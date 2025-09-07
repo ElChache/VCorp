@@ -1,0 +1,12 @@
+{
+  "product_owner": "pm_opus_001",
+  "system_architect": "sa_opus_002",
+  "lead_developer": "ld_opus_003",
+  "backend_developers": ["be_sonnet_001"],
+  "frontend_developers": ["fe_primary_001_k8m3"],
+  "ai_developers": ["ai_sonnet_003", "ai_claude_001_d8v2"],
+  "technical_qa": "qa_primary_001_c7x2",
+  "devops_engineer": "devops_haiku_002",
+  "ux_experts": ["ux_sonnet_001_k2f8"],
+  "graphic_designer": "gd_claude_001_k9f3"
+}

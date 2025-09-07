@@ -1,0 +1,130 @@
+{
+  "qa_primary_001_c7x2": {
+    "role": "technical_qa",
+    "start_time": "2025-09-07T12:00:00Z",
+    "files_locked": ["coordination/agent_output/QA_TASKS.md"],
+    "features_working_on": ["Comprehensive Test Plan Creation"],
+    "plan_file": "coordination/planned_work/qa_primary_001_c7x2_plan.md",
+    "expected_completion": "2025-09-07T18:00:00Z",
+    "status": "in_progress"
+  },
+  "pm_primary_001_k3n9": {
+    "role": "product_owner",
+    "start_time": "2025-01-06T23:40:00Z",
+    "files_locked": [
+      "coordination/agent_output/PRODUCT_CLARIFICATIONS.md",
+      "coordination/PROJECT_SPECIFICATION.md"
+    ],
+    "features_working_on": [
+      "product_vision_definition",
+      "user_requirements_gathering",
+      "feature_specifications"
+    ],
+    "plan_file": "coordination/planned_work/pm_primary_001_k3n9_plan.md",
+    "expected_completion": "2025-01-07T01:00:00Z",
+    "status": "phase_2_complete_monitoring_active"
+  },
+  "sa_primary_001_m7x4": {
+    "role": "system_architect",
+    "start_time": "2025-01-06T23:53:00Z",
+    "files_locked": [
+      "coordination/agent_output/ARCHITECT_REPORT.md"
+    ],
+    "features_working_on": [
+      "technical_oversight",
+      "architecture_compliance_review",
+      "developer_support"
+    ],
+    "plan_file": "coordination/planned_work/sa_primary_001_m7x4_plan.md",
+    "expected_completion": "2025-01-07T03:00:00Z",
+    "status": "phase2_oversight"
+  },
+  "ld_claude_001_a4b7": {
+    "role": "lead_developer",
+    "start_time": "2025-01-06T16:15:00Z",
+    "files_locked": [
+      "package.json",
+      "svelte.config.js",
+      "vite.config.js",
+      "src/app.html",
+      "src/routes/+page.svelte",
+      "docker-compose.template.yml",
+      "coordination/TECHNICAL_STANDARDS.md",
+      "coordination/agent_output/DEVELOPMENT_ENVIRONMENT_SETUP.md",
+      "coordination/CODE_REVIEW_CHECKLIST.md"
+    ],
+    "features_working_on": [
+      "initial_bootstrap",
+      "technical_standards",
+      "development_environment_setup"
+    ],
+    "plan_file": "coordination/planned_work/ld_claude_001_a4b7_plan.md",
+    "expected_completion": "2025-01-06T18:15:00Z",
+    "status": "phase1_bootstrap"
+  },
+  "ai_claude_001_d8v2": {
+    "role": "ai_developer",
+    "start_time": "2025-01-06T17:45:00Z",
+    "completed_time": "2025-01-06T18:45:00Z",
+    "files_completed": [
+      "src/lib/ai/index.ts",
+      "src/lib/ai/manager.ts",
+      "src/lib/ai/types/index.ts",
+      "src/lib/ai/providers/base.ts",
+      "src/lib/ai/providers/claude.ts",
+      "src/lib/ai/providers/openai.ts",
+      "src/lib/ai/tests/manager.test.ts",
+      "src/lib/ai/package.json",
+      "src/lib/ai/README.md"
+    ],
+    "features_completed": [
+      "AI provider abstraction system - Complete",
+      "Claude API integration - Complete",
+      "OpenAI API integration - Complete",
+      "Health monitoring and metrics - Complete",
+      "Automatic failover logic - Complete",
+      "Cost tracking and optimization - Complete"
+    ],
+    "plan_file": "coordination/planned_work/ai_claude_001_d8v2_plan.md",
+    "pr_created": "https://github.com/ElChache/monitors/pull/new/ai_claude_001_d8v2_work",
+    "status": "AI001_complete_awaiting_review"
+  },
+  "be_primary_001_23f6": {
+    "role": "backend_developer",
+    "start_time": "2025-01-06T20:30:00Z",
+    "completed_time": "2025-01-07T15:30:00Z",
+    "files_completed": [
+      "src/routes/api/monitors/+server.ts",
+      "src/routes/api/monitors/[id]/+server.ts",
+      "src/routes/api/monitors/[id]/toggle/+server.ts",
+      "src/lib/server/monitors/validation.ts",
+      "src/lib/server/monitors/service.ts"
+    ],
+    "features_completed": [
+      "BE001_database_schema_design - Complete",
+      "BE002_core_authentication_system - Complete", 
+      "BE003_monitor_crud_api_endpoints - Complete"
+    ],
+    "plan_file": "coordination/planned_work/be_primary_001_23f6_plan.md",
+    "pr_created": "https://github.com/ElChache/monitors/pull/4",
+    "status": "BE003_complete_awaiting_review"
+  },
+  "gd_claude_001_k9f3": {
+    "role": "graphic_designer",
+    "start_time": "2025-09-07T00:00:00Z",
+    "files_locked": ["coordination/agent_output/GD_TASKS.md"],
+    "features_working_on": ["Monitors! Logo and Brand Identity Design"],
+    "plan_file": "coordination/planned_work/gd_claude_001_k9f3_plan.md",
+    "expected_completion": "2025-09-07T06:00:00Z",
+    "status": "in_progress"
+  },
+  "ai_sonnet_003": {
+    "role": "ai_developer",
+    "start_time": "2025-09-07T23:30:00Z",
+    "files_locked": ["coordination/agent_output/AI_TASKS.md", "coordination/agent_output/QA_TASKS.md"],
+    "features_working_on": ["QA AI Integration Testing Support", "AI Performance Monitoring Setup"],
+    "plan_file": "coordination/planned_work/ai_sonnet_003_plan.md",
+    "expected_completion": "2025-09-08T02:00:00Z",
+    "status": "qa_support_active"
+  }
+}
