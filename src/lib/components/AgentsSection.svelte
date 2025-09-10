@@ -1,19 +1,172 @@
 <script>
-	export let roles = [];
-	export let agents = [];
-	export let selectedAgent = null;
-	export let selectedRoleType = '';
-	export let selectedModel = 'sonnet';
-	export let selectedProject = null;
-	export let launchAgent = () => {};
-	export let killAgent = () => {};
-	export let onAgentSelect = () => {};
-	export let showStartupPromptEditor = false;
-	export let loadStartupPrompt = () => {};
+	import { onMount } from 'svelte';
 	
+	export let selectedProject = null;
+	
+	let roles = [];
+	let agents = [];
+	let selectedAgent = null;
+	let selectedRoleType = '';
+	let selectedModel = 'sonnet';
+	let showStartupPromptEditor = false;
+	let startupPrompt = '';
 	let agentOutput = '';
 	let refreshInterval = null;
 	let activeTab = 'console'; // Default to console tab
+
+	onMount(async () => {
+		if (selectedProject) {
+			await loadRoles();
+			await loadAgentsData();
+		}
+	});
+
+	$: if (selectedProject) {
+		loadRoles();
+		loadAgentsData();
+	}
+
+	// Agent management functions
+	async function launchAgent() {
+		if (!selectedProject) {
+			console.error('No project selected');
+			return;
+		}
+
+		if (!selectedRoleType) {
+			alert('Please select a role first');
+			return;
+		}
+
+		try {
+			const response = await fetch('/api/agents/launch', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					projectId: selectedProject.id,
+					roleType: selectedRoleType,
+					model: selectedModel
+				})
+			});
+
+			if (response.ok) {
+				console.log('Agent launched successfully');
+				// Wait a moment for agent to potentially register, then reload
+				setTimeout(async () => {
+					await loadAgentsData();
+				}, 2000);
+			} else {
+				const error = await response.json();
+				console.error('Failed to launch agent:', error.error);
+				alert(`Failed to launch agent: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error launching agent:', error);
+			alert('Failed to launch agent');
+		}
+	}
+
+	async function killAgent() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+		
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/kill`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ projectId: selectedProject.id })
+			});
+			
+			if (response.ok) {
+				console.log('Agent killed successfully');
+				selectedAgent = null;
+				await loadAgentsData();
+			} else {
+				const error = await response.json();
+				console.error('Failed to kill agent:', error.error);
+				alert(`Failed to kill agent: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error killing agent:', error);
+			alert('Failed to kill agent');
+		}
+	}
+
+	async function loadAgentsData() {
+		if (!selectedProject) {
+			agents = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				agents = await response.json();
+				// Update selectedAgent if it no longer exists
+				if (selectedAgent && !agents.find(a => a.id === selectedAgent.id)) {
+					selectedAgent = null;
+				}
+			} else {
+				console.error('Failed to load agents');
+				agents = [];
+			}
+		} catch (error) {
+			console.error('Error loading agents:', error);
+			agents = [];
+		}
+	}
+
+	async function loadRoles() {
+		if (!selectedProject) {
+			roles = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/roles?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				roles = await response.json();
+			} else {
+				console.error('Failed to load roles');
+				roles = [];
+			}
+		} catch (error) {
+			console.error('Error loading roles:', error);
+			roles = [];
+		}
+	}
+
+	function onAgentSelect(agent) {
+		selectedAgent = agent;
+	}
+
+	function loadStartupPrompt() {
+		// This function loads startup prompt for the dialog
+		console.log('Load startup prompt function called');
+	}
+
+	async function saveStartupPrompt() {
+		try {
+			const response = await fetch('/api/agents/startup-prompt', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ startupPrompt })
+			});
+
+			if (response.ok) {
+				showStartupPromptEditor = false;
+				console.log('Startup prompt saved successfully');
+			} else {
+				console.error('Failed to save startup prompt');
+			}
+		} catch (error) {
+			console.error('Failed to save startup prompt:', error);
+		}
+	}
 
 	function formatHeartbeat(timestamp) {
 		if (!timestamp) return 'Never';
@@ -249,6 +402,37 @@
 		</div>
 	</div>
 </div>
+
+<!-- Startup Prompt Editor Modal -->
+{#if showStartupPromptEditor}
+	<div class="modal-overlay" on:click={() => showStartupPromptEditor = false}>
+		<div class="modal-content large-modal" on:click|stopPropagation>
+			<div class="modal-header">
+				<h3>Agent Startup Prompt</h3>
+				<button class="modal-close" on:click={() => showStartupPromptEditor = false}>×</button>
+			</div>
+			
+			<div class="modal-body">
+				<div class="form-group">
+					<label for="startup-prompt">This prompt is sent to each agent when they launch:</label>
+					<textarea 
+						id="startup-prompt"
+						bind:value={startupPrompt}
+						placeholder="Enter the startup prompt for new agents..."
+						rows="15"
+					></textarea>
+				</div>
+			</div>
+			
+			<div class="modal-actions">
+				<button class="btn-secondary" on:click={() => showStartupPromptEditor = false}>Cancel</button>
+				<button class="btn-primary" on:click={saveStartupPrompt}>
+					Save Prompt
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.agents-section {
@@ -710,5 +894,104 @@
 		color: #374151;
 		font-size: 18px;
 		font-weight: 600;
+	}
+
+	/* Modal Styles */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.modal-content {
+		background: white;
+		border-radius: 8px;
+		width: 100%;
+		max-width: 600px;
+		max-height: 90vh;
+		overflow-y: auto;
+		margin: 1rem;
+	}
+
+	.modal-content.large-modal {
+		max-width: 800px;
+	}
+
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 1rem 1.5rem;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.modal-header h3 {
+		margin: 0;
+		font-size: 1.25rem;
+		font-weight: 600;
+	}
+
+	.modal-close {
+		background: none;
+		border: none;
+		font-size: 1.5rem;
+		color: #6b7280;
+		cursor: pointer;
+		padding: 0;
+		width: 2rem;
+		height: 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.modal-close:hover {
+		color: #374151;
+	}
+
+	.modal-body {
+		padding: 1.5rem;
+	}
+
+	.form-group {
+		margin-bottom: 1rem;
+	}
+
+	.form-group label {
+		display: block;
+		margin-bottom: 0.5rem;
+		font-weight: 500;
+		color: #374151;
+	}
+
+	.form-group textarea {
+		width: 100%;
+		padding: 0.75rem;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font-size: 0.875rem;
+		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+		resize: vertical;
+	}
+
+	.form-group textarea:focus {
+		outline: 2px solid #3b82f6;
+		outline-offset: -1px;
+		border-color: #3b82f6;
+	}
+
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		padding: 1rem 1.5rem;
+		border-top: 1px solid #e5e7eb;
 	}
 </style>
