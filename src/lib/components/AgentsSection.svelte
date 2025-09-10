@@ -10,11 +10,67 @@
 	export let onAgentSelect = () => {};
 	export let showStartupPromptEditor = false;
 	export let loadStartupPrompt = () => {};
+	
+	let agentOutput = '';
+	let refreshInterval = null;
+	let activeTab = 'console'; // Default to console tab
 
 	function formatHeartbeat(timestamp) {
 		if (!timestamp) return 'Never';
 		return new Date(timestamp).toLocaleTimeString();
 	}
+
+	async function loadAgentOutput() {
+		if (!selectedAgent || !selectedProject) {
+			agentOutput = '';
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/output?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				const data = await response.json();
+				agentOutput = data.output || '';
+			} else {
+				console.error('Failed to load agent output');
+				agentOutput = 'Failed to load console output';
+			}
+		} catch (error) {
+			console.error('Error loading agent output:', error);
+			agentOutput = 'Error loading console output';
+		}
+	}
+
+	function startOutputRefresh() {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+		}
+		
+		refreshInterval = setInterval(() => {
+			if (selectedAgent) {
+				loadAgentOutput();
+			}
+		}, 2000);
+	}
+
+	// Load output when agent is selected
+	$: if (selectedAgent) {
+		loadAgentOutput();
+		startOutputRefresh();
+	} else {
+		agentOutput = '';
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+	}
+
+	import { onDestroy } from 'svelte';
+	onDestroy(() => {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+		}
+	});
 </script>
 
 <div class="agents-section">
@@ -109,38 +165,78 @@
 						</div>
 					</div>
 					
-					<div class="agent-info-grid">
-						<div class="info-card">
-							<h4>Status</h4>
-							<div class="status-display status-{selectedAgent.status}">
-								{selectedAgent.status}
+					<!-- Tab Navigation -->
+					<div class="tab-navigation">
+						<button 
+							class="tab-btn" 
+							class:active={activeTab === 'console'}
+							on:click={() => activeTab = 'console'}
+						>
+							🖥️ Console
+						</button>
+						<button 
+							class="tab-btn" 
+							class:active={activeTab === 'info'}
+							on:click={() => activeTab = 'info'}
+						>
+							📊 Info
+						</button>
+					</div>
+
+					<!-- Tab Content -->
+					<div class="tab-content">
+						{#if activeTab === 'console'}
+							<!-- Console Tab -->
+							<div class="console-section">
+								<div class="console-header">
+									<h4>Live Console Output</h4>
+									<button class="btn-secondary" on:click={loadAgentOutput}>🔄 Refresh</button>
+								</div>
+								<textarea 
+									bind:value={agentOutput}
+									class="console-output"
+									readonly
+									placeholder="Console output will appear here..."
+								></textarea>
 							</div>
-						</div>
-						
-						<div class="info-card">
-							<h4>Role</h4>
-							<p>{selectedAgent.roleType}</p>
-						</div>
-						
-						<div class="info-card">
-							<h4>Model</h4>
-							<p>{selectedAgent.model}</p>
-						</div>
-						
-						<div class="info-card">
-							<h4>Session</h4>
-							<p>{selectedAgent.tmuxSession || 'Not available'}</p>
-						</div>
-						
-						<div class="info-card">
-							<h4>Workspace</h4>
-							<p class="workspace-path">{selectedAgent.worktreePath || 'Not assigned'}</p>
-						</div>
-						
-						<div class="info-card">
-							<h4>Last Heartbeat</h4>
-							<p>{formatHeartbeat(selectedAgent.lastHeartbeat)}</p>
-						</div>
+						{:else if activeTab === 'info'}
+							<!-- Info Tab -->
+							<div class="info-section">
+								<div class="agent-info-grid">
+									<div class="info-card">
+										<h4>Status</h4>
+										<div class="status-display status-{selectedAgent.status}">
+											{selectedAgent.status}
+										</div>
+									</div>
+									
+									<div class="info-card">
+										<h4>Role</h4>
+										<p>{selectedAgent.roleType}</p>
+									</div>
+									
+									<div class="info-card">
+										<h4>Model</h4>
+										<p>{selectedAgent.model}</p>
+									</div>
+									
+									<div class="info-card">
+										<h4>Session</h4>
+										<p>{selectedAgent.tmuxSession || 'Not available'}</p>
+									</div>
+									
+									<div class="info-card">
+										<h4>Workspace</h4>
+										<p class="workspace-path">{selectedAgent.worktreePath || 'Not assigned'}</p>
+									</div>
+									
+									<div class="info-card">
+										<h4>Last Heartbeat</h4>
+										<p>{formatHeartbeat(selectedAgent.lastHeartbeat)}</p>
+									</div>
+								</div>
+							</div>
+						{/if}
 					</div>
 				</div>
 			{:else}
@@ -409,6 +505,7 @@
 		height: 100%;
 		display: flex;
 		flex-direction: column;
+		overflow: hidden;
 	}
 
 	.agent-details-header {
@@ -431,12 +528,97 @@
 		gap: 8px;
 	}
 
+	.tab-navigation {
+		display: flex;
+		border-bottom: 1px solid #e5e7eb;
+		background: #f9fafb;
+	}
+
+	.tab-btn {
+		flex: 1;
+		padding: 12px 16px;
+		background: transparent;
+		border: none;
+		border-bottom: 3px solid transparent;
+		font-size: 14px;
+		font-weight: 500;
+		color: #6b7280;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.tab-btn:hover {
+		color: #374151;
+		background: #f3f4f6;
+	}
+
+	.tab-btn.active {
+		color: #3b82f6;
+		background: white;
+		border-bottom-color: #3b82f6;
+	}
+
+	.tab-content {
+		flex: 1;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.console-section {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.info-section {
+		flex: 1;
+		overflow-y: auto;
+	}
+
 	.agent-info-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 16px;
 		padding: 20px;
+	}
+
+	.console-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 16px 20px;
+		background: #1f2937;
+		color: white;
+	}
+
+	.console-header h4 {
+		margin: 0;
+		color: white;
+		background: transparent;
+		padding: 0;
+		border: none;
+		font-size: 14px;
+	}
+
+	.console-output {
 		flex: 1;
+		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+		font-size: 12px;
+		background: #111827;
+		color: #10b981;
+		border: none;
+		padding: 16px;
+		margin: 0;
+		resize: none;
+		white-space: pre-wrap;
+		overflow-y: auto;
+		line-height: 1.4;
+	}
+
+	.console-output:focus {
+		outline: none;
 	}
 
 	.info-card {

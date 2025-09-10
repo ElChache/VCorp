@@ -2,6 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import OverviewSection from '$lib/components/OverviewSection.svelte';
 	import RolesSection from '$lib/components/RolesSection.svelte';
+	import PromptsSection from '$lib/components/PromptsSection.svelte';
+	import AgentsSection from '$lib/components/AgentsSection.svelte';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -16,8 +18,6 @@
 	let selectedRole: any = null;
 	let agents: any[] = [];
 	let selectedAgent: any = null;
-	let agentOutput: string = '';
-	let agentRefreshInterval: NodeJS.Timeout | null = null;
 	let selectedRoleType: string = '';
 	let selectedModel: string = 'sonnet';
 	let showStartupPromptEditor = false;
@@ -40,12 +40,6 @@
 	let showEditReminderDialog = false;
 	let newReminder = { name: '', targetRoleType: '', message: '', frequencyMinutes: 15, isActive: true };
 	let editReminder = { id: 0, name: '', targetRoleType: '', message: '', frequencyMinutes: 15, isActive: true };
-	let showCreatePromptDialog = false;
-	let showEditPromptDialog = false;
-	let showUpdateTemplateDialog = false;
-	let selectedPromptForTemplate: any = null;
-	let newPrompt = { name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
-	let editPrompt = { id: 0, name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
 	
 	// Communications Center variables
 	let directorInbox: any = { messages: [], categorized: { urgent: [], regular: [], read: [] }, stats: {}, summary: {} };
@@ -150,9 +144,7 @@
 	});
 
 	onDestroy(() => {
-		if (agentRefreshInterval) {
-			clearInterval(agentRefreshInterval);
-		}
+		// Cleanup handled by individual components
 	});
 
 	async function loadProjects() {
@@ -514,8 +506,7 @@
 				if (selectedProject) {
 					await loadChannels();
 					await loadSquads();
-					await loadPrompts();
-				}
+					}
 			} else {
 				const errorData = await response.json();
 				console.error('Failed to delete project:', errorData);
@@ -528,8 +519,77 @@
 	}
 
 
-	// Agent management functions
-	async function loadAgents() {
+	// Agent management functions (moved to AgentsSection component)
+	async function launchAgent() {
+		if (!selectedProject) {
+			console.error('No project selected');
+			return;
+		}
+
+		if (!selectedRoleType) {
+			alert('Please select a role first');
+			return;
+		}
+
+		try {
+			const response = await fetch('/api/agents/launch', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					projectId: selectedProject.id,
+					roleType: selectedRoleType,
+					model: selectedModel
+				})
+			});
+
+			if (response.ok) {
+				console.log('Agent launched successfully');
+				// Wait a moment for agent to potentially register, then reload
+				setTimeout(async () => {
+					await loadAgentsData();
+				}, 2000);
+			} else {
+				const error = await response.json();
+				console.error('Failed to launch agent:', error.error);
+				alert(`Failed to launch agent: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error launching agent:', error);
+			alert('Failed to launch agent');
+		}
+	}
+
+	async function killAgent() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+		
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/kill`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ projectId: selectedProject.id })
+			});
+			
+			if (response.ok) {
+				console.log('Agent killed successfully');
+				selectedAgent = null;
+				await loadAgentsData();
+			} else {
+				const error = await response.json();
+				console.error('Failed to kill agent:', error.error);
+				alert(`Failed to kill agent: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error killing agent:', error);
+			alert('Failed to kill agent');
+		}
+	}
+
+	async function loadAgentsData() {
 		if (!selectedProject) {
 			agents = [];
 			return;
@@ -539,95 +599,52 @@
 			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
 			if (response.ok) {
 				agents = await response.json();
-				selectedAgent = agents.length > 0 ? agents[0] : null;
+				// Update selectedAgent if it no longer exists
+				if (selectedAgent && !agents.find(a => a.id === selectedAgent.id)) {
+					selectedAgent = null;
+				}
+			} else {
+				console.error('Failed to load agents');
+				agents = [];
 			}
 		} catch (error) {
-			console.error('Failed to load agents:', error);
+			console.error('Error loading agents:', error);
 			agents = [];
 		}
-
-		startAgentRefresh();
 	}
 
-
-	async function loadAgentOutput() {
-		if (!selectedAgent) {
-			agentOutput = '';
+	async function loadRoles() {
+		if (!selectedProject) {
+			roles = [];
 			return;
 		}
 
 		try {
-			const response = await fetch(`/api/agents/${selectedAgent.id}/console`);
+			const response = await fetch(`/api/roles?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				const data = await response.json();
-				agentOutput = data.output || 'Console not available';
+				roles = await response.json();
+			} else {
+				console.error('Failed to load roles');
+				roles = [];
 			}
 		} catch (error) {
-			console.error('Failed to load agent console:', error);
-			agentOutput = 'Failed to load console output';
+			console.error('Error loading roles:', error);
+			roles = [];
 		}
 	}
 
-	async function killAgent() {
-		if (!selectedAgent) return;
-		
-		try {
-			const response = await fetch(`/api/agents/${selectedAgent.id}/kill`, {
-				method: 'POST'
-			});
-			
-			if (response.ok) {
-				// Refresh the agents list
-				await loadAgents();
-				// Clear selection since agent is killed
-				selectedAgent = null;
-				agentOutput = '';
-			}
-		} catch (error) {
-			console.error('Failed to kill agent:', error);
-		}
+	function onAgentSelect(agent: any) {
+		selectedAgent = agent;
 	}
 
-	async function launchAgent() {
-		if (!selectedProject) return;
-
-		try {
-			const response = await fetch('/api/agents/launch', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					roleType: selectedRoleType,
-					model: selectedModel,
-					projectId: selectedProject.id
-				})
-			});
-
-			if (response.ok) {
-				// Wait a moment for agent to potentially register
-				setTimeout(async () => {
-					await loadAgents();
-				}, 2000);
-			}
-		} catch (error) {
-			console.error('Failed to launch agent:', error);
-		}
-	}
-
-	async function loadStartupPrompt() {
-		try {
-			const response = await fetch('/api/agents/launch');
-			if (response.ok) {
-				const data = await response.json();
-				startupPrompt = data.startupPrompt;
-			}
-		} catch (error) {
-			console.error('Failed to load startup prompt:', error);
-		}
+	function loadStartupPrompt() {
+		// This function loads startup prompt for the dialog in main file
+		console.log('Load startup prompt function called');
 	}
 
 	async function saveStartupPrompt() {
 		try {
-			const response = await fetch('/api/agents/launch', {
+			const response = await fetch('/api/agents/startup-prompt', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ startupPrompt })
@@ -635,31 +652,13 @@
 
 			if (response.ok) {
 				showStartupPromptEditor = false;
+				console.log('Startup prompt saved successfully');
+			} else {
+				console.error('Failed to save startup prompt');
 			}
 		} catch (error) {
 			console.error('Failed to save startup prompt:', error);
 		}
-	}
-
-
-	function startAgentRefresh() {
-		if (agentRefreshInterval) {
-			clearInterval(agentRefreshInterval);
-		}
-
-		agentRefreshInterval = setInterval(async () => {
-			if (currentSection === 'agents' && selectedProject) {
-				await loadAgents();
-				if (selectedAgent) {
-					await loadAgentOutput();
-				}
-			}
-		}, 5000); // Refresh every 5 seconds
-	}
-
-	function onAgentSelect(agent: any) {
-		selectedAgent = agent;
-		loadAgentOutput();
 	}
 
 	// Channel management functions
@@ -1087,26 +1086,6 @@
 	}
 
 	// Prompt management functions
-	async function loadPrompts() {
-		if (!selectedProject) {
-			prompts = [];
-			promptsByType = {};
-			return;
-		}
-
-		try {
-			const response = await fetch(`/api/prompts?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const data = await response.json();
-				prompts = data.prompts || [];
-				promptsByType = data.promptsByType || {};
-			}
-		} catch (error) {
-			console.error('Failed to load prompts:', error);
-			prompts = [];
-			promptsByType = {};
-		}
-	}
 
 	// Communications Center functions
 	async function loadDirectorMessages() {
@@ -1479,132 +1458,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 		return '💭';
 	}
 
-	function openCreatePromptDialog() {
-		newPrompt = { name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
-		showCreatePromptDialog = true;
-	}
 
-	function closeCreatePromptDialog() {
-		showCreatePromptDialog = false;
-		newPrompt = { name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
-	}
-
-	async function createPrompt() {
-		if (!newPrompt.name.trim() || !newPrompt.content.trim() || !selectedProject) return;
-		
-		try {
-			const response = await fetch('/api/prompts', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					...newPrompt,
-					projectId: selectedProject.id
-				})
-			});
-			
-			if (response.ok) {
-				const prompt = await response.json();
-				prompts = [...prompts, prompt];
-				await loadPrompts(); // Refresh to get updated grouping
-				closeCreatePromptDialog();
-			}
-		} catch (error) {
-			console.error('Failed to create prompt:', error);
-		}
-	}
-
-	function openEditPromptDialog(prompt: any) {
-		editPrompt = {
-			id: prompt.id,
-			name: prompt.name,
-			type: prompt.type,
-			content: prompt.content,
-			premade: prompt.premade,
-			orderIndex: prompt.orderIndex
-		};
-		showEditPromptDialog = true;
-	}
-
-	function closeEditPromptDialog() {
-		showEditPromptDialog = false;
-		editPrompt = { id: 0, name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
-	}
-
-	async function updatePrompt() {
-		if (!editPrompt.name.trim() || !editPrompt.content.trim() || !editPrompt.id) return;
-		
-		try {
-			const response = await fetch(`/api/prompts/${editPrompt.id}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(editPrompt)
-			});
-			
-			if (response.ok) {
-				await loadPrompts(); // Refresh the prompts
-				closeEditPromptDialog();
-			}
-		} catch (error) {
-			console.error('Failed to update prompt:', error);
-		}
-	}
-
-	async function deletePrompt(promptId: number) {
-		if (!confirm('Are you sure you want to delete this prompt?')) return;
-		
-		try {
-			const response = await fetch(`/api/prompts/${promptId}`, {
-				method: 'DELETE'
-			});
-			
-			if (response.ok) {
-				await loadPrompts(); // Refresh the prompts
-			}
-		} catch (error) {
-			console.error('Failed to delete prompt:', error);
-		}
-	}
-
-	// Template Update Functions
-	function openUpdateTemplateDialog(prompt: any) {
-		selectedPromptForTemplate = prompt;
-		showUpdateTemplateDialog = true;
-	}
-
-	async function updateTemplate() {
-		if (!selectedPromptForTemplate) return;
-		
-		try {
-			const response = await fetch(`/api/templates/${selectedPromptForTemplate.templateId}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					content: selectedPromptForTemplate.content,
-					name: selectedPromptForTemplate.name,
-					type: selectedPromptForTemplate.type
-				})
-			});
-			
-			if (response.ok) {
-				const result = await response.json();
-				showUpdateTemplateDialog = false;
-				selectedPromptForTemplate = null;
-				
-				// Show success message
-				alert(`Template updated successfully! ${result.affectedCount || 0} prompts across projects will use the new template content.`);
-				
-				// Refresh prompts to show any changes
-				await loadPrompts();
-			} else {
-				const error = await response.json();
-				console.error('Failed to update template:', error.error);
-				alert('Failed to update template: ' + error.error);
-			}
-		} catch (error) {
-			console.error('Failed to update template:', error);
-			alert('Failed to update template. Please try again.');
-		}
-	}
 
 
 	// Documents management functions
@@ -1837,14 +1691,14 @@ Status: ACTIVE - Ready to assist with full authority`,
 				<button 
 					class="nav-btn" 
 					class:active={currentSection === 'prompts'}
-					on:click={() => { currentSection = 'prompts'; loadPrompts(); }}
+					on:click={() => currentSection = 'prompts'}
 				>
 					Prompts
 				</button>
 				<button 
 					class="nav-btn" 
 					class:active={currentSection === 'agents'}
-					on:click={() => { currentSection = 'agents'; loadAgents(); }}
+					on:click={() => { currentSection = 'agents'; loadRoles(); loadAgentsData(); }}
 				>
 					Agents
 				</button>
@@ -1907,183 +1761,21 @@ Status: ACTIVE - Ready to assist with full authority`,
 			{:else if currentSection === 'roles'}
 				<RolesSection {selectedProject} bind:roles bind:selectedRole />
 			{:else if currentSection === 'prompts'}
-				<div class="prompts-section">
-					<div class="section-header">
-						<h2>Custom Prompt Management</h2>
-						<p class="section-description">Manage custom prompts and role descriptions. Premade prompts (channel instructions, ticketing system) are managed in the Roles section.</p>
-						<button class="btn-primary" on:click={openCreatePromptDialog}>
-							➕ Create Custom Prompt
-						</button>
-					</div>
-
-					{#if Object.keys(promptsByType).length > 0}
-						{#each Object.entries(promptsByType) as [type, typePrompts]}
-							<div class="prompt-type-section">
-								<div class="prompt-type-header">
-									<h3>{type.replace(/_/g, ' ').toUpperCase()}</h3>
-									<span class="prompt-count">({typePrompts.length})</span>
-								</div>
-								
-								<div class="prompt-list">
-									{#each typePrompts as prompt}
-										<div class="prompt-card">
-											<div class="prompt-card-header">
-												<div class="prompt-info">
-													<h4 class="prompt-name">{prompt.name}</h4>
-													{#if prompt.premade}
-														<span class="prompt-badge premade">Premade</span>
-													{:else if prompt.templateId}
-														<span class="prompt-badge template">Template</span>
-													{:else}
-														<span class="prompt-badge custom">Custom</span>
-													{/if}
-												</div>
-												<div class="prompt-actions">
-													{#if prompt.templateId}
-														<button 
-															class="btn-template" 
-															on:click={() => openUpdateTemplateDialog(prompt)}
-															title="Update the original template with this content"
-														>📝 Update Template</button>
-													{/if}
-													<button 
-														class="btn-secondary" 
-														on:click={() => openEditPromptDialog(prompt)}
-														title="Edit prompt"
-													>✏️</button>
-													<button 
-														class="btn-danger" 
-														on:click={() => deletePrompt(prompt.id)}
-														title="Delete prompt"
-													>🗑️</button>
-												</div>
-											</div>
-											<div class="prompt-preview">
-												{prompt.content.substring(0, 200)}{#if prompt.content.length > 200}...{/if}
-											</div>
-											<div class="prompt-metadata">
-												<span class="prompt-order">Order: #{prompt.orderIndex}</span>
-												<span class="prompt-created">
-													Created: {new Date(prompt.createdAt).toLocaleDateString()}
-												</span>
-											</div>
-										</div>
-									{/each}
-								</div>
-							</div>
-						{/each}
-					{:else}
-						<div class="empty-state">
-							<h3>No prompts found</h3>
-							<p>Create your first prompt to get started with project customization.</p>
-							<button class="btn-primary" on:click={openCreatePromptDialog}>
-								Create First Prompt
-							</button>
-						</div>
-					{/if}
-				</div>
+				<PromptsSection {selectedProject} bind:prompts bind:promptsByType />
 			{:else if currentSection === 'agents'}
-				<div class="agents-section">
-					<div class="section-header">
-						<h2>Agent Management</h2>
-						<div class="agent-controls">
-							<select bind:value={selectedRoleType} class="role-selector">
-								{#if roles.length === 0}
-									<option value="">No roles available</option>
-								{:else}
-									{#each roles as role}
-										<option value={role.name}>{role.name}</option>
-									{/each}
-								{/if}
-							</select>
-							
-							<select bind:value={selectedModel} class="model-selector">
-								<option value="sonnet">Sonnet</option>
-								<option value="opus">Opus</option>
-								<option value="haiku">Haiku</option>
-							</select>
-							
-							<button class="btn-primary" on:click={launchAgent}>
-								🚀 Launch Agent
-							</button>
-						</div>
-					</div>
-
-					<div class="agents-content">
-						<div class="agents-left">
-							<div class="agents-panel">
-								<div class="agents-header">
-									<h3>All Agents ({agents.length})</h3>
-									<button class="btn-secondary" on:click={() => { loadStartupPrompt(); showStartupPromptEditor = true; }}>
-										⚙️ Startup Prompt
-									</button>
-								</div>
-								
-								<!-- Agent List -->
-								<div class="agent-list">
-									{#each agents as agent}
-										<div 
-											class="agent-item"
-											class:active={selectedAgent?.id === agent.id}
-											on:click={() => onAgentSelect(agent)}
-										>
-											<div class="agent-header">
-												<div class="agent-id-section">
-													<span class="agent-status-indicator status-{agent.status}"></span>
-													<span class="agent-id">{agent.id}</span>
-												</div>
-												<span class="agent-status status-{agent.status}">{agent.status}</span>
-											</div>
-											<div class="agent-details">
-												<span class="agent-role">{agent.roleType}</span>
-												<span class="agent-model">{agent.model}</span>
-												<span class="agent-heartbeat">
-													Last seen: {new Date(agent.lastHeartbeat).toLocaleTimeString()}
-												</span>
-											</div>
-										</div>
-									{/each}
-								</div>
-
-								{#if agents.length === 0}
-									<p class="empty-state">No agents launched yet</p>
-								{/if}
-							</div>
-						</div>
-
-						<div class="agents-right">
-							{#if selectedAgent}
-								<div class="agent-details-panel">
-									<div class="agent-details-header">
-										<h3>{selectedAgent.id}</h3>
-										<div class="agent-actions">
-											<button class="btn-secondary">Send Command</button>
-											<button class="btn-danger" on:click={killAgent}>🗲 Kill Agent</button>
-										</div>
-									</div>
-
-									<div class="agent-console">
-										<div class="console-header">
-											<h4>Live Console</h4>
-											<button class="btn-secondary" on:click={loadAgentOutput}>🔄 Refresh</button>
-										</div>
-										<textarea 
-											bind:value={agentOutput}
-											class="console-output"
-											readonly
-											rows="25"
-											placeholder="Console output will appear here..."
-										></textarea>
-									</div>
-								</div>
-							{:else}
-								<div class="empty-selection">
-									<p>Select an agent to view details</p>
-								</div>
-							{/if}
-						</div>
-					</div>
-				</div>
+				<AgentsSection 
+					{selectedProject} 
+					{roles}
+					bind:agents
+					bind:selectedAgent
+					bind:selectedRoleType
+					bind:selectedModel
+					{launchAgent}
+					{killAgent}
+					{onAgentSelect}
+					bind:showStartupPromptEditor
+					{loadStartupPrompt}
+				/>
 			{:else if currentSection === 'channels'}
 				<div class="channels-section">
 					<div class="section-header">
@@ -3541,174 +3233,8 @@ Status: ACTIVE - Ready to assist with full authority`,
 	</div>
 {/if}
 
-{#if showCreatePromptDialog}
-	<div class="dialog-overlay" on:click={closeCreatePromptDialog}>
-		<div class="dialog large-dialog" on:click|stopPropagation>
-			<h3>Create New Prompt</h3>
-			
-			<div class="form-group">
-				<label for="prompt-name">Name:</label>
-				<input 
-					id="prompt-name"
-					type="text" 
-					bind:value={newPrompt.name} 
-					placeholder="Enter prompt name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-type">Type:</label>
-				<select 
-					id="prompt-type"
-					bind:value={newPrompt.type}
-				>
-					<option value="system_intro">System Introduction - Agent startup and identity</option>
-					<option value="role_description">Role Description - Detailed role responsibilities and scope</option>
-					<option value="communication">Communication - Team interaction and messaging protocols</option>
-					<option value="channel_instructions">Channel Instructions - When to use specific channels</option>
-					<option value="worktree_workflow">Worktree Workflow - Code management and Git workflows</option>
-					<option value="company_workflow">Company Workflow - Business processes and standards</option>
-					<option value="custom">Custom - General purpose prompts</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-content">Content:</label>
-				<textarea 
-					id="prompt-content"
-					bind:value={newPrompt.content} 
-					placeholder="Enter prompt content..."
-					rows="12"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-order">Order Index:</label>
-				<input 
-					id="prompt-order"
-					type="number" 
-					bind:value={newPrompt.orderIndex} 
-					placeholder="0"
-					min="0"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeCreatePromptDialog}>Cancel</button>
-				<button class="create-btn" on:click={createPrompt} disabled={!newPrompt.name.trim() || !newPrompt.content.trim()}>
-					Create Prompt
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 
-{#if showEditPromptDialog}
-	<div class="dialog-overlay" on:click={closeEditPromptDialog}>
-		<div class="dialog large-dialog" on:click|stopPropagation>
-			<h3>Edit Prompt</h3>
-			
-			<div class="form-group">
-				<label for="edit-prompt-name">Name:</label>
-				<input 
-					id="edit-prompt-name"
-					type="text" 
-					bind:value={editPrompt.name} 
-					placeholder="Enter prompt name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-type">Type:</label>
-				<select 
-					id="edit-prompt-type"
-					bind:value={editPrompt.type}
-				>
-					<option value="system_intro">System Introduction - Agent startup and identity</option>
-					<option value="role_description">Role Description - Detailed role responsibilities and scope</option>
-					<option value="communication">Communication - Team interaction and messaging protocols</option>
-					<option value="channel_instructions">Channel Instructions - When to use specific channels</option>
-					<option value="worktree_workflow">Worktree Workflow - Code management and Git workflows</option>
-					<option value="company_workflow">Company Workflow - Business processes and standards</option>
-					<option value="custom">Custom - General purpose prompts</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-content">Content:</label>
-				<textarea 
-					id="edit-prompt-content"
-					bind:value={editPrompt.content} 
-					placeholder="Enter prompt content..."
-					rows="12"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-order">Order Index:</label>
-				<input 
-					id="edit-prompt-order"
-					type="number" 
-					bind:value={editPrompt.orderIndex} 
-					placeholder="0"
-					min="0"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeEditPromptDialog}>Cancel</button>
-				<button class="create-btn" on:click={updatePrompt} disabled={!editPrompt.name.trim() || !editPrompt.content.trim()}>
-					Update Prompt
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showUpdateTemplateDialog}
-	<div class="dialog-overlay" on:click={() => showUpdateTemplateDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>⚠️ Update Template</h3>
-			
-			{#if selectedPromptForTemplate}
-				<div class="warning-section">
-					<div class="warning-box">
-						<p><strong>Are you sure you want to update the template?</strong></p>
-						<p>This will update the original template with the current content of this prompt.</p>
-						<p><strong>Template:</strong> {selectedPromptForTemplate.name}</p>
-						<p><strong>Type:</strong> {selectedPromptForTemplate.type}</p>
-					</div>
-					
-					<div class="template-impact">
-						<h4>⚠️ Impact:</h4>
-						<ul>
-							<li>All existing prompts created from this template will <strong>NOT</strong> be automatically updated</li>
-							<li>Only new prompts created from this template will use the updated content</li>
-							<li>This action cannot be easily undone</li>
-						</ul>
-					</div>
-
-					<div class="content-preview">
-						<h4>New Template Content:</h4>
-						<div class="preview-box">
-							{selectedPromptForTemplate.content.substring(0, 300)}{#if selectedPromptForTemplate.content.length > 300}...{/if}
-						</div>
-					</div>
-				</div>
-			{/if}
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showUpdateTemplateDialog = false}>Cancel</button>
-				<button class="btn-warning" on:click={updateTemplate}>
-					Yes, Update Template
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 {#if showReplyDialog}
 	<div class="dialog-overlay" on:click={closeReplyDialog}>
@@ -4583,322 +4109,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 		font-style: italic;
 	}
 
-	/* Agents Section Styles */
-	.agents-section {
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
-		height: calc(100vh - 140px);
-	}
 
-	.agent-controls {
-		display: flex;
-		gap: 8px;
-	}
-
-	.agents-content {
-		display: flex;
-		gap: 20px;
-		flex: 1;
-		overflow: hidden;
-	}
-
-	.agents-left {
-		width: 400px;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		overflow-y: auto;
-	}
-
-	.agents-right {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.agents-panel {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		padding: 16px;
-	}
-
-	.agents-panel h3 {
-		margin: 0 0 12px 0;
-		color: #333;
-	}
-
-	.agents-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 12px;
-	}
-
-	.agents-header h3 {
-		margin: 0;
-	}
-
-	.agent-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.agent-item {
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		padding: 12px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		transition: all 0.2s ease;
-		cursor: pointer !important;
-		user-select: none;
-	}
-
-
-
-
-
-	.agent-item:hover {
-		border-color: #007acc;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-	}
-
-	.agent-item.active {
-		border-color: #007acc;
-		background: #f0f8ff;
-	}
-
-	.agent-header {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.agent-id {
-		font-weight: 500;
-		color: #333;
-	}
-
-	.agent-model {
-		font-size: 12px;
-		background: #e7f3ff;
-		color: #0066cc;
-		padding: 2px 6px;
-		border-radius: 10px;
-	}
-
-
-	.agent-details {
-		display: flex;
-		gap: 8px;
-		font-size: 12px;
-		color: #666;
-	}
-
-	.agent-uptime {
-		font-family: monospace;
-	}
-
-	.agent-status {
-		padding: 2px 8px;
-		border-radius: 12px;
-		font-size: 11px;
-		font-weight: 500;
-		text-transform: uppercase;
-	}
-
-	.status-active {
-		background: #e8f5e8;
-		color: #2d7d2d;
-	}
-
-	.status-idle {
-		background: #fff3cd;
-		color: #856404;
-	}
-
-	.status-offline {
-		background: #f8d7da;
-		color: #721c24;
-	}
-
-	.agent-id-section {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.agent-status-indicator {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		display: inline-block;
-		animation: pulse 2s infinite;
-	}
-
-	.agent-status-indicator.status-active {
-		background: #28a745;
-		animation: pulse-active 1.5s infinite;
-	}
-
-	.agent-status-indicator.status-idle {
-		background: #ffc107;
-		animation: pulse-idle 2s infinite;
-	}
-
-	.agent-status-indicator.status-offline {
-		background: #dc3545;
-		animation: none;
-	}
-
-	.agent-heartbeat {
-		font-size: 10px;
-		color: #666;
-		font-style: italic;
-	}
-
-	@keyframes pulse-active {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.5; }
-	}
-
-	@keyframes pulse-idle {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.3; }
-	}
-
-	.btn-launch {
-		background: #28a745;
-		color: white;
-		border: none;
-		padding: 6px 12px;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 12px;
-	}
-
-	.btn-launch:hover {
-		background: #218838;
-	}
-
-	.btn-danger {
-		background: #dc3545;
-		color: white;
-		border: none;
-		padding: 6px 12px;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 14px;
-	}
-
-	.btn-danger:hover {
-		background: #c82333;
-	}
-
-	.agent-details-panel {
-		background: white;
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		height: 100%;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.agent-details-header {
-		padding: 16px;
-		border-bottom: 1px solid #e5e5e5;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.agent-details-header h3 {
-		margin: 0;
-		font-family: monospace;
-	}
-
-	.agent-console {
-		flex: 1;
-		padding: 16px;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.agent-console h4 {
-		margin: 0 0 8px 0;
-		color: #333;
-	}
-
-	.console-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 8px;
-	}
-
-	.console-output {
-		flex: 1;
-		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-		font-size: 12px;
-		background: #1a1a1a;
-		color: #00ff00;
-		border: none;
-		padding: 12px;
-		border-radius: 4px;
-		resize: none;
-		white-space: pre-wrap;
-		height: 500px;
-	}
-
-	.console-output:focus {
-		outline: none;
-	}
-
-
-	.large-dialog {
-		width: 600px;
-		max-width: 90vw;
-	}
-
-	.section-subtitle {
-		margin: 16px 0 8px 0;
-		color: #666;
-		font-size: 14px;
-		font-weight: 500;
-	}
-
-	.agent-item.launching {
-		background: #fff8dc;
-		border-color: #ffc107;
-		cursor: pointer !important;
-	}
-
-	.agent-priority {
-		background: #007acc;
-		color: white;
-		padding: 2px 6px;
-		border-radius: 10px;
-		font-size: 11px;
-		font-weight: 500;
-		min-width: 20px;
-		text-align: center;
-		margin-right: 8px;
-	}
-
-	.status-launching {
-		background: #fff3cd;
-		color: #856404;
-	}
-
-	.agent-role {
-		font-size: 12px;
-		color: #666;
-	}
 
 	/* Channels Section Styles */
 	.channels-section {
@@ -5527,12 +4738,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 		gap: 8px;
 	}
 	
-	/* Prompts Section Styles */
-	.prompts-section {
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
-	}
 	
 	
 	
@@ -5557,33 +4762,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 	
 	
 
-	/* Prompt Assignment Styles */
-	.section-header-with-action {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 12px;
-	}
-
-	.section-header-with-action h4 {
-		margin: 0;
-	}
-
-
-	.btn-danger-small {
-		background: #dc3545;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		padding: 4px 8px;
-		font-size: 12px;
-		cursor: pointer;
-		transition: background-color 0.2s;
-	}
-
-	.btn-danger-small:hover {
-		background: #c82333;
-	}
 
 
 
@@ -5591,98 +4769,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 
 
 
-	/* Template Update Styles */
-	.btn-template {
-		background: #ff9800;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		padding: 6px 12px;
-		font-size: 12px;
-		cursor: pointer;
-		transition: background-color 0.2s;
-		margin-right: 8px;
-	}
-
-	.btn-template:hover {
-		background: #f57c00;
-	}
-
-	.btn-warning {
-		background: #ff9800;
-		color: white;
-		border: none;
-		border-radius: 4px;
-		padding: 8px 16px;
-		font-size: 14px;
-		cursor: pointer;
-		transition: background-color 0.2s;
-	}
-
-	.btn-warning:hover {
-		background: #f57c00;
-	}
-
-	.warning-section {
-		margin-bottom: 20px;
-	}
-
-	.warning-box {
-		background: #fff3e0;
-		border: 1px solid #ff9800;
-		border-radius: 4px;
-		padding: 12px;
-		margin-bottom: 16px;
-	}
-
-	.warning-box p {
-		margin: 4px 0;
-	}
-
-	.template-impact {
-		background: #ffebee;
-		border: 1px solid #e57373;
-		border-radius: 4px;
-		padding: 12px;
-		margin-bottom: 16px;
-	}
-
-	.template-impact h4 {
-		margin: 0 0 8px 0;
-		color: #c62828;
-	}
-
-	.template-impact ul {
-		margin: 0;
-		padding-left: 20px;
-	}
-
-	.template-impact li {
-		margin: 4px 0;
-		color: #666;
-	}
-
-	.content-preview {
-		margin-bottom: 16px;
-	}
-
-	.content-preview h4 {
-		margin: 0 0 8px 0;
-		color: #333;
-	}
-
-	.preview-box {
-		background: #f5f5f5;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		padding: 12px;
-		font-family: monospace;
-		font-size: 12px;
-		color: #666;
-		white-space: pre-wrap;
-		max-height: 200px;
-		overflow-y: auto;
-	}
 	
 	.empty-state {
 		text-align: center;
