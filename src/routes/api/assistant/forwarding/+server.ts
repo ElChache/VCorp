@@ -1,11 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { db } from '$lib/db/index';
-import { projects } from '$lib/db/schema';
-import { eq } from 'drizzle-orm';
-
-// Simple in-memory storage for forwarding settings
-// In production, this could be stored in the database or Redis
-const forwardingSettings = new Map<number, boolean>();
+import { setForwardingEnabled, isForwardingEnabled } from '$lib/services/ForwardingService';
 
 export async function POST({ request }) {
 	try {
@@ -18,7 +12,7 @@ export async function POST({ request }) {
 		console.log(`📬 Assistant forwarding ${enabled ? 'ENABLED' : 'DISABLED'} for project ${projectId}`);
 		
 		// Store the setting
-		forwardingSettings.set(parseInt(projectId), enabled);
+		setForwardingEnabled(parseInt(projectId), enabled);
 
 		return json({ 
 			success: true, 
@@ -40,7 +34,7 @@ export async function GET({ url }) {
 			return json({ error: 'Project ID required' }, { status: 400 });
 		}
 
-		const enabled = forwardingSettings.get(parseInt(projectId)) || false;
+		const enabled = isForwardingEnabled(parseInt(projectId));
 
 		return json({ enabled });
 
@@ -50,7 +44,3 @@ export async function GET({ url }) {
 	}
 }
 
-// Export function to check if forwarding is enabled (for use by other modules)
-export function isForwardingEnabled(projectId: number): boolean {
-	return forwardingSettings.get(projectId) || false;
-}

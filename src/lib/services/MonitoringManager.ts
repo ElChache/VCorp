@@ -1,27 +1,16 @@
 import { execSync, spawn } from 'child_process';
 import { db } from '$lib/db/index';
-import { agents, content, readingAssignments, readingAssignmentReads, projects } from '$lib/db/schema';
+import { agents, content, readingAssignments, readingAssignmentReads, projects, scheduledReminders } from '$lib/db/schema';
 import { eq, and, or, notExists } from 'drizzle-orm';
 
-// Import forwarding status check
-async function isForwardingEnabled(projectId: number): Promise<boolean> {
-	try {
-		const response = await fetch(`http://localhost:5173/api/assistant/forwarding?projectId=${projectId}`);
-		if (response.ok) {
-			const data = await response.json();
-			return data.enabled || false;
-		}
-	} catch (error) {
-		console.error('Failed to check forwarding status:', error);
-	}
-	return false;
-}
+import { checkForwardingStatus } from '$lib/services/ForwardingService';
 
 interface MonitoringStats {
 	totalChecks: number;
 	statusUpdates: number;
 	notificationsSent: number;
 	gentlePokes: number;
+	remindersSent: number;
 	errors: number;
 	startTime: Date;
 	lastCheck: Date | null;
@@ -45,6 +34,14 @@ interface NotificationResult {
 interface GentlePokeResult {
 	agentId: string;
 	idleStartTime: Date;
+	success: boolean;
+	error?: string;
+}
+
+interface ScheduledReminderResult {
+	reminderId: number;
+	reminderName: string;
+	targetRoleType: string;
 	success: boolean;
 	error?: string;
 }
@@ -151,6 +148,8 @@ This is just a gentle reminder - no action needed if you're already working! üö
 			totalChecks: 0,
 			statusUpdates: 0,
 			notificationsSent: 0,
+			gentlePokes: 0,
+			remindersSent: 0,
 			errors: 0,
 			startTime: new Date(),
 			lastCheck: null,
@@ -227,10 +226,11 @@ This is just a gentle reminder - no action needed if you're already working! üö
 
 	private async processProject(projectId: number): Promise<void> {
 		// Run all monitoring tasks in parallel
-		const [statusUpdates, notificationResults, gentlePokeResults, forwardingResults] = await Promise.all([
+		const [statusUpdates, notificationResults, gentlePokeResults, reminderResults, forwardingResults] = await Promise.all([
 			this.updateAgentStatuses(projectId),
 			this.sendUnreadNotifications(projectId),
 			this.sendGentlePokes(projectId),
+			this.processScheduledReminders(projectId),
 			this.processAssistantForwarding(projectId)
 		]);
 
@@ -238,6 +238,7 @@ This is just a gentle reminder - no action needed if you're already working! üö
 		this.stats.statusUpdates += statusUpdates.length;
 		this.stats.notificationsSent += notificationResults.filter(r => r.success).length;
 		this.stats.gentlePokes += gentlePokeResults.filter(r => r.success).length;
+		this.stats.remindersSent += reminderResults.filter(r => r.success).length;
 
 		// Log significant events
 		if (statusUpdates.length > 0) {
@@ -260,6 +261,14 @@ This is just a gentle reminder - no action needed if you're already working! üö
 			console.log(`üëã [${new Date().toLocaleTimeString()}] Project ${projectId}: ${successfulPokes.length} gentle pokes sent`);
 			successfulPokes.forEach(result => {
 				console.log(`   ‚îî‚îÄ ${result.agentId}: idle for ${Math.round((Date.now() - result.idleStartTime.getTime()) / 1000)}s`);
+			});
+		}
+
+		const successfulReminders = reminderResults.filter(r => r.success);
+		if (successfulReminders.length > 0) {
+			console.log(`‚è∞ [${new Date().toLocaleTimeString()}] Project ${projectId}: ${successfulReminders.length} scheduled reminders sent`);
+			successfulReminders.forEach(result => {
+				console.log(`   ‚îî‚îÄ "${result.reminderName}" ‚Üí ${result.targetRoleType}`);
 			});
 		}
 	}
@@ -578,6 +587,122 @@ This is just a gentle reminder - no action needed if you're already working! üö
 		return results;
 	}
 
+	private async processScheduledReminders(projectId: number): Promise<ScheduledReminderResult[]> {
+		// Get all active scheduled reminders for this project
+		const activeReminders = await db
+			.select()
+			.from(scheduledReminders)
+			.where(and(
+				eq(scheduledReminders.projectId, projectId),
+				eq(scheduledReminders.isActive, true)
+			));
+
+		const results: ScheduledReminderResult[] = [];
+		const now = new Date();
+
+		for (const reminder of activeReminders) {
+			try {
+				// Check if it's time to send this reminder
+				const shouldSend = this.shouldSendReminder(reminder, now);
+				
+				if (!shouldSend) {
+					continue;
+				}
+
+				// Send the reminder message to the target role
+				const success = await this.sendReminderMessage(reminder, projectId);
+				
+				if (success) {
+					// Update the lastSentAt timestamp
+					await db
+						.update(scheduledReminders)
+						.set({ 
+							lastSentAt: now,
+							updatedAt: now
+						})
+						.where(eq(scheduledReminders.id, reminder.id));
+				}
+
+				results.push({
+					reminderId: reminder.id,
+					reminderName: reminder.name,
+					targetRoleType: reminder.targetRoleType,
+					success
+				});
+
+			} catch (error) {
+				results.push({
+					reminderId: reminder.id,
+					reminderName: reminder.name,
+					targetRoleType: reminder.targetRoleType,
+					success: false,
+					error: error.message
+				});
+			}
+		}
+
+		return results;
+	}
+
+	private shouldSendReminder(reminder: any, now: Date): boolean {
+		// If never sent before, send now
+		if (!reminder.lastSentAt) {
+			return true;
+		}
+
+		// Check if enough time has passed since last send
+		const lastSent = new Date(reminder.lastSentAt);
+		const timeSinceLastSent = now.getTime() - lastSent.getTime();
+		const intervalMs = reminder.frequencyMinutes * 60 * 1000;
+
+		return timeSinceLastSent >= intervalMs;
+	}
+
+	private async sendReminderMessage(reminder: any, projectId: number): Promise<boolean> {
+		try {
+			// Create a reminder message in the content table
+			await db
+				.insert(content)
+				.values({
+					projectId,
+					type: 'message',
+					title: `‚è∞ Scheduled Reminder: ${reminder.name}`,
+					body: reminder.message,
+					assignedToRoleType: reminder.targetRoleType,
+					createdAt: new Date(),
+					updatedAt: new Date()
+				});
+
+			// Create a reading assignment for the target role
+			const [newContent] = await db
+				.select({ id: content.id })
+				.from(content)
+				.where(and(
+					eq(content.projectId, projectId),
+					eq(content.type, 'message'),
+					eq(content.title, `‚è∞ Scheduled Reminder: ${reminder.name}`)
+				))
+				.orderBy(content.createdAt)
+				.limit(1);
+
+			if (newContent) {
+				await db
+					.insert(readingAssignments)
+					.values({
+						contentId: newContent.id,
+						assignedToType: 'role',
+						assignedTo: reminder.targetRoleType,
+						assignedAt: new Date()
+					});
+			}
+
+			return true;
+		} catch (error) {
+			console.error(`Failed to send reminder "${reminder.name}":`, error);
+			return false;
+		}
+	}
+
 	private async getPhaseContextForRole(roleType: string, projectId: number): Promise<string> {
 		try {
 			// Use internal API call to get phase context
@@ -615,7 +740,7 @@ Status: ${phase.status}`;
 
 	private async processAssistantForwarding(projectId: number): Promise<any[]> {
 		// Check if forwarding is enabled for this project
-		const forwardingEnabled = await isForwardingEnabled(projectId);
+		const forwardingEnabled = await checkForwardingStatus(projectId);
 		if (!forwardingEnabled) {
 			return [];
 		}
