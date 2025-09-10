@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import OverviewSection from '$lib/components/OverviewSection.svelte';
+	import CommunicationsSection from '$lib/components/CommunicationsSection.svelte';
+	import PhasesSection from '$lib/components/PhasesSection.svelte';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -137,6 +138,7 @@
 	onMount(async () => {
 		await loadProjects();
 		await loadPhases();
+		await refreshMonitoringStatus();
 		
 		// Add global debug functions for testing
 		(window as any).debugChannels = () => {
@@ -1873,6 +1875,54 @@ Status: ACTIVE - Ready to assist with full authority`,
 		}
 	}
 
+	// Monitoring Service Functions
+	async function refreshMonitoringStatus() {
+		try {
+			const response = await fetch('/api/monitoring/status');
+			if (response.ok) {
+				monitoringStatus = await response.json();
+			} else {
+				console.error('Failed to fetch monitoring status');
+			}
+		} catch (error) {
+			console.error('Error fetching monitoring status:', error);
+		}
+	}
+
+	async function startMonitoring() {
+		try {
+			const response = await fetch('/api/monitoring/start', { method: 'POST' });
+			if (response.ok) {
+				await refreshMonitoringStatus();
+				console.log('Monitoring service started successfully');
+			} else {
+				const error = await response.json();
+				console.error('Failed to start monitoring:', error.error);
+				alert(`Failed to start monitoring: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error starting monitoring:', error);
+			alert('Failed to start monitoring service');
+		}
+	}
+
+	async function stopMonitoring() {
+		try {
+			const response = await fetch('/api/monitoring/stop', { method: 'POST' });
+			if (response.ok) {
+				const result = await response.json();
+				await refreshMonitoringStatus();
+				console.log('Monitoring service stopped:', result.finalStats);
+			} else {
+				const error = await response.json();
+				console.error('Failed to stop monitoring:', error.error);
+				alert(`Failed to stop monitoring: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error stopping monitoring:', error);
+			alert('Failed to stop monitoring service');
+		}
+	}
 
 	// Documents management functions
 	async function loadDocuments() {
@@ -2170,7 +2220,59 @@ Status: ACTIVE - Ready to assist with full authority`,
 	<div class="main-content">
 		{#if selectedProject}
 			{#if currentSection === 'overview'}
-				<OverviewSection {selectedProject} bind:monitoringStatus />
+				<h2>{selectedProject.name}</h2>
+				<p>{selectedProject.description || 'No description provided'}</p>
+				
+				<!-- Monitoring Service Controls -->
+				<div class="monitoring-section">
+					<h3>🔍 Monitoring Service</h3>
+					<div class="monitoring-controls">
+						<div class="monitoring-status">
+							<span class="status-indicator" class:active={monitoringStatus?.isRunning}></span>
+							<span>{monitoringStatus?.isRunning ? 'Active' : 'Stopped'}</span>
+						</div>
+						
+						<div class="monitoring-actions">
+							{#if monitoringStatus?.isRunning}
+								<button class="btn-stop" on:click={stopMonitoring}>Stop Monitoring</button>
+							{:else}
+								<button class="btn-start" on:click={startMonitoring}>Start Monitoring</button>
+							{/if}
+							<button class="btn-refresh" on:click={refreshMonitoringStatus}>Refresh</button>
+						</div>
+					</div>
+					
+					{#if monitoringStatus?.stats}
+						<div class="monitoring-stats">
+							<div class="stat-item">
+								<span class="stat-label">Total Checks:</span>
+								<span class="stat-value">{monitoringStatus.stats.totalChecks}</span>
+							</div>
+							<div class="stat-item">
+								<span class="stat-label">Status Updates:</span>
+								<span class="stat-value">{monitoringStatus.stats.statusUpdates}</span>
+							</div>
+							<div class="stat-item">
+								<span class="stat-label">Notifications Sent:</span>
+								<span class="stat-value">{monitoringStatus.stats.notificationsSent}</span>
+							</div>
+							<div class="stat-item">
+								<span class="stat-label">Gentle Pokes:</span>
+								<span class="stat-value">{monitoringStatus.stats.gentlePokes || 0}</span>
+							</div>
+							<div class="stat-item">
+								<span class="stat-label">Errors:</span>
+								<span class="stat-value">{monitoringStatus.stats.errors}</span>
+							</div>
+							{#if monitoringStatus.stats.lastCheck}
+								<div class="stat-item">
+									<span class="stat-label">Last Check:</span>
+									<span class="stat-value">{new Date(monitoringStatus.stats.lastCheck).toLocaleTimeString()}</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
 			{:else if currentSection === 'roles'}
 				<div class="roles-section">
 					<div class="section-header">
@@ -3172,1625 +3274,39 @@ Status: ACTIVE - Ready to assist with full authority`,
 					</div>
 				</div>
 			{:else if currentSection === 'communications'}
-				<div class="communications-section">
-					<div class="section-header">
-						<h2>📬 Communications Center</h2>
-						<button 
-							class="btn-primary"
-							on:click={() => showSendMessageDialog = true}
-						>
-							✉️ Send Message
-						</button>
-					</div>
-
-					<div class="comms-nav">
-						<button 
-							class="comms-nav-btn" 
-							class:active={commsViewMode === 'urgent'}
-							on:click={() => commsViewMode = 'urgent'}
-						>
-							🚨 Urgent ({directorInbox.categorized?.urgent?.length || 0})
-						</button>
-						<button 
-							class="comms-nav-btn" 
-							class:active={commsViewMode === 'dashboard'}
-							on:click={() => commsViewMode = 'dashboard'}
-						>
-							📊 Dashboard
-						</button>
-						<button 
-							class="comms-nav-btn" 
-							class:active={commsViewMode === 'messages'}
-							on:click={() => { commsViewMode = 'messages'; loadAllMessages(); }}
-						>
-							💬 All Messages ({allMessagesSummary.total || 0})
-						</button>
-						<button 
-							class="comms-nav-btn" 
-							class:active={commsViewMode === 'assistant'}
-							on:click={() => { commsViewMode = 'assistant'; loadAssistantMessages(); }}
-						>
-							🤖 Assistant ({assistantMessages.length || 0})
-						</button>
-					</div>
-
-					<div class="comms-content">
-						{#if commsViewMode === 'urgent'}
-							<div class="urgent-view">
-								<h3>🚨 Urgent Messages</h3>
-								{#if directorInbox.categorized?.urgent?.length > 0}
-									<div class="message-list">
-										{#each directorInbox.categorized.urgent as message}
-											<div class="message-card urgent" class:unread={!message.isRead}>
-												<div class="message-header">
-													<div class="message-meta">
-														<span class="message-icon">{getMessageIcon(message)}</span>
-														<span class="message-source">
-															{#if message.isDM}
-																DM from {message.authorAgentId}
-															{:else if message.isDirectorChannel}
-																#{message.channelName} (Director Channel)
-															{:else}
-																#{message.channelName}
-															{/if}
-														</span>
-														<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-													</div>
-													<div class="message-actions">
-														{#if !message.isRead}
-															<button class="btn-small" on:click={() => markAsRead(message.messageId, message.assignmentId)}>
-																Mark Read
-															</button>
-														{/if}
-														<button class="btn-small btn-primary" on:click={() => openReplyDialog(message)}>
-															Reply
-														</button>
-													</div>
-												</div>
-												<div class="message-content">
-													<div class="message-body">{message.body}</div>
-													{#if message.parentMessage}
-														<div class="parent-context">
-															<small>↩️ Replying to: "{message.parentMessage.body.substring(0, 50)}..."</small>
-														</div>
-													{/if}
-												</div>
-											</div>
-										{/each}
-									</div>
-								{:else}
-									<div class="empty-state">
-										<h4>✅ No urgent messages!</h4>
-										<p>All caught up on priority communications.</p>
-									</div>
-								{/if}
-							</div>
-
-						{:else if commsViewMode === 'assistant'}
-							<div class="assistant-view">
-								<div class="assistant-header">
-									<div class="assistant-title-row">
-										<div>
-											<h3>🤖 Director Assistant</h3>
-											<p class="assistant-description">Direct communication with your assistant</p>
-										</div>
-										<div class="assistant-controls">
-											<label class="toggle-container">
-												<span class="toggle-label">Forward messages to assistant</span>
-												<input 
-													type="checkbox" 
-													bind:checked={assistantForwardingEnabled}
-													on:change={toggleAssistantForwarding}
-												/>
-												<span class="toggle-slider"></span>
-											</label>
-										</div>
-									</div>
-									{#if assistantForwardingEnabled}
-										<div class="forwarding-notice">
-											<span class="notice-icon">📬</span>
-											<span>Assistant will receive copies of all messages directed to you and can respond on your behalf</span>
-										</div>
-									{/if}
-								</div>
-								
-								<div class="assistant-chat">
-									{#if assistantMessages.length > 0}
-										<div class="message-list">
-											{#each assistantMessages as message}
-												<div class="assistant-message" class:from-assistant={message.isFromAssistant} class:from-director={message.isFromDirector}>
-													<div class="message-header">
-														<span class="message-author">
-															{#if message.isFromAssistant}
-																🤖 Assistant ({message.authorAgentId})
-															{:else}
-																👤 You
-															{/if}
-														</span>
-														<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-													</div>
-													<div class="message-body">{message.body}</div>
-												</div>
-											{/each}
-										</div>
-									{:else}
-										<div class="empty-chat">
-											<div class="empty-icon">💬</div>
-											<h4>No messages yet</h4>
-											<p>Start a conversation with your Director Assistant</p>
-										</div>
-									{/if}
-								</div>
-								
-								<div class="assistant-input">
-									<div class="input-container">
-										<textarea
-											bind:value={assistantMessageContent}
-											placeholder="Type your message to the assistant..."
-											rows="3"
-											on:keydown={(e) => {
-												if (e.key === 'Enter' && !e.shiftKey) {
-													e.preventDefault();
-													sendAssistantMessage();
-												}
-											}}
-										></textarea>
-										<button 
-											class="send-btn" 
-											on:click={sendAssistantMessage}
-											disabled={!assistantMessageContent.trim()}
-										>
-											Send
-										</button>
-									</div>
-									<div class="input-hint">
-										<span>📝 Press Enter to send, Shift+Enter for new line</span>
-									</div>
-								</div>
-							</div>
-
-						{:else if commsViewMode === 'dashboard'}
-							<div class="dashboard-view">
-								<div class="dashboard-grid">
-									<div class="dashboard-card">
-										<h3>📊 Activity Overview</h3>
-										{#if directorActivity.summary}
-											<div class="activity-stats">
-												<div class="stat-item">
-													<span class="stat-number">{directorActivity.summary.totalMessages}</span>
-													<span class="stat-label">Total Messages</span>
-												</div>
-												<div class="stat-item">
-													<span class="stat-number">{directorActivity.summary.activeAgents}</span>
-													<span class="stat-label">Active Agents</span>
-												</div>
-												<div class="stat-item">
-													<span class="stat-number">{directorActivity.summary.activeChannels}</span>
-													<span class="stat-label">Active Channels</span>
-												</div>
-											</div>
-										{/if}
-									</div>
-
-									<div class="dashboard-card">
-										<h3>🤖 Agent Activity</h3>
-										{#if directorActivity.agentStats?.length > 0}
-											<div class="agent-activity-list">
-												{#each directorActivity.agentStats.slice(0, 5) as agentStat}
-													<div class="activity-item">
-														<span class="agent-name">{agentStat.agentId}</span>
-														<span class="activity-count">{agentStat.messageCount} messages</span>
-														<span class="activity-time">{formatTimeAgo(agentStat.lastActivity)}</span>
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<p class="empty-note">No agent activity yet</p>
-										{/if}
-									</div>
-
-									<div class="dashboard-card">
-										<h3>📢 Channel Activity</h3>
-										{#if directorActivity.channelStats?.length > 0}
-											<div class="channel-activity-list">
-												{#each directorActivity.channelStats.slice(0, 5) as channelStat}
-													<div class="activity-item">
-														<span class="channel-name">
-															#{channelStat.channelName}
-														</span>
-														<span class="activity-count">{channelStat.messageCount} messages</span>
-														<span class="activity-time">{formatTimeAgo(channelStat.lastActivity)}</span>
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<p class="empty-note">No channel activity yet</p>
-										{/if}
-									</div>
-
-									<div class="dashboard-card">
-										<h3>📈 Recent Activity</h3>
-										{#if directorActivity.recentActivity?.length > 0}
-											<div class="recent-activity-list">
-												{#each directorActivity.recentActivity.slice(0, 5) as activity}
-													<div class="activity-item recent">
-														<span class="activity-icon">{getMessageIcon(activity)}</span>
-														<div class="activity-details">
-															<span class="activity-summary">
-																{activity.authorAgentId || 'System'} 
-																{#if activity.channelName}in #{activity.channelName}{/if}
-															</span>
-															<span class="activity-preview">{activity.body.substring(0, 40)}...</span>
-														</div>
-														<span class="activity-time">{formatTimeAgo(activity.createdAt)}</span>
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<p class="empty-note">No recent activity</p>
-										{/if}
-									</div>
-								</div>
-							</div>
-
-						{:else if commsViewMode === 'messages'}
-							<div class="all-messages-view">
-								<div class="messages-header">
-									<h3>💬 All Messages</h3>
-									{#if allMessagesSummary.total}
-										<div class="messages-stats">
-											<span class="stat">Total: {allMessagesSummary.total}</span>
-											<span class="stat">With Assignments: {allMessagesSummary.withAssignments}</span>
-											<span class="stat">Direct: {allMessagesSummary.withoutAssignments}</span>
-										</div>
-									{/if}
-								</div>
-								
-								{#if allMessages.length > 0}
-									<div class="message-list">
-										{#each allMessages as message}
-											<div class="message-card enhanced">
-												<div class="message-header">
-													<div class="message-meta">
-														<span class="message-icon">{getMessageIcon(message)}</span>
-														<div class="message-info">
-															<div class="message-title-line">
-																{#if message.title}
-																	<strong>{message.title}</strong>
-																{:else}
-																	<span class="message-type">{message.type}</span>
-																{/if}
-																{#if message.isReply}
-																	<span class="reply-badge">Reply</span>
-																{/if}
-															</div>
-															<div class="message-source-line">
-																<span class="message-source">
-																	{#if message.authorAgentId}
-																		{message.authorAgentId}
-																	{:else}
-																		Director
-																	{/if}
-																</span>
-																{#if message.channelName}
-																	<span class="channel-name">#{message.channelName}</span>
-																{:else if message.isDM}
-																	<span class="dm-badge">DM</span>
-																{/if}
-																<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-															</div>
-														</div>
-													</div>
-													<div class="message-actions">
-														<button 
-															class="btn-small btn-primary" 
-															on:click={() => { selectedMessage = message; replyToMessageId = message.id; showReplyDialog = true; }}
-														>
-															Reply
-														</button>
-													</div>
-												</div>
-												
-												<div class="message-content">
-													<div class="message-body">{message.body}</div>
-												</div>
-
-												<!-- Reading Assignments Status -->
-												{#if message.readingAssignments && message.readingAssignments.length > 0}
-													{@const assignmentsByType = message.readingAssignments.reduce((groups, assignment) => {
-														const key = assignment.assignedToType;
-														if (!groups[key]) groups[key] = [];
-														groups[key].push(assignment);
-														return groups;
-													}, {})}
-													<div class="reading-status-section">
-														<h5>📋 Reading Assignments ({message.readingAssignments.length})</h5>
-														<div class="assignments-grouped">
-															
-															{#each Object.entries(assignmentsByType) as [type, assignments]}
-																<div class="assignment-group">
-																	<div class="group-header">
-																		<span class="group-type-icon">
-																			{#if type === 'role'}👥{:else if type === 'agent'}🤖{:else if type === 'squad'}👨‍👩‍👧‍👦{/if}
-																		</span>
-																		<strong>{type.charAt(0).toUpperCase() + type.slice(1)}s</strong>
-																		<span class="group-count">({assignments.length})</span>
-																	</div>
-																	<div class="assignment-items">
-																		{#each assignments as assignment}
-																			<div class="assignment-item" class:fully-read={assignment.isFullyRead}>
-																				<div class="assignment-info">
-																					<span class="assignment-name">{assignment.assignedTo}</span>
-																					<div class="read-indicators">
-																						<span class="read-count" class:all-read={assignment.isFullyRead}>
-																							{assignment.readCount}/{assignment.totalTargets}
-																						</span>
-																						{#if assignment.isFullyRead}
-																							<span class="status-indicator read">✓</span>
-																						{:else if assignment.readCount > 0}
-																							<span class="status-indicator partial">◐</span>
-																						{:else}
-																							<span class="status-indicator unread">○</span>
-																						{/if}
-																					</div>
-																				</div>
-																				
-																				{#if assignment.readBy && assignment.readBy.length > 0}
-																					<div class="read-by-list">
-																						<span class="read-by-label">Read:</span>
-																						{#each assignment.readBy as read}
-																							<span class="read-by-agent">
-																								{read.agentId}
-																								<small>({formatTimeAgo(read.readAt)})</small>
-																							</span>
-																						{/each}
-																					</div>
-																				{/if}
-																				
-																				{#if assignment.unreadAgents && assignment.unreadAgents.length > 0}
-																					<div class="unread-agents-list">
-																						<span class="unread-label">Unread:</span>
-																						{#each assignment.unreadAgents as agentId}
-																							<span class="unread-agent">{agentId}</span>
-																						{/each}
-																					</div>
-																				{/if}
-																			</div>
-																		{/each}
-																	</div>
-																</div>
-															{/each}
-														</div>
-													</div>
-												{:else}
-													<div class="no-assignments">
-														<small>📝 No reading assignments</small>
-													</div>
-												{/if}
-											</div>
-										{/each}
-									</div>
-								{:else}
-									<div class="empty-state">
-										<h4>📭 No messages yet</h4>
-										<p>All project messages will appear here with reading assignment status.</p>
-									</div>
-								{/if}
-							</div>
-						{/if}
-					</div>
-				</div>
+				<CommunicationsSection 
+					{selectedProject}
+					bind:commsViewMode
+					{channels}
+					{allMessages}
+					{directorActivity}
+					bind:selectedMessage 
+					bind:showReplyDialog 
+					bind:replyToMessageId 
+					{formatTimeAgo}
+					{getMessageIcon}
+				/>
 			{:else if currentSection === 'phases'}
-				<div class="phases-section">
-					<div class="section-header">
-						<h2>Phase Management</h2>
-						<button class="btn-primary" on:click={() => showCreatePhaseDialog = true}>
-							+ Create Phase
-						</button>
-					</div>
-
-					<div class="phases-by-role">
-						{#each Object.entries(phasesByRole) as [roleType, rolePhases]}
-							<div class="role-section">
-								<h3>{roleType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</h3>
-								
-								<div class="phase-list">
-									{#each rolePhases as phase}
-										<div class="phase-card" class:draft={phase.phaseStatus === 'draft'} class:approved={phase.phaseStatus === 'approved'} class:active={phase.phaseStatus === 'active'} class:completed={phase.phaseStatus === 'completed'} class:blocked={phase.phaseStatus === 'blocked'}>
-											<div class="phase-header">
-												<h4>{phase.title}</h4>
-												<div class="phase-controls">
-													<select 
-														class="phase-status-select" 
-														value={phase.phaseStatus} 
-														on:change={(e) => updatePhaseStatus(phase, e.target.value)}
-													>
-														<option value="draft">Draft</option>
-														<option value="approved">Approved</option>
-														<option value="active">Active</option>
-														<option value="completed">Completed</option>
-														<option value="blocked">Blocked</option>
-													</select>
-												</div>
-											</div>
-											
-											<div class="phase-body">
-												<p>{phase.body}</p>
-											</div>
-											
-											{#if phase.requiredInputs || phase.expectedOutputs}
-												<div class="phase-dependencies">
-													{#if phase.requiredInputs}
-														<div class="phase-inputs">
-															<strong>Required Inputs:</strong> {JSON.parse(phase.requiredInputs).join(', ')}
-														</div>
-													{/if}
-													{#if phase.expectedOutputs}
-														<div class="phase-outputs">
-															<strong>Expected Outputs:</strong> {JSON.parse(phase.expectedOutputs).join(', ')}
-														</div>
-													{/if}
-												</div>
-											{/if}
-											
-											<div class="phase-meta">
-												<span class="phase-status-badge status-{phase.phaseStatus}">
-													{phase.phaseStatus}
-												</span>
-												<span class="phase-created">
-													Created: {new Date(phase.createdAt).toLocaleDateString()}
-												</span>
-											</div>
-										</div>
-									{/each}
-								</div>
-								
-								{#if rolePhases.length === 0}
-									<div class="empty-phases">
-										<p>No phases defined for this role yet.</p>
-									</div>
-								{/if}
-							</div>
-						{/each}
-						
-						{#if Object.keys(phasesByRole).length === 0}
-							<div class="empty-state">
-								<h4>No phases created yet</h4>
-								<p>Create your first phase to start organizing work by roles.</p>
-							</div>
-						{/if}
-					</div>
-				</div>
+				<PhasesSection 
+					{phasesByRole}
+					bind:showCreatePhaseDialog
+					{formatTimeAgo}
+				/>
 			{/if}
-		{:else}
-			<p>Select or create a project to get started</p>
 		{/if}
 	</div>
-</div>
+
+<!-- Dialogs and modals would go here -->
 
 {#if showCreateDialog}
-	<div class="dialog-overlay" on:click={closeCreateDialog}>
-		<div class="dialog" on:click|stopPropagation>
+	<div class="modal">
+		<div class="modal-content">
 			<h3>Create New Project</h3>
-			
-			<div class="form-group">
-				<label for="name">Name:</label>
-				<input 
-					id="name"
-					type="text" 
-					bind:value={newProject.name} 
-					placeholder="Enter project name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="description">Description:</label>
-				<textarea 
-					id="description"
-					bind:value={newProject.description} 
-					placeholder="Project description or prompt"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="path">Project Path:</label>
-				<input 
-					id="path"
-					type="text" 
-					bind:value={newProject.path} 
-					placeholder="Enter project path (e.g., /Users/username/Projects/myproject)"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeCreateDialog}>Cancel</button>
-				<button class="create-btn" on:click={createProject} disabled={!newProject.name.trim() || !newProject.path.trim()}>
-					Create
-				</button>
-			</div>
+			<p>Create project dialog would go here</p>
+			<button on:click={() => showCreateDialog = false}>Close</button>
 		</div>
 	</div>
 {/if}
-
-{#if showDeleteDialog}
-	<div class="dialog-overlay" on:click={closeDeleteDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Delete Project</h3>
-			<p>This action cannot be undone. To confirm, type the project name: <strong>{selectedProject?.name}</strong></p>
-			
-			<div class="form-group">
-				<label for="delete-name">Project name:</label>
-				<input 
-					id="delete-name"
-					type="text" 
-					bind:value={deleteProjectName} 
-					placeholder="Type project name to confirm"
-					autofocus
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeDeleteDialog}>Cancel</button>
-				<button 
-					class="delete-confirm-btn" 
-					on:click={deleteProject} 
-					disabled={deleteProjectName !== selectedProject?.name}
-				>
-					Delete Project
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showEditDialog}
-	<div class="dialog-overlay" on:click={closeEditDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Edit Project</h3>
-			
-			<div class="form-group">
-				<label for="edit-name">Name:</label>
-				<input 
-					id="edit-name"
-					type="text" 
-					bind:value={editProject.name} 
-					placeholder="Enter project name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-description">Description:</label>
-				<textarea 
-					id="edit-description"
-					bind:value={editProject.description} 
-					placeholder="Project description or prompt"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-path">Project Path:</label>
-				<input 
-					id="edit-path"
-					type="text" 
-					bind:value={editProject.path} 
-					placeholder="Enter project path (e.g., /Users/username/Projects/myproject)"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeEditDialog}>Cancel</button>
-				<button class="create-btn" on:click={updateProject} disabled={!editProject.name.trim() || !editProject.path.trim()}>
-					Update
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showStartupPromptEditor}
-	<div class="dialog-overlay" on:click={() => showStartupPromptEditor = false}>
-		<div class="dialog large-dialog" on:click|stopPropagation>
-			<h3>Agent Startup Prompt</h3>
-			
-			<div class="form-group">
-				<label for="startup-prompt">This prompt is sent to each agent when they launch:</label>
-				<textarea 
-					id="startup-prompt"
-					bind:value={startupPrompt}
-					placeholder="Enter the startup prompt for new agents..."
-					rows="15"
-				></textarea>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showStartupPromptEditor = false}>Cancel</button>
-				<button class="create-btn" on:click={saveStartupPrompt}>
-					Save Prompt
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showCreateChannelDialog}
-	<div class="dialog-overlay" on:click={closeCreateChannelDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Create New Channel</h3>
-			
-			<div class="form-group">
-				<label for="channel-name">Name:</label>
-				<input 
-					id="channel-name"
-					type="text" 
-					bind:value={newChannel.name} 
-					placeholder="Enter channel name"
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="channel-description">Description:</label>
-				<textarea 
-					id="channel-description"
-					bind:value={newChannel.description} 
-					placeholder="Channel description (optional)"
-					rows="3"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="channel-prompt">Agent Prompt:</label>
-				<textarea 
-					id="channel-prompt"
-					bind:value={newChannel.promptForAgents} 
-					placeholder="When should agents use this channel? (optional)"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={newChannel.isMainChannel}
-					/>
-					Set as main channel
-				</label>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={newChannel.isForHumanDirector}
-					/>
-					👤 For Human Director communication
-				</label>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeCreateChannelDialog}>Cancel</button>
-				<button class="create-btn" on:click={createChannel} disabled={!newChannel.name.trim()}>
-					Create Channel
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showEditChannelDialog}
-	<div class="dialog-overlay" on:click={closeEditChannelDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Edit Channel</h3>
-			
-			<div class="form-group">
-				<label for="edit-channel-id">Channel ID:</label>
-				<input 
-					id="edit-channel-id"
-					type="text" 
-					bind:value={editChannel.id} 
-					placeholder="Enter channel ID"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-channel-name">Name:</label>
-				<input 
-					id="edit-channel-name"
-					type="text" 
-					bind:value={editChannel.name} 
-					placeholder="Enter channel name"
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-channel-description">Description:</label>
-				<textarea 
-					id="edit-channel-description"
-					bind:value={editChannel.description} 
-					placeholder="Channel description (optional)"
-					rows="3"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-channel-prompt">Agent Prompt:</label>
-				<textarea 
-					id="edit-channel-prompt"
-					bind:value={editChannel.promptForAgents} 
-					placeholder="When should agents use this channel? (optional)"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={editChannel.isMainChannel}
-					/>
-					Set as main channel
-				</label>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={editChannel.isForHumanDirector}
-					/>
-					👤 For Human Director communication
-				</label>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeEditChannelDialog}>Cancel</button>
-				<button class="create-btn" on:click={updateChannel} disabled={!editChannel.name.trim() || !editChannel.id.trim()}>
-					Update Channel
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showCreatePromptDialog}
-	<div class="dialog-overlay" on:click={closeCreatePromptDialog}>
-		<div class="dialog large-dialog" on:click|stopPropagation>
-			<h3>Create New Prompt</h3>
-			
-			<div class="form-group">
-				<label for="prompt-name">Name:</label>
-				<input 
-					id="prompt-name"
-					type="text" 
-					bind:value={newPrompt.name} 
-					placeholder="Enter prompt name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-type">Type:</label>
-				<select 
-					id="prompt-type"
-					bind:value={newPrompt.type}
-				>
-					<option value="system_intro">System Introduction - Agent startup and identity</option>
-					<option value="role_description">Role Description - Detailed role responsibilities and scope</option>
-					<option value="communication">Communication - Team interaction and messaging protocols</option>
-					<option value="channel_instructions">Channel Instructions - When to use specific channels</option>
-					<option value="worktree_workflow">Worktree Workflow - Code management and Git workflows</option>
-					<option value="company_workflow">Company Workflow - Business processes and standards</option>
-					<option value="custom">Custom - General purpose prompts</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-content">Content:</label>
-				<textarea 
-					id="prompt-content"
-					bind:value={newPrompt.content} 
-					placeholder="Enter prompt content..."
-					rows="12"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="prompt-order">Order Index:</label>
-				<input 
-					id="prompt-order"
-					type="number" 
-					bind:value={newPrompt.orderIndex} 
-					placeholder="0"
-					min="0"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeCreatePromptDialog}>Cancel</button>
-				<button class="create-btn" on:click={createPrompt} disabled={!newPrompt.name.trim() || !newPrompt.content.trim()}>
-					Create Prompt
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showAddPromptToRoleDialog}
-	<div class="dialog-overlay" on:click={() => showAddPromptToRoleDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Add Prompt to Role: {selectedRole?.name}</h3>
-			
-			{#if availablePromptsForRole.length > 0}
-				<div class="form-group">
-					<label>Select a prompt to assign to this role:</label>
-					<div class="prompt-selection-list">
-						{#each availablePromptsForRole as prompt}
-							<div class="prompt-selection-item">
-								<div class="prompt-info">
-									<h4>{prompt.name}</h4>
-									<span class="prompt-type-badge">{prompt.type.replace(/_/g, ' ')}</span>
-									<p class="prompt-preview">{prompt.content.substring(0, 150)}...</p>
-								</div>
-								<button 
-									class="btn-primary" 
-									on:click={() => assignPromptToRole(prompt.id)}
-								>
-									Assign
-								</button>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{:else}
-				<div class="empty-state">
-					<p>No available prompts to assign. All custom prompts are either already assigned to this role or no custom prompts exist.</p>
-					<p>Create new prompts in the Prompts section to assign them to roles.</p>
-				</div>
-			{/if}
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showAddPromptToRoleDialog = false}>Cancel</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showEditPromptDialog}
-	<div class="dialog-overlay" on:click={closeEditPromptDialog}>
-		<div class="dialog large-dialog" on:click|stopPropagation>
-			<h3>Edit Prompt</h3>
-			
-			<div class="form-group">
-				<label for="edit-prompt-name">Name:</label>
-				<input 
-					id="edit-prompt-name"
-					type="text" 
-					bind:value={editPrompt.name} 
-					placeholder="Enter prompt name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-type">Type:</label>
-				<select 
-					id="edit-prompt-type"
-					bind:value={editPrompt.type}
-				>
-					<option value="system_intro">System Introduction - Agent startup and identity</option>
-					<option value="role_description">Role Description - Detailed role responsibilities and scope</option>
-					<option value="communication">Communication - Team interaction and messaging protocols</option>
-					<option value="channel_instructions">Channel Instructions - When to use specific channels</option>
-					<option value="worktree_workflow">Worktree Workflow - Code management and Git workflows</option>
-					<option value="company_workflow">Company Workflow - Business processes and standards</option>
-					<option value="custom">Custom - General purpose prompts</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-content">Content:</label>
-				<textarea 
-					id="edit-prompt-content"
-					bind:value={editPrompt.content} 
-					placeholder="Enter prompt content..."
-					rows="12"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-prompt-order">Order Index:</label>
-				<input 
-					id="edit-prompt-order"
-					type="number" 
-					bind:value={editPrompt.orderIndex} 
-					placeholder="0"
-					min="0"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeEditPromptDialog}>Cancel</button>
-				<button class="create-btn" on:click={updatePrompt} disabled={!editPrompt.name.trim() || !editPrompt.content.trim()}>
-					Update Prompt
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showUpdateTemplateDialog}
-	<div class="dialog-overlay" on:click={() => showUpdateTemplateDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>⚠️ Update Template</h3>
-			
-			{#if selectedPromptForTemplate}
-				<div class="warning-section">
-					<div class="warning-box">
-						<p><strong>Are you sure you want to update the template?</strong></p>
-						<p>This will update the original template with the current content of this prompt.</p>
-						<p><strong>Template:</strong> {selectedPromptForTemplate.name}</p>
-						<p><strong>Type:</strong> {selectedPromptForTemplate.type}</p>
-					</div>
-					
-					<div class="template-impact">
-						<h4>⚠️ Impact:</h4>
-						<ul>
-							<li>All existing prompts created from this template will <strong>NOT</strong> be automatically updated</li>
-							<li>Only new prompts created from this template will use the updated content</li>
-							<li>This action cannot be easily undone</li>
-						</ul>
-					</div>
-
-					<div class="content-preview">
-						<h4>New Template Content:</h4>
-						<div class="preview-box">
-							{selectedPromptForTemplate.content.substring(0, 300)}{#if selectedPromptForTemplate.content.length > 300}...{/if}
-						</div>
-					</div>
-				</div>
-			{/if}
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showUpdateTemplateDialog = false}>Cancel</button>
-				<button class="btn-warning" on:click={updateTemplate}>
-					Yes, Update Template
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showReplyDialog}
-	<div class="dialog-overlay" on:click={closeReplyDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Reply to Message</h3>
-			
-			{#if selectedMessage}
-				<div class="reply-context">
-					<div class="original-message">
-						<div class="original-header">
-							<span class="message-icon">{getMessageIcon(selectedMessage)}</span>
-							<span class="message-source">
-								{#if selectedMessage.isDM}
-									DM from {selectedMessage.authorAgentId}
-								{:else}
-									#{selectedMessage.channelName}
-								{/if}
-							</span>
-							<span class="message-time">{formatTimeAgo(selectedMessage.createdAt)}</span>
-						</div>
-						<div class="original-content">
-							<p>{selectedMessage.body}</p>
-						</div>
-					</div>
-				</div>
-			{/if}
-			
-			<div class="form-group">
-				<label for="reply-content">Your Reply:</label>
-				<textarea 
-					id="reply-content"
-					bind:value={replyContent} 
-					placeholder="Type your reply..."
-					rows="6"
-					autofocus
-				></textarea>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeReplyDialog}>Cancel</button>
-				<button class="create-btn" on:click={sendReply} disabled={!replyContent.trim()}>
-					Send Reply
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showSendMessageDialog}
-	<div class="dialog-overlay" on:click={() => showSendMessageDialog = false}>
-		<div class="dialog dialog-large" on:click|stopPropagation>
-			<h3>✉️ Send New Message</h3>
-			
-			<div class="form-group">
-				<label for="message-type">Message Type:</label>
-				<select id="message-type" bind:value={newMessage.type}>
-					<option value="message">Message</option>
-					<option value="announcement">Announcement</option>
-					<option value="document">Document</option>
-				</select>
-			</div>
-
-			<div class="form-group">
-				<label for="message-channel">Channel (Optional):</label>
-				<select id="message-channel" bind:value={newMessage.channelId}>
-					<option value={null}>No Channel (Direct Assignment)</option>
-					{#each channels as channel}
-						<option value={channel.id}>#{channel.name}</option>
-					{/each}
-				</select>
-			</div>
-
-			<div class="form-group">
-				<label for="message-title">Title:</label>
-				<input 
-					id="message-title"
-					type="text" 
-					bind:value={newMessage.title}
-					placeholder="Message title..."
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="message-body">Message Content:</label>
-				<textarea 
-					id="message-body"
-					bind:value={newMessage.body} 
-					placeholder="Type your message..."
-					rows="8"
-					autofocus
-				></textarea>
-			</div>
-
-			<div class="form-group">
-				<label>Reading Assignments:</label>
-				<div class="reading-assignments-section">
-					{#each messageReadingAssignments as assignment, index}
-						<div class="assignment-item">
-							<select bind:value={assignment.assignedToType} on:change={() => assignment.assignedTo = ''}>
-								<option value="role">Role</option>
-								<option value="agent">Agent</option>
-								<option value="squad">Squad</option>
-							</select>
-							
-							{#if assignment.assignedToType === 'role'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Role...</option>
-									{#each roles as role}
-										<option value={role.name}>{role.name}</option>
-									{/each}
-								</select>
-							{:else if assignment.assignedToType === 'agent'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Agent...</option>
-									{#each agents as agent}
-										<option value={agent.id}>{agent.id} ({agent.roleType})</option>
-									{/each}
-								</select>
-							{:else if assignment.assignedToType === 'squad'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Squad...</option>
-									{#each squads as squad}
-										<option value={squad.id}>{squad.name}</option>
-									{/each}
-								</select>
-							{/if}
-							
-							<button 
-								class="btn-remove"
-								on:click={() => removeReadingAssignment(index)}
-							>×</button>
-						</div>
-					{/each}
-					
-					<button 
-						class="btn-secondary btn-sm"
-						on:click={addReadingAssignment}
-					>+ Add Assignment</button>
-				</div>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showSendMessageDialog = false}>Cancel</button>
-				<button 
-					class="create-btn" 
-					on:click={sendMessage} 
-					disabled={!newMessage.body.trim()}
-				>
-					Send Message
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showCreatePhaseDialog}
-	<div class="dialog-overlay" on:click={() => showCreatePhaseDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Create New Phase</h3>
-			
-			<div class="form-group">
-				<label for="phase-role">Role Type:</label>
-				<select 
-					id="phase-role"
-					bind:value={newPhase.roleType}
-				>
-					<option value="backend_developer">Backend Developer</option>
-					<option value="frontend_developer">Frontend Developer</option>
-					<option value="product_manager">Product Manager</option>
-					<option value="architect">Architect</option>
-					<option value="lead_developer">Lead Developer</option>
-					<option value="ai_developer">AI Developer</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="phase-title">Title:</label>
-				<input 
-					id="phase-title"
-					type="text" 
-					bind:value={newPhase.title} 
-					placeholder="Enter phase title"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="phase-body">Description:</label>
-				<textarea 
-					id="phase-body"
-					bind:value={newPhase.body} 
-					placeholder="Describe what this phase involves..."
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="phase-inputs">Required Inputs (Document Slugs):</label>
-				<input 
-					id="phase-inputs"
-					type="text" 
-					bind:value={newPhase.requiredInputs} 
-					placeholder="pm-spec-document, design-wireframes (comma-separated slugs)"
-				/>
-				<small class="form-help">Optional: Document slugs that must be completed before this phase can start</small>
-			</div>
-			
-			<div class="form-group">
-				<label for="phase-outputs">Expected Outputs (Document Slugs):</label>
-				<input 
-					id="phase-outputs"
-					type="text" 
-					bind:value={newPhase.expectedOutputs} 
-					placeholder="api-documentation, database-schema (comma-separated slugs)"
-				/>
-				<small class="form-help">Optional: Document slugs that this phase will produce</small>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showCreatePhaseDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={createPhase} disabled={!newPhase.title.trim()}>
-					Create Phase
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- Squad Management Modals -->
-{#if showCreateSquadDialog}
-	<div class="dialog-overlay" on:click={() => showCreateSquadDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Create New Squad</h3>
-			
-			<div class="form-group">
-				<label for="squad-id">Squad ID:</label>
-				<input 
-					id="squad-id"
-					type="text" 
-					bind:value={newSquad.squadId} 
-					placeholder="e.g., leadership, core-team, frontend-team"
-					autofocus
-				/>
-				<small class="form-help">Unique identifier for the squad (lowercase, use hyphens)</small>
-			</div>
-			
-			<div class="form-group">
-				<label for="squad-name">Squad Name:</label>
-				<input 
-					id="squad-name"
-					type="text" 
-					bind:value={newSquad.name} 
-					placeholder="e.g., Leadership Team, Core Development Team"
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showCreateSquadDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={createSquad} disabled={!newSquad.name.trim() || !newSquad.squadId.trim()}>
-					Create Squad
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showEditSquadDialog}
-	<div class="dialog-overlay" on:click={() => showEditSquadDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Edit Squad</h3>
-			
-			<div class="form-group">
-				<label for="edit-squad-name">Squad Name:</label>
-				<input 
-					id="edit-squad-name"
-					type="text" 
-					bind:value={editSquad.name} 
-					placeholder="Squad name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showEditSquadDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={updateSquad} disabled={!editSquad.name.trim()}>
-					Update Squad
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showDeleteSquadDialog}
-	<div class="dialog-overlay" on:click={() => showDeleteSquadDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Delete Squad</h3>
-			<p>Are you sure you want to delete the squad "{deleteSquadName}"?</p>
-			<p><strong>Warning:</strong> This will also remove all role assignments from this squad.</p>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showDeleteSquadDialog = false}>Cancel</button>
-				<button class="delete-btn" on:click={deleteSquad}>
-					Delete Squad
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showAssignRoleDialog}
-	<div class="dialog-overlay" on:click={() => showAssignRoleDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Assign Role to Squad</h3>
-			
-			{#if availableRolesForSquad.length === 0}
-				<p>No available roles to assign. All roles are already assigned to this squad.</p>
-				<div class="dialog-buttons">
-					<button class="cancel-btn" on:click={() => showAssignRoleDialog = false}>Close</button>
-				</div>
-			{:else}
-				<div class="form-group">
-					<label>Select a role to assign:</label>
-					<div class="role-options">
-						{#each availableRolesForSquad as role}
-							<button 
-								class="role-option"
-								on:click={() => assignRoleToSquad(role.id)}
-							>
-								<div class="role-name">{role.name}</div>
-								<div class="role-preview">{role.content?.substring(0, 100)}...</div>
-							</button>
-						{/each}
-					</div>
-				</div>
-				<div class="dialog-buttons">
-					<button class="cancel-btn" on:click={() => showAssignRoleDialog = false}>Cancel</button>
-				</div>
-			{/if}
-		</div>
-	</div>
-{/if}
-
-<!-- Documents Modals -->
-{#if showCreateDocumentDialog}
-	<div class="dialog-overlay" on:click={() => showCreateDocumentDialog = false}>
-		<div class="dialog large" on:click|stopPropagation>
-			<h3>Create New Document</h3>
-			
-			<div class="form-group">
-				<label for="document-title">Title:</label>
-				<input 
-					id="document-title"
-					type="text" 
-					bind:value={newDocument.title} 
-					placeholder="Document title"
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="document-slug">Document Slug (optional):</label>
-				<input 
-					id="document-slug"
-					type="text" 
-					bind:value={newDocument.documentSlug} 
-					placeholder="document-slug"
-				/>
-				<small class="form-help">Unique identifier for this document</small>
-			</div>
-			
-			<div class="form-group">
-				<label for="document-body">Content:</label>
-				<textarea 
-					id="document-body"
-					bind:value={newDocument.body} 
-					placeholder="Document content..."
-					rows="10"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="document-squad">Squad (optional):</label>
-				<select 
-					id="document-squad"
-					bind:value={newDocument.squadId}
-				>
-					<option value="">None</option>
-					{#each squads as squad}
-						<option value={squad.id}>{squad.name}</option>
-					{/each}
-				</select>
-			</div>
-
-			<!-- Reading Assignments Section -->
-			<div class="form-group">
-				<label>Reading Assignments:</label>
-				<div class="reading-assignments-section">
-					{#each documentReadingAssignments as assignment, index}
-						<div class="assignment-item">
-							<select bind:value={assignment.assignedToType} on:change={() => assignment.assignedTo = ''}>
-								<option value="role">Role</option>
-								<option value="agent">Agent</option>
-								<option value="squad">Squad</option>
-							</select>
-							
-							{#if assignment.assignedToType === 'role'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Role...</option>
-									{#each roles as role}
-										<option value={role.name}>{role.name}</option>
-									{/each}
-								</select>
-							{:else if assignment.assignedToType === 'agent'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Agent...</option>
-									{#each agents as agent}
-										<option value={agent.name}>{agent.name}</option>
-									{/each}
-								</select>
-							{:else if assignment.assignedToType === 'squad'}
-								<select bind:value={assignment.assignedTo}>
-									<option value="">Select Squad...</option>
-									{#each squads as squad}
-										<option value={squad.name}>{squad.name}</option>
-									{/each}
-								</select>
-							{/if}
-							
-							<button class="remove-btn" on:click={() => removeDocumentReadingAssignment(index)}>×</button>
-						</div>
-					{/each}
-					
-					<button class="add-assignment-btn" on:click={addDocumentReadingAssignment}>
-						+ Add Reading Assignment
-					</button>
-				</div>
-				<small class="form-help">Assign specific agents, roles, or squads to read this document</small>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showCreateDocumentDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={createDocument} disabled={!newDocument.title.trim() || !newDocument.body.trim()}>
-					Create Document
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-{#if showReplyToDocumentDialog}
-	<div class="dialog-overlay" on:click={() => showReplyToDocumentDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>{replyToContentId ? 'Reply to Comment' : 'Add Comment'}</h3>
-			
-			<div class="form-group">
-				<label for="reply-content">Comment:</label>
-				<textarea 
-					id="reply-content"
-					bind:value={documentReplyContent} 
-					placeholder="Write your comment..."
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showReplyToDocumentDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={replyToDocument} disabled={!documentReplyContent.trim()}>
-					Post Comment
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- Create Scheduled Reminder Dialog -->
-{#if showCreateReminderDialog}
-	<div class="dialog-overlay" on:click={() => showCreateReminderDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Create Scheduled Reminder</h3>
-			
-			<div class="form-group">
-				<label for="reminder-name">Name:</label>
-				<input 
-					id="reminder-name"
-					type="text" 
-					bind:value={newReminder.name} 
-					placeholder="Enter reminder name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="reminder-role">Target Role:</label>
-				<select id="reminder-role" bind:value={newReminder.targetRoleType}>
-					<option value="">Select a role</option>
-					<option value="Backend Developer">Backend Developer</option>
-					<option value="Frontend Developer">Frontend Developer</option>
-					<option value="AI Developer">AI Developer</option>
-					<option value="UX Expert">UX Expert</option>
-					<option value="Graphic Designer">Graphic Designer</option>
-					<option value="Technical QA">Technical QA</option>
-					<option value="Product Manager">Product Manager</option>
-					<option value="Lead Developer">Lead Developer</option>
-					<option value="System Architect">System Architect</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="reminder-frequency">Frequency (minutes):</label>
-				<select id="reminder-frequency" bind:value={newReminder.frequencyMinutes}>
-					<option value={5}>Every 5 minutes</option>
-					<option value={15}>Every 15 minutes</option>
-					<option value={30}>Every 30 minutes</option>
-					<option value={60}>Every hour</option>
-					<option value={120}>Every 2 hours</option>
-					<option value={240}>Every 4 hours</option>
-					<option value={480}>Every 8 hours</option>
-					<option value={1440}>Every day</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="reminder-message">Message:</label>
-				<textarea 
-					id="reminder-message"
-					bind:value={newReminder.message} 
-					placeholder="Enter the reminder message to send to the role"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={newReminder.isActive}
-					/>
-					Active (start sending immediately)
-				</label>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showCreateReminderDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={createReminder} disabled={!newReminder.name.trim() || !newReminder.targetRoleType || !newReminder.message.trim()}>
-					Create Reminder
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- Edit Scheduled Reminder Dialog -->
-{#if showEditReminderDialog}
-	<div class="dialog-overlay" on:click={() => showEditReminderDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Edit Scheduled Reminder</h3>
-			
-			<div class="form-group">
-				<label for="edit-reminder-name">Name:</label>
-				<input 
-					id="edit-reminder-name"
-					type="text" 
-					bind:value={editReminder.name} 
-					placeholder="Enter reminder name"
-					autofocus
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-reminder-role">Target Role:</label>
-				<select id="edit-reminder-role" bind:value={editReminder.targetRoleType}>
-					<option value="">Select a role</option>
-					<option value="Backend Developer">Backend Developer</option>
-					<option value="Frontend Developer">Frontend Developer</option>
-					<option value="AI Developer">AI Developer</option>
-					<option value="UX Expert">UX Expert</option>
-					<option value="Graphic Designer">Graphic Designer</option>
-					<option value="Technical QA">Technical QA</option>
-					<option value="Product Manager">Product Manager</option>
-					<option value="Lead Developer">Lead Developer</option>
-					<option value="System Architect">System Architect</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-reminder-frequency">Frequency (minutes):</label>
-				<select id="edit-reminder-frequency" bind:value={editReminder.frequencyMinutes}>
-					<option value={5}>Every 5 minutes</option>
-					<option value={15}>Every 15 minutes</option>
-					<option value={30}>Every 30 minutes</option>
-					<option value={60}>Every hour</option>
-					<option value={120}>Every 2 hours</option>
-					<option value={240}>Every 4 hours</option>
-					<option value={480}>Every 8 hours</option>
-					<option value={1440}>Every day</option>
-				</select>
-			</div>
-			
-			<div class="form-group">
-				<label for="edit-reminder-message">Message:</label>
-				<textarea 
-					id="edit-reminder-message"
-					bind:value={editReminder.message} 
-					placeholder="Enter the reminder message to send to the role"
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label class="checkbox-label">
-					<input 
-						type="checkbox" 
-						bind:checked={editReminder.isActive}
-					/>
-					Active (start sending immediately)
-				</label>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showEditReminderDialog = false}>Cancel</button>
-				<button class="create-btn" on:click={updateReminder} disabled={!editReminder.name.trim() || !editReminder.targetRoleType || !editReminder.message.trim()}>
-					Update Reminder
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
 <style>
 	.app {
 		height: 100vh;
@@ -6555,6 +5071,214 @@ Status: ACTIVE - Ready to assist with full authority`,
 		flex-direction: column;
 		overflow: hidden;
 	}
+	
+	/* Clean Professional Messages Interface */
+	.messages-view-clean {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		overflow: hidden;
+	}
+	
+	.messages-toolbar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 16px 0;
+		border-bottom: 1px solid #e5e5e5;
+		margin-bottom: 16px;
+	}
+	
+	.toolbar-left {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	
+	.toolbar-left h3 {
+		margin: 0;
+		font-size: 18px;
+		font-weight: 600;
+		color: #333;
+	}
+	
+	.message-count {
+		background: #f0f0f0;
+		color: #666;
+		padding: 4px 8px;
+		border-radius: 12px;
+		font-size: 12px;
+		font-weight: 500;
+	}
+	
+	.toolbar-right {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+	}
+	
+	.search-input {
+		padding: 8px 12px;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 14px;
+		width: 200px;
+	}
+	
+	.filter-select {
+		padding: 8px 12px;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 14px;
+		background: white;
+		min-width: 120px;
+	}
+	
+	.messages-table {
+		flex: 1;
+		overflow-y: auto;
+		background: white;
+		border-radius: 8px;
+		border: 1px solid #e5e5e5;
+	}
+	
+	.message-row {
+		display: grid;
+		grid-template-columns: 120px 100px 1fr 80px 100px 80px;
+		gap: 16px;
+		padding: 12px 16px;
+		border-bottom: 1px solid #f0f0f0;
+		align-items: center;
+		font-size: 14px;
+		transition: background-color 0.15s ease;
+	}
+	
+	.message-row:hover {
+		background: #f8f9fa;
+	}
+	
+	.message-row.unread {
+		background: #fafbff;
+		border-left: 3px solid #4285f4;
+	}
+	
+	.message-sender {
+		font-weight: 600;
+		color: #333;
+		font-size: 13px;
+	}
+	
+	.message-channel {
+		color: #666;
+		font-size: 12px;
+		font-family: monospace;
+	}
+	
+	.message-content {
+		overflow: hidden;
+	}
+	
+	.message-subject {
+		font-weight: 500;
+		color: #333;
+		margin-bottom: 2px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	
+	.message-preview {
+		color: #666;
+		font-size: 12px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	
+	.message-status {
+		text-align: center;
+	}
+	
+	.read-status {
+		background: #f0f0f0;
+		color: #666;
+		padding: 2px 6px;
+		border-radius: 10px;
+		font-size: 11px;
+		font-weight: 500;
+		display: inline-block;
+		min-width: 35px;
+	}
+	
+	.read-status.complete {
+		background: #e8f5e8;
+		color: #2e7d2e;
+	}
+	
+	.read-status.none {
+		background: transparent;
+		color: #ccc;
+	}
+	
+	.message-time {
+		color: #999;
+		font-size: 12px;
+		text-align: right;
+	}
+	
+	.message-actions {
+		text-align: right;
+	}
+	
+	.action-btn {
+		background: transparent;
+		border: 1px solid #ddd;
+		color: #666;
+		padding: 4px 8px;
+		border-radius: 4px;
+		font-size: 12px;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+	
+	.action-btn:hover {
+		background: #f0f0f0;
+		border-color: #ccc;
+	}
+	
+	.reply-btn:hover {
+		background: #e3f2fd;
+		border-color: #2196f3;
+		color: #2196f3;
+	}
+	
+	.empty-state-clean {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 60px 20px;
+		color: #666;
+		text-align: center;
+		flex: 1;
+	}
+	
+	.empty-icon {
+		font-size: 48px;
+		margin-bottom: 16px;
+		opacity: 0.5;
+	}
+	
+	.empty-state-clean h4 {
+		margin: 0 0 8px 0;
+		color: #333;
+		font-weight: 500;
+	}
+	
+	.empty-state-clean p {
+		margin: 0;
+		font-size: 14px;
+	}
 
 	.comms-stats {
 		display: flex;
@@ -7602,6 +6326,126 @@ Status: ACTIVE - Ready to assist with full authority`,
 		line-height: 1.3;
 	}
 
+	/* Monitoring Service Styles */
+	.monitoring-section {
+		margin: 24px 0;
+		padding: 20px;
+		border: 1px solid #e5e5e5;
+		border-radius: 8px;
+		background: #f9f9ff;
+	}
+
+	.monitoring-section h3 {
+		margin: 0 0 16px 0;
+		color: #333;
+	}
+
+	.monitoring-controls {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 16px;
+	}
+
+	.monitoring-status {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-weight: 500;
+	}
+
+	.status-indicator {
+		width: 12px;
+		height: 12px;
+		border-radius: 50%;
+		background: #dc3545;
+		transition: background 0.3s ease;
+	}
+
+	.status-indicator.active {
+		background: #28a745;
+		animation: pulse 2s infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.5; }
+	}
+
+	.monitoring-actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.btn-start {
+		padding: 6px 12px;
+		background: #28a745;
+		color: white;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+
+	.btn-start:hover {
+		background: #218838;
+	}
+
+	.btn-stop {
+		padding: 6px 12px;
+		background: #dc3545;
+		color: white;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+
+	.btn-stop:hover {
+		background: #c82333;
+	}
+
+	.btn-refresh {
+		padding: 6px 12px;
+		background: #6c757d;
+		color: white;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+
+	.btn-refresh:hover {
+		background: #545b62;
+	}
+
+	.monitoring-stats {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 12px;
+		padding: 16px;
+		background: white;
+		border-radius: 6px;
+		border: 1px solid #e0e0e0;
+	}
+
+	.stat-item {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.stat-label {
+		font-size: 12px;
+		color: #666;
+		font-weight: 500;
+	}
+
+	.stat-value {
+		font-size: 16px;
+		font-weight: bold;
+		color: #333;
+	}
 
 	/* Send Message Dialog Styles */
 	.dialog-large {
