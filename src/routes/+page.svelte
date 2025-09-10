@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import OverviewSection from '$lib/components/OverviewSection.svelte';
+	import RolesSection from '$lib/components/RolesSection.svelte';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -13,10 +14,6 @@
 	let currentSection = 'overview'; // 'overview', 'roles', 'prompts', 'documents', 'scheduled-reminders'
 	let roles: any[] = [];
 	let selectedRole: any = null;
-	let rolePrompts: any[] = [];
-	let roleChannels: any = null;
-	let roleFinalPrompt: string = '';
-	let draggedIndex: number | null = null;
 	let agents: any[] = [];
 	let selectedAgent: any = null;
 	let agentOutput: string = '';
@@ -45,8 +42,6 @@
 	let editReminder = { id: 0, name: '', targetRoleType: '', message: '', frequencyMinutes: 15, isActive: true };
 	let showCreatePromptDialog = false;
 	let showEditPromptDialog = false;
-	let showAddPromptToRoleDialog = false;
-	let availablePromptsForRole: any[] = [];
 	let showUpdateTemplateDialog = false;
 	let selectedPromptForTemplate: any = null;
 	let newPrompt = { name: '', type: 'custom', content: '', premade: null, orderIndex: 0 };
@@ -167,7 +162,6 @@
 				projects = await response.json();
 				if (projects.length > 0 && !selectedProject) {
 					selectedProject = projects[0];
-					await loadRoles();
 				}
 			}
 		} catch (error) {
@@ -175,218 +169,18 @@
 		}
 	}
 
-	async function loadRoles() {
-		if (!selectedProject) {
-			roles = [];
-			return;
-		}
-		
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/roles`);
-			if (response.ok) {
-				roles = await response.json();
-				selectedRole = roles.length > 0 ? roles[0] : null;
-				// Set default selectedRoleType for agents section if not already set
-				if (roles.length > 0 && !selectedRoleType) {
-					selectedRoleType = roles[0].name;
-				}
-				if (selectedRole) {
-					await loadRolePrompts();
-				}
-			}
-		} catch (error) {
-			console.error('Failed to load roles:', error);
-			roles = [];
-		}
-	}
 
-	async function loadRolePrompts() {
-		if (!selectedRole) {
-			rolePrompts = [];
-			roleChannels = null;
-			roleFinalPrompt = '';
-			return;
-		}
-		
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/prompts`);
-			if (response.ok) {
-				rolePrompts = await response.json();
-			}
-		} catch (error) {
-			console.error('Failed to load role prompts:', error);
-			rolePrompts = [];
-		}
-		
-		// Load the final combined prompt
-		await loadRoleFinalPrompt();
-		
-		// Also load role channels
-		await loadRoleChannels();
-	}
 
-	async function loadRoleFinalPrompt() {
-		if (!selectedRole) {
-			roleFinalPrompt = '';
-			return;
-		}
-		
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/final-prompt`);
-			if (response.ok) {
-				const data = await response.json();
-				roleFinalPrompt = data.finalPrompt;
-			}
-		} catch (error) {
-			console.error('Failed to load final prompt:', error);
-			roleFinalPrompt = 'Error loading final prompt';
-		}
-	}
 
-	async function loadRoleChannels() {
-		if (!selectedRole) {
-			roleChannels = null;
-			return;
-		}
-		
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/channels`);
-			if (response.ok) {
-				roleChannels = await response.json();
-			}
-		} catch (error) {
-			console.error('Failed to load role channels:', error);
-			roleChannels = null;
-		}
-	}
 
-	async function addChannelToRole(channelId: number) {
-		if (!selectedRole) return;
-		
-		try {
-			const response = await fetch(`/api/channels/${channelId}/roles`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ roleId: selectedRole.id.toString() })
-			});
-			if (response.ok) {
-				await loadRoleChannels(); // Refresh the channel assignments
-			}
-		} catch (error) {
-			console.error('Failed to add channel to role:', error);
-		}
-	}
 
-	async function removeChannelFromRole(assignmentId: number) {
-		if (!selectedRole) return;
-		
-		try {
-			// We need to find the channel ID from the assignment
-			const assignedChannel = roleChannels?.assignedChannels?.find(c => c.assignmentId === assignmentId);
-			if (!assignedChannel) return;
-			
-			const response = await fetch(`/api/channels/${assignedChannel.channelId}/roles/${assignmentId}`, {
-				method: 'DELETE'
-			});
-			if (response.ok) {
-				await loadRoleChannels(); // Refresh the channel assignments
-			}
-		} catch (error) {
-			console.error('Failed to remove channel from role:', error);
-		}
-	}
 
-	async function refreshSelectedRoleContent() {
-		if (!selectedRole) return;
-		
-		const currentRoleId = selectedRole.id;
-		
-		try {
-			// Reload all roles to get updated content
-			const response = await fetch(`/api/projects/${selectedProject.id}/roles`);
-			if (response.ok) {
-				roles = await response.json();
-				// Find and restore the previously selected role
-				selectedRole = roles.find(role => role.id === currentRoleId) || null;
-			}
-		} catch (error) {
-			console.error('Failed to refresh role content:', error);
-		}
-	}
 
-	// Prompt assignment functions
-	async function openAddPromptToRoleDialog() {
-		if (!selectedProject) return;
-		
-		try {
-			// Load all available custom prompts that are not already assigned to this role
-			const response = await fetch(`/api/prompts?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const data = await response.json();
-				
-				// Filter out prompts that are already assigned to this role
-				const currentPromptIds = rolePrompts.filter(p => p.source === 'role').map(p => p.id);
-				availablePromptsForRole = data.prompts.filter(prompt => !currentPromptIds.includes(prompt.id));
-				
-				showAddPromptToRoleDialog = true;
-			}
-		} catch (error) {
-			console.error('Failed to load available prompts:', error);
-		}
-	}
 
-	async function assignPromptToRole(promptId: number) {
-		if (!selectedRole || !promptId) return;
-		
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/prompts/assign`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ promptId })
-			});
-			
-			if (response.ok) {
-				await loadRolePrompts();
-				await loadRoleFinalPrompt();
-				showAddPromptToRoleDialog = false;
-			} else {
-				const error = await response.json();
-				console.error('Failed to assign prompt to role:', error.error);
-			}
-		} catch (error) {
-			console.error('Failed to assign prompt to role:', error);
-		}
-	}
 
-	async function removePromptFromRole(promptId: number) {
-		if (!selectedRole || !promptId) return;
-		
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/prompts/unassign`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ promptId })
-			});
-			
-			if (response.ok) {
-				await loadRolePrompts();
-				await loadRoleFinalPrompt();
-			} else {
-				const error = await response.json();
-				console.error('Failed to remove prompt from role:', error.error);
-			}
-		} catch (error) {
-			console.error('Failed to remove prompt from role:', error);
-		}
-	}
 
-	async function onRoleSelect(role: any) {
-		selectedRole = role;
-		await loadRolePrompts();
-	}
 
 	async function onProjectChange() {
-		await loadRoles();
 		await loadPhases();
 		currentSection = 'overview';
 	}
@@ -718,7 +512,6 @@
 				closeDeleteDialog();
 				// Refresh data for the newly selected project
 				if (selectedProject) {
-					await loadRoles();
 					await loadChannels();
 					await loadSquads();
 					await loadPrompts();
@@ -734,66 +527,6 @@
 		}
 	}
 
-	// Drag and drop functions
-	function handleDragStart(event: DragEvent, index: number) {
-		draggedIndex = index;
-		if (event.dataTransfer) {
-			event.dataTransfer.effectAllowed = 'move';
-		}
-	}
-
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		if (event.dataTransfer) {
-			event.dataTransfer.dropEffect = 'move';
-		}
-	}
-
-	function handleDrop(event: DragEvent, targetIndex: number) {
-		event.preventDefault();
-		
-		if (draggedIndex === null || draggedIndex === targetIndex) {
-			draggedIndex = null;
-			return;
-		}
-
-		// Reorder the prompts array
-		const reorderedPrompts = [...rolePrompts];
-		const [draggedItem] = reorderedPrompts.splice(draggedIndex, 1);
-		reorderedPrompts.splice(targetIndex, 0, draggedItem);
-
-		// Update orderIndex for each prompt
-		reorderedPrompts.forEach((prompt, index) => {
-			prompt.orderIndex = index;
-		});
-
-		rolePrompts = reorderedPrompts;
-		draggedIndex = null;
-
-		// Save the new order to the server
-		savePromptOrder();
-	}
-
-	async function savePromptOrder() {
-		if (!selectedRole) return;
-
-		try {
-			const response = await fetch(`/api/roles/${selectedRole.id}/prompts`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ prompts: rolePrompts })
-			});
-
-			if (response.ok) {
-				// Reload just the prompts for the current role (preserves selectedRole)
-				await loadRolePrompts();
-				// Also refresh the role content to show updated combined prompts
-				await refreshSelectedRoleContent();
-			}
-		} catch (error) {
-			console.error('Failed to save prompt order:', error);
-		}
-	}
 
 	// Agent management functions
 	async function loadAgents() {
@@ -2111,7 +1844,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 				<button 
 					class="nav-btn" 
 					class:active={currentSection === 'agents'}
-					on:click={() => { currentSection = 'agents'; loadRoles(); loadAgents(); }}
+					on:click={() => { currentSection = 'agents'; loadAgents(); }}
 				>
 					Agents
 				</button>
@@ -2172,156 +1905,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 			{#if currentSection === 'overview'}
 				<OverviewSection {selectedProject} bind:monitoringStatus />
 			{:else if currentSection === 'roles'}
-				<div class="roles-section">
-					<div class="section-header">
-						<div class="role-controls">
-							<select bind:value={selectedRole} on:change={() => loadRolePrompts()} class="role-selector">
-								{#if roles.length === 0}
-									<option value={null}>No roles</option>
-								{:else}
-									{#each roles as role}
-										<option value={role}>{role.name}</option>
-									{/each}
-								{/if}
-							</select>
-							
-						</div>
-					</div>
-					
-					{#if selectedRole}
-						<div class="role-content">
-							<h4>Final Role Prompt (All Components)</h4>
-							<textarea 
-								bind:value={roleFinalPrompt}
-								class="role-textarea"
-								readonly
-								rows="20"
-							></textarea>
-							
-							<div class="section-header-with-action">
-								<h4>Prompt Composition</h4>
-								{#if selectedRole}
-									<button class="btn-secondary" on:click={openAddPromptToRoleDialog}>
-										➕ Add Prompt
-									</button>
-								{/if}
-							</div>
-							<div class="prompt-composition">
-								{#if rolePrompts.length > 0}
-									{#each rolePrompts as prompt, index}
-										<div 
-											class="prompt-item"
-											class:dragging={draggedIndex === index}
-											draggable="true"
-											on:dragstart={(e) => handleDragStart(e, index)}
-											on:dragover={handleDragOver}
-											on:drop={(e) => handleDrop(e, index)}
-										>
-											<div class="prompt-header">
-												<span class="prompt-order">#{index + 1}</span>
-												<span class="prompt-name">{prompt.name}</span>
-												{#if prompt.isPremade || prompt.premade}
-													<span class="prompt-badge premade">Premade</span>
-												{:else}
-													<span class="prompt-badge custom">Role Description</span>
-												{/if}
-												{#if prompt.source === 'role'}
-													<span class="prompt-badge source-role">Role: {selectedRole?.name || 'Unknown'}</span>
-												{:else if prompt.source === 'squad'}
-													<span class="prompt-badge source-squad">Squad: {prompt.squadName || 'Unknown'}</span>
-												{:else if prompt.source === 'global'}
-													<span class="prompt-badge source-global">Global</span>
-												{/if}
-												<span class="prompt-type">{prompt.type}</span>
-												<div class="prompt-actions">
-													{#if prompt.source === 'role'}
-														<button 
-															class="btn-danger-small" 
-															on:click={() => removePromptFromRole(prompt.id)}
-															title="Remove this prompt from role"
-														>×</button>
-													{/if}
-													<span class="drag-handle">⋮⋮</span>
-												</div>
-											</div>
-											<div class="prompt-preview">
-												{prompt.content.substring(0, 100)}...
-											</div>
-										</div>
-									{/each}
-								{:else}
-									<p class="empty-state">No prompts assigned to this role</p>
-								{/if}
-							</div>
-							
-							<h4>Channel Access</h4>
-							<div class="role-channels">
-								{#if roleChannels}
-									<div class="channel-assignments">
-										<div class="assigned-channels">
-											<h5>Accessible Channels ({roleChannels.assignedChannels?.length || 0})</h5>
-											{#if roleChannels.assignedChannels && roleChannels.assignedChannels.length > 0}
-												<div class="channel-list">
-													{#each roleChannels.assignedChannels as assignedChannel}
-														<div class="channel-item assigned">
-															<div class="channel-info">
-																<span class="channel-name">#{assignedChannel.channelName}</span>
-																{#if assignedChannel.isMainChannel}
-																	<span class="channel-status public">Public</span>
-																{/if}
-															</div>
-															{#if !assignedChannel.isMainChannel}
-																<button 
-																	class="btn-remove"
-																	on:click={() => removeChannelFromRole(assignedChannel.assignmentId)}
-																	title="Remove channel access"
-																>×</button>
-															{/if}
-														</div>
-													{/each}
-												</div>
-											{:else}
-												<p class="no-channels">No channels accessible to this role</p>
-											{/if}
-										</div>
-										
-										<div class="available-channels">
-											<h5>Available Channels</h5>
-											{#if roleChannels.allChannels}
-												{@const unassignedChannels = roleChannels.allChannels.filter(channel => !channel.isAssigned && !channel.isMainChannel)}
-												{#if unassignedChannels.length > 0}
-													<div class="channel-list">
-														{#each unassignedChannels as channel}
-															<div class="channel-item available">
-																<div class="channel-info">
-																	<span class="channel-name">#{channel.name}</span>
-																	<span class="channel-desc">{channel.description}</span>
-																</div>
-																<button 
-																	class="btn-add"
-																	on:click={() => addChannelToRole(channel.id)}
-																	title="Grant channel access"
-																>+</button>
-															</div>
-														{/each}
-													</div>
-												{:else}
-													<p class="no-channels">All channels are accessible or public</p>
-												{/if}
-											{/if}
-										</div>
-									</div>
-								{:else}
-									<p>Loading channel access...</p>
-								{/if}
-							</div>
-						</div>
-					{:else}
-						<div class="empty-selection">
-							<p>Select a role to view details</p>
-						</div>
-					{/if}
-				</div>
+				<RolesSection {selectedProject} bind:roles bind:selectedRole />
 			{:else if currentSection === 'prompts'}
 				<div class="prompts-section">
 					<div class="section-header">
@@ -4020,45 +3604,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 	</div>
 {/if}
 
-{#if showAddPromptToRoleDialog}
-	<div class="dialog-overlay" on:click={() => showAddPromptToRoleDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Add Prompt to Role: {selectedRole?.name}</h3>
-			
-			{#if availablePromptsForRole.length > 0}
-				<div class="form-group">
-					<label>Select a prompt to assign to this role:</label>
-					<div class="prompt-selection-list">
-						{#each availablePromptsForRole as prompt}
-							<div class="prompt-selection-item">
-								<div class="prompt-info">
-									<h4>{prompt.name}</h4>
-									<span class="prompt-type-badge">{prompt.type.replace(/_/g, ' ')}</span>
-									<p class="prompt-preview">{prompt.content.substring(0, 150)}...</p>
-								</div>
-								<button 
-									class="btn-primary" 
-									on:click={() => assignPromptToRole(prompt.id)}
-								>
-									Assign
-								</button>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{:else}
-				<div class="empty-state">
-					<p>No available prompts to assign. All custom prompts are either already assigned to this role or no custom prompts exist.</p>
-					<p>Create new prompts in the Prompts section to assign them to roles.</p>
-				</div>
-			{/if}
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showAddPromptToRoleDialog = false}>Cancel</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 {#if showEditPromptDialog}
 	<div class="dialog-overlay" on:click={closeEditPromptDialog}>
@@ -4977,29 +4522,13 @@ Status: ACTIVE - Ready to assist with full authority`,
 		border-color: #007acc;
 	}
 
-	.roles-section {
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
-	}
 
 	.section-header {
 		border-bottom: 1px solid #e5e5e5;
 		padding-bottom: 16px;
 	}
 
-	.role-controls {
-		display: flex;
-		align-items: center;
-		gap: 16px;
-	}
 
-	.role-selector {
-		padding: 6px 12px;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		min-width: 200px;
-	}
 
 	.empty-state {
 		color: #666;
@@ -5008,10 +4537,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 	}
 
 
-	.role-actions {
-		display: flex;
-		gap: 8px;
-	}
 
 	.btn-primary, .btn-secondary {
 		padding: 6px 12px;
@@ -5039,100 +4564,15 @@ Status: ACTIVE - Ready to assist with full authority`,
 		background: #e5e5e5;
 	}
 
-	.role-content h4 {
-		margin: 20px 0 8px 0;
-		color: #333;
-	}
 
-	.role-textarea {
-		width: 100%;
-		padding: 12px;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		font-family: monospace;
-		font-size: 14px;
-		resize: vertical;
-	}
 
-	.prompt-composition {
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		padding: 12px;
-		background: #fafafa;
-	}
 
-	.prompt-item {
-		background: white;
-		border: 1px solid #e5e5e5;
-		border-radius: 4px;
-		margin-bottom: 8px;
-		padding: 12px;
-		cursor: move;
-		transition: all 0.2s ease;
-		user-select: none;
-	}
 
-	.prompt-item:hover {
-		border-color: #007acc;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-	}
 
-	.prompt-item.dragging {
-		opacity: 0.5;
-		transform: rotate(2deg);
-	}
 
-	.prompt-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 8px;
-		font-weight: 500;
-	}
 
-	.prompt-order {
-		background: #007acc;
-		color: white;
-		padding: 2px 6px;
-		border-radius: 10px;
-		font-size: 12px;
-		min-width: 24px;
-		text-align: center;
-	}
 
-	.prompt-name {
-		flex: 1;
-		color: #333;
-	}
 
-	.prompt-type {
-		background: #f0f0f0;
-		padding: 2px 8px;
-		border-radius: 12px;
-		font-size: 12px;
-		color: #666;
-	}
-
-	.drag-handle {
-		color: #999;
-		font-size: 18px;
-		cursor: grab;
-	}
-
-	.drag-handle:active {
-		cursor: grabbing;
-	}
-
-	.prompt-preview {
-		color: #666;
-		font-size: 13px;
-		line-height: 1.4;
-		font-family: monospace;
-		background: #f9f9f9;
-		padding: 8px;
-		border-radius: 3px;
-		border-left: 3px solid #007acc;
-	}
 
 	.empty-selection {
 		display: flex;
@@ -5419,12 +4859,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 		outline: none;
 	}
 
-	.role-selector, .model-selector {
-		padding: 6px 12px;
-		border: 1px solid #ccc;
-		border-radius: 4px;
-		min-width: 120px;
-	}
 
 	.large-dialog {
 		width: 600px;
@@ -5669,17 +5103,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 		line-height: 1.4;
 	}
 
-	.prompt-preview {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 4px;
-		padding: 12px;
-		font-family: monospace;
-		font-size: 13px;
-		color: #666;
-		white-space: pre-wrap;
-		border-left: 3px solid #007acc;
-	}
 
 	.status-badge {
 		background: #e7f3ff;
@@ -5712,113 +5135,22 @@ Status: ACTIVE - Ready to assist with full authority`,
 		margin-bottom: 0;
 	}
 
-	.role-assignments {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
 
-	.assigned-roles, .available-roles {
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		padding: 12px;
-		background: #fafafa;
-	}
 
-	.assigned-roles h5, .available-roles h5 {
-		margin: 0 0 12px 0;
-		font-size: 13px;
-		font-weight: 600;
-		color: #333;
-	}
 
-	.role-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
 
-	.role-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 8px 12px;
-		border-radius: 4px;
-		background: white;
-		border: 1px solid #e5e5e5;
-	}
 
-	.role-item.assigned {
-		border-color: #4caf50;
-		background: #f8fff8;
-	}
 
-	.role-item.available {
-		border-color: #ddd;
-		background: white;
-	}
 
-	.role-info {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
 
-	.role-name {
-		font-size: 13px;
-		font-weight: 500;
-		color: #333;
-	}
 
-	.role-status {
-		font-size: 11px;
-		padding: 2px 6px;
-		border-radius: 3px;
-		background: #ffa726;
-		color: white;
-	}
 
-	.role-status.inactive {
-		background: #ff7043;
-	}
 
-	.btn-remove, .btn-add {
-		width: 24px;
-		height: 24px;
-		border: none;
-		border-radius: 4px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		font-size: 14px;
-		font-weight: bold;
-	}
 
-	.btn-remove {
-		background: #f44336;
-		color: white;
-	}
 
-	.btn-remove:hover {
-		background: #d32f2f;
-	}
 
-	.btn-add {
-		background: #4caf50;
-		color: white;
-	}
 
-	.btn-add:hover {
-		background: #388e3c;
-	}
 
-	.no-roles {
-		font-size: 13px;
-		color: #999;
-		font-style: italic;
-		margin: 0;
-	}
 
 	.loading {
 		font-size: 13px;
@@ -6202,163 +5534,28 @@ Status: ACTIVE - Ready to assist with full authority`,
 		gap: 20px;
 	}
 	
-	.prompt-type-section {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 8px;
-		padding: 16px;
-	}
 	
-	.prompt-type-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 16px;
-		padding-bottom: 8px;
-		border-bottom: 1px solid #e5e5e5;
-	}
 	
-	.prompt-type-header h3 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #333;
-	}
 	
-	.prompt-count {
-		background: #007acc;
-		color: white;
-		padding: 2px 8px;
-		border-radius: 12px;
-		font-size: 12px;
-		font-weight: 500;
-	}
 	
-	.prompt-list {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
 	
-	.prompt-card {
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		padding: 16px;
-		transition: all 0.2s ease;
-	}
 	
-	.prompt-card:hover {
-		border-color: #007acc;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-	}
 	
-	.prompt-card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		margin-bottom: 12px;
-	}
 	
-	.prompt-info {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
 	
-	.prompt-name {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #333;
-	}
 	
-	.prompt-badge {
-		font-size: 11px;
-		padding: 3px 8px;
-		border-radius: 12px;
-		font-weight: 500;
-	}
 	
-	.prompt-badge.premade {
-		background: #e8f5e8;
-		color: #2d7d2d;
-		border: 1px solid #4caf50;
-	}
 	
-	.prompt-badge.custom {
-		background: #e7f3ff;
-		color: #0066cc;
-		border: 1px solid #007acc;
-	}
 
-	.prompt-badge.template {
-		background: #fff3e0;
-		color: #e65100;
-		border: 1px solid #ff9800;
-	}
 	
-	.prompt-badge.source-role {
-		background: #fff3e0;
-		color: #e65100;
-		border: 1px solid #ff9800;
-	}
 	
-	.prompt-badge.source-squad {
-		background: #f3e5f5;
-		color: #7b1fa2;
-		border: 1px solid #9c27b0;
-	}
 	
-	.prompt-badge.source-global {
-		background: #e8f5e8;
-		color: #2e7d32;
-		border: 1px solid #4caf50;
-	}
 	
-	.prompt-actions {
-		display: flex;
-		gap: 4px;
-	}
 	
-	.prompt-actions button {
-		padding: 4px 8px;
-		font-size: 12px;
-		border-radius: 4px;
-		border: none;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
 	
-	.prompt-preview {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 4px;
-		padding: 12px;
-		font-family: monospace;
-		font-size: 13px;
-		color: #666;
-		line-height: 1.4;
-		border-left: 3px solid #007acc;
-		margin-bottom: 12px;
-		white-space: pre-wrap;
-	}
 	
-	.prompt-metadata {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		font-size: 12px;
-		color: #999;
-	}
 	
-	.prompt-order {
-		font-weight: 500;
-	}
 	
-	.prompt-created {
-		font-style: italic;
-	}
 
 	/* Prompt Assignment Styles */
 	.section-header-with-action {
@@ -6372,11 +5569,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 		margin: 0;
 	}
 
-	.prompt-actions {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
 
 	.btn-danger-small {
 		background: #dc3545;
@@ -6393,50 +5585,11 @@ Status: ACTIVE - Ready to assist with full authority`,
 		background: #c82333;
 	}
 
-	.prompt-selection-list {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		max-height: 400px;
-		overflow-y: auto;
-	}
 
-	.prompt-selection-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px;
-		border: 1px solid #e0e0e0;
-		border-radius: 6px;
-		background: #f9f9f9;
-	}
 
-	.prompt-selection-item .prompt-info {
-		flex: 1;
-	}
 
-	.prompt-selection-item h4 {
-		margin: 0 0 4px 0;
-		font-size: 14px;
-		color: #333;
-	}
 
-	.prompt-type-badge {
-		background: #e7f3ff;
-		color: #0066cc;
-		padding: 2px 6px;
-		border-radius: 4px;
-		font-size: 11px;
-		margin-bottom: 8px;
-		display: inline-block;
-	}
 
-	.prompt-selection-item .prompt-preview {
-		font-size: 12px;
-		color: #666;
-		margin: 4px 0 0 0;
-		line-height: 1.4;
-	}
 
 	/* Template Update Styles */
 	.btn-template {
@@ -7164,21 +6317,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 		overflow-y: auto;
 	}
 
-	.role-section {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 8px;
-		padding: 20px;
-	}
 
-	.role-section h3 {
-		margin: 0 0 16px 0;
-		font-size: 18px;
-		font-weight: 600;
-		color: #333;
-		border-bottom: 2px solid #007acc;
-		padding-bottom: 8px;
-	}
 
 	.phase-list {
 		display: flex;
@@ -7485,11 +6624,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 	}
 
 	.squad-overview,
-	.squad-roles {
-		flex: 1;
-		padding: 20px;
-		overflow: auto;
-	}
 
 	.info-card {
 		background: #f8f9fa;
@@ -7512,95 +6646,17 @@ Status: ACTIVE - Ready to assist with full authority`,
 		color: #555;
 	}
 
-	.roles-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 16px;
-	}
 
-	.roles-header h4 {
-		margin: 0;
-		font-size: 18px;
-		font-weight: 600;
-		color: #333;
-	}
 
-	.roles-list {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
 
-	.role-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px 16px;
-		background: white;
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		transition: all 0.2s ease;
-	}
 
-	.role-item:hover {
-		border-color: #007bff;
-		box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-	}
 
-	.role-info h5 {
-		margin: 0 0 4px 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #333;
-	}
 
-	.role-content {
-		margin: 0;
-		font-size: 13px;
-		color: #666;
-		line-height: 1.4;
-	}
 
-	.role-options {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		max-height: 300px;
-		overflow-y: auto;
-	}
 
-	.role-option {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-start;
-		padding: 12px 16px;
-		background: white;
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		cursor: pointer;
-		transition: all 0.2s ease;
-		text-align: left;
-		width: 100%;
-	}
 
-	.role-option:hover {
-		border-color: #007bff;
-		background: #f8f9ff;
-	}
 
-	.role-name {
-		font-weight: 600;
-		font-size: 14px;
-		color: #333;
-		margin-bottom: 4px;
-	}
 
-	.role-preview {
-		font-size: 12px;
-		color: #666;
-		line-height: 1.3;
-	}
 
 
 	/* Send Message Dialog Styles */
@@ -7636,24 +6692,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 		font-size: 13px;
 	}
 
-	.btn-remove {
-		width: 24px;
-		height: 24px;
-		border: none;
-		background: #dc3545;
-		color: white;
-		border-radius: 50%;
-		cursor: pointer;
-		font-size: 14px;
-		font-weight: bold;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
 
-	.btn-remove:hover {
-		background: #c82333;
-	}
 
 	.btn-secondary {
 		background: #6c757d;
@@ -8222,14 +7261,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 		align-items: center;
 	}
 
-	.role-badge {
-		background: #007bff;
-		color: white;
-		padding: 4px 8px;
-		border-radius: 4px;
-		font-size: 12px;
-		font-weight: 500;
-	}
 
 	.frequency {
 		background: #f0f0f0;
