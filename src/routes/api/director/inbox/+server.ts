@@ -4,10 +4,17 @@ import { content, readingAssignments, readingAssignmentReads, agents, channels }
 import { eq, or, and, isNull, desc, sql } from 'drizzle-orm';
 
 // GET /api/director/inbox - Get all messages for human director with priority organization
-export async function GET() {
+export async function GET({ url }) {
 	try {
-		// Get all messages assigned to director (either direct DMs or director channels)
-		const directorMessages = await db
+		const projectId = url.searchParams.get('projectId');
+		
+		if (!projectId) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+
+		// Get messages from two sources:
+		// 1. Messages with reading assignments to director/human-director
+		const assignedMessages = await db
 			.select({
 				// Message info
 				messageId: content.id,
@@ -34,26 +41,95 @@ export async function GET() {
 			.leftJoin(channels, eq(content.channelId, channels.id))
 			.where(
 				and(
-					eq(readingAssignments.assignedToType, 'agent'),
-					eq(readingAssignments.assignedTo, 'director')
+					eq(content.projectId, parseInt(projectId)),
+					or(
+						and(
+							eq(readingAssignments.assignedToType, 'agent'),
+							eq(readingAssignments.assignedTo, 'director')
+						),
+						and(
+							eq(readingAssignments.assignedToType, 'role'),
+							eq(readingAssignments.assignedTo, 'human-director')
+						)
+					)
 				)
-			)
-			.orderBy(desc(content.createdAt));
+			);
+
+		// 2. Messages from director channels (isForHumanDirector = true)
+		const directorChannelMessages = await db
+			.select({
+				// Message info
+				messageId: content.id,
+				title: content.title,
+				body: content.body,
+				type: content.type,
+				authorAgentId: content.authorAgentId,
+				channelId: content.channelId,
+				parentContentId: content.parentContentId,
+				createdAt: content.createdAt,
+				
+				// No assignment info for channel messages
+				assignmentId: sql<number>`null`,
+				assignedToType: sql<string>`null`,
+				assignedTo: sql<string>`null`,
+				assignedAt: sql<Date>`null`,
+				
+				// Channel info
+				channelName: channels.name,
+				isDirectorChannel: channels.isForHumanDirector,
+			})
+			.from(content)
+			.innerJoin(channels, eq(content.channelId, channels.id))
+			.where(
+				and(
+					eq(content.projectId, parseInt(projectId)),
+					eq(channels.isForHumanDirector, true)
+				)
+			);
+
+		// Combine and deduplicate messages (in case a director channel message also has assignments)
+		const allMessages = [...assignedMessages, ...directorChannelMessages];
+		const uniqueMessages = allMessages.reduce((acc, message) => {
+			const existing = acc.find(m => m.messageId === message.messageId);
+			if (existing) {
+				// Keep the version with assignment info if available
+				if (message.assignmentId && !existing.assignmentId) {
+					const index = acc.indexOf(existing);
+					acc[index] = message;
+				}
+			} else {
+				acc.push(message);
+			}
+			return acc;
+		}, [] as typeof allMessages);
+
+		// Sort by creation date
+		const directorMessages = uniqueMessages.sort((a, b) => 
+			new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+		);
 
 		// Check read status for each message
 		const messagesWithStatus = await Promise.all(
 			directorMessages.map(async (message) => {
-				const [readRecord] = await db
-					.select({
-						readAt: readingAssignmentReads.readAt,
-						acknowledged: readingAssignmentReads.acknowledged,
-					})
-					.from(readingAssignmentReads)
-					.where(and(
-						eq(readingAssignmentReads.readingAssignmentId, message.assignmentId),
-						eq(readingAssignmentReads.agentId, 'director')
-					))
-					.limit(1);
+				let readRecord = null;
+				
+				// Only check read status for messages with assignments
+				if (message.assignmentId) {
+					[readRecord] = await db
+						.select({
+							readAt: readingAssignmentReads.readAt,
+							acknowledged: readingAssignmentReads.acknowledged,
+						})
+						.from(readingAssignmentReads)
+						.where(and(
+							eq(readingAssignmentReads.readingAssignmentId, message.assignmentId),
+							or(
+								eq(readingAssignmentReads.agentId, 'director'),
+								eq(readingAssignmentReads.agentId, 'human-director')
+							)
+						))
+						.limit(1);
+				}
 
 				// Get thread context if this is a reply
 				let parentMessage = null;
@@ -85,7 +161,9 @@ export async function GET() {
 					parentMessage,
 					createdAt: message.createdAt,
 					assignedAt: message.assignedAt,
-					isRead: !!readRecord,
+					// For assignment-based messages, check read record
+					// For director channel messages without assignments, consider them unread by default
+					isRead: message.assignmentId ? !!readRecord : false,
 					readAt: readRecord?.readAt || null,
 					acknowledged: readRecord?.acknowledged || false,
 					isDM: !message.channelId,

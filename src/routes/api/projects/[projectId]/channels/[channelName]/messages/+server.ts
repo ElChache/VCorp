@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 
 // POST /api/projects/[projectId]/channels/[channelName]/messages - Post message to channel by name
 export async function POST({ params, request }) {
+	console.log('🔥 ALTERNATIVE API HIT: /api/projects/[projectId]/channels/[channelName]/messages');
 	try {
 		const { projectId, channelName } = params;
 		const { type = 'message', title, body, authorAgentId, squadId } = await request.json();

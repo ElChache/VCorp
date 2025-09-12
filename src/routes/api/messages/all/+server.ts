@@ -14,7 +14,7 @@ export async function GET({ url }) {
 
 		console.log(`📬 Loading all messages for project ${projectId}`);
 
-		// Get all messages (content) for this project, ordered by creation time
+		// Get only messages and replies for this project, ordered by creation time
 		const allMessages = await db
 			.select({
 				id: content.id,
@@ -34,7 +34,13 @@ export async function GET({ url }) {
 				phaseStatus: content.phaseStatus
 			})
 			.from(content)
-			.where(eq(content.projectId, parseInt(projectId)))
+			.where(and(
+				eq(content.projectId, parseInt(projectId)),
+				or(
+					eq(content.type, 'message'),
+					isNotNull(content.parentContentId)  // Include replies (content with parent)
+				)
+			))
 			.orderBy(desc(content.createdAt));
 
 		// For each message, get reading assignments with read status (similar to channels endpoint)
@@ -83,8 +89,7 @@ export async function GET({ url }) {
 							const roleAgents = await db
 								.select({ id: agents.id })
 								.from(agents)
-								.innerJoin(roles, eq(agents.roleId, roles.id))
-								.where(eq(roles.name, assignment.assignedTo));
+								.where(eq(agents.roleType, assignment.assignedTo));
 							targetAgents = roleAgents.map(a => a.id);
 						} else if (assignment.assignedToType === 'squad') {
 							// Squad assignment - get all agents in this squad

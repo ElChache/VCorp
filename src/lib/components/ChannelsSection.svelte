@@ -8,11 +8,15 @@
 	// Component-local variables
 	let showCreateChannelDialog = false;
 	let showEditChannelDialog = false;
+	let showAssignmentDialog = false;
 	let newChannel = { name: '', description: '', promptForAgents: '', isMainChannel: false, isForHumanDirector: false };
 	let editChannel = { id: '', name: '', description: '', promptForAgents: '', isMainChannel: false, isForHumanDirector: false };
 	let channelRoles = null;
-	let channelViewMode = 'messages'; // Default to messages view
-	let channelMessages = [];
+	
+	// Data for dropdowns
+	let agents = [];
+	let projectRoles = []; // Renamed to avoid conflict with exported roles prop
+	let squads = [];
 
 	// Channel management functions
 	async function loadChannels() {
@@ -24,14 +28,52 @@
 		try {
 			const response = await fetch(`/api/channels?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				channels = await response.json();
-				selectedChannel = channels.length > 0 ? channels[0] : null;
+				const channelsData = await response.json();
+				
+				// Load message counts for each channel
+				const channelsWithCounts = await Promise.all(
+					channelsData.map(async (channel) => {
+						try {
+							const msgResponse = await fetch(`/api/channels/${channel.id}/messages?projectId=${selectedProject.id}`);
+							if (msgResponse.ok) {
+								const messages = await msgResponse.json();
+								return {
+									...channel,
+									messageCount: messages.length,
+									unreadCount: 0 // TODO: Calculate unread for human-director
+								};
+							}
+						} catch (error) {
+							console.error(`Failed to load messages for channel ${channel.id}:`, error);
+						}
+						return {
+							...channel,
+							messageCount: 0,
+							unreadCount: 0
+						};
+					})
+				);
+				
+				// Preserve the currently selected channel if it exists
+				const currentSelectedId = selectedChannel?.id;
+				channels = channelsWithCounts;
+				
+				// Try to find and preserve the currently selected channel
+				if (currentSelectedId) {
+					const stillExists = channels.find(c => c.id === currentSelectedId);
+					selectedChannel = stillExists || (channels.length > 0 ? channels[0] : null);
+				} else {
+					selectedChannel = channels.length > 0 ? channels[0] : null;
+				}
 			}
 		} catch (error) {
 			console.error('Failed to load channels:', error);
 			channels = [];
 		}
 	}
+
+
+
 
 	function openCreateChannelDialog() {
 		newChannel = { name: '', description: '', promptForAgents: '', isMainChannel: false, isForHumanDirector: false };
@@ -162,16 +204,8 @@
 	}
 
 	function onChannelSelect(channel) {
-		console.log('=== CHANNEL SELECTION DEBUG ===');
-		console.log('Channel selected:', channel);
-		console.log('Previous selectedChannel:', selectedChannel);
 		selectedChannel = channel;
-		channelViewMode = 'messages'; // Reset to messages view when selecting a new channel
-		console.log('New selectedChannel:', selectedChannel);
-		console.log('About to call loadChannelRoles...');
 		loadChannelRoles();
-		loadChannelMessages();
-		console.log('=== END CHANNEL SELECTION DEBUG ===');
 	}
 
 	async function loadChannelMessages() {
@@ -183,7 +217,22 @@
 		try {
 			const response = await fetch(`/api/channels/${selectedChannel.id}/messages`);
 			if (response.ok) {
-				channelMessages = await response.json();
+				const allMessages = await response.json();
+				
+				// Organize messages into threads (parent messages with their replies)
+				const parentMessages = allMessages.filter(msg => !msg.parentContentId);
+				const replies = allMessages.filter(msg => msg.parentContentId);
+				
+				// Add replies to their parent messages
+				const messagesWithReplies = parentMessages.map(parent => ({
+					...parent,
+					replies: replies
+						.filter(reply => reply.parentContentId === parent.id)
+						.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+				}));
+				
+				// Sort parent messages by creation time (newest first)
+				channelMessages = messagesWithReplies.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 			} else {
 				console.error('Failed to load channel messages:', response.status);
 				channelMessages = [];
@@ -209,13 +258,6 @@
 		return date.toLocaleDateString();
 	}
 	
-	function switchToMessagesView() {
-		channelViewMode = 'messages';
-	}
-	
-	function switchToSettingsView() {
-		channelViewMode = 'settings';
-	}
 
 	async function assignRoleToChannel(roleId) {
 		if (!selectedChannel) return;
@@ -251,25 +293,87 @@
 		}
 	}
 
+	// Loading functions for assignment dropdowns
+	async function loadAgents() {
+		if (!selectedProject) {
+			agents = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				agents = await response.json();
+			} else {
+				console.error('Failed to load agents:', response.status);
+				agents = [];
+			}
+		} catch (error) {
+			console.error('Failed to load agents:', error);
+			agents = [];
+		}
+	}
+
+	async function loadProjectRoles() {
+		if (!selectedProject) {
+			projectRoles = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/roles?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				projectRoles = await response.json();
+			} else {
+				console.error('Failed to load roles:', response.status);
+				projectRoles = [];
+			}
+		} catch (error) {
+			console.error('Failed to load roles:', error);
+			projectRoles = [];
+		}
+	}
+
+	async function loadSquads() {
+		if (!selectedProject) {
+			squads = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/squads?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				squads = await response.json();
+			} else {
+				console.error('Failed to load squads:', response.status);
+				squads = [];
+			}
+		} catch (error) {
+			console.error('Failed to load squads:', error);
+			squads = [];
+		}
+	}
+
+
 	// Load channels when the selected project changes
 	$: if (selectedProject) {
 		loadChannels();
+		loadAgents();
+		loadProjectRoles();
+		loadSquads();
 	}
 </script>
 
 <div class="channels-section">
-	<div class="section-header">
-		<h2>Channel Management</h2>
-		<button class="btn-primary" on:click={openCreateChannelDialog}>
-			➕ Create Channel
-		</button>
-	</div>
 
 	<div class="channels-content">
 		<div class="channels-left">
 			<div class="channels-panel">
 				<div class="channels-header">
 					<h3>Channels ({channels.length})</h3>
+					<button class="btn-icon" on:click={openCreateChannelDialog} title="Create Channel">
+						+
+					</button>
 				</div>
 				
 				<div class="channel-list">
@@ -280,7 +384,7 @@
 							on:click={() => onChannelSelect(channel)}
 						>
 							<div class="channel-header">
-								<span class="channel-id">#{channel.id}</span>
+								<span class="channel-name">#{channel.name}</span>
 								{#if channel.isForHumanDirector}
 									<span class="channel-badge human-director">👤 Human</span>
 								{/if}
@@ -289,7 +393,12 @@
 								{/if}
 							</div>
 							<div class="channel-details">
-								<span class="channel-name">{channel.name}</span>
+								<span class="channel-stats">
+									{channel.messageCount || 0} messages
+									{#if channel.unreadCount > 0}
+										• <span class="unread-count">{channel.unreadCount} unread</span>
+									{/if}
+								</span>
 							</div>
 						</div>
 					{/each}
@@ -306,128 +415,10 @@
 				<div class="channel-details-panel">
 					<div class="channel-details-header">
 						<h3>#{selectedChannel.name}</h3>
-						<div class="channel-view-toggle">
-							<button 
-								class="view-toggle-btn" 
-								class:active={channelViewMode === 'messages'}
-								on:click={switchToMessagesView}
-							>💬 Messages</button>
-							<button 
-								class="view-toggle-btn settings-btn" 
-								class:active={channelViewMode === 'settings'}
-								on:click={switchToSettingsView}
-								title="Channel Settings"
-							>⚙️</button>
-						</div>
 					</div>
 
 					<div class="channel-info">
-						{#if channelViewMode === 'messages'}
-							<div class="messages-view">
-								<!-- Messages view placeholder for now -->
-								<div class="messages-container">
-									<div class="messages-list">
-										{#if channelMessages.length > 0}
-											{#each channelMessages as message}
-												<div class="message" class:ticket={message.type === 'ticket'}>
-													<div class="message-header">
-														<span class="message-author">{message.authorAgentId || 'System'}</span>
-														{#if message.type === 'ticket'}
-															<span class="message-type ticket-badge">🎫 TICKET</span>
-														{/if}
-														<span class="message-time">{formatMessageTime(message.createdAt)}</span>
-													</div>
-													
-													{#if message.type === 'ticket'}
-														<div class="ticket-info">
-															<div class="ticket-header">
-																<h4 class="ticket-title">{message.title}</h4>
-																<div class="ticket-badges">
-																	{#if message.priority}
-																		<span class="priority-badge priority-{message.priority}">{message.priority.toUpperCase()}</span>
-																	{/if}
-																	{#if message.status}
-																		<span class="status-badge status-{message.status.replace('_', '-')}">{message.status.replace('_', ' ').toUpperCase()}</span>
-																	{/if}
-																</div>
-															</div>
-															
-															<div class="ticket-assignment">
-																{#if message.assignedToRoleType}
-																	<span class="assigned-role">👥 {message.assignedToRoleType}</span>
-																{/if}
-																{#if message.claimedByAgent}
-																	<span class="claimed-agent">👤 {message.claimedByAgent}</span>
-																{/if}
-															</div>
-															
-															<div class="ticket-body">
-																{message.body}
-															</div>
-															
-															{#if message.updatedAt && message.updatedAt !== message.createdAt}
-																<div class="ticket-updated">
-																	Last updated: {formatMessageTime(message.updatedAt)}
-																</div>
-															{/if}
-														</div>
-													{:else}
-														<div class="message-content">
-															{#if message.title && message.title !== message.body}
-																<strong>{message.title}</strong><br>
-															{/if}
-															{message.body}
-														</div>
-													{/if}
-													{#if message.readingAssignments && message.readingAssignments.length > 0}
-														<div class="message-assignments">
-															{#each message.readingAssignments as assignment}
-																<div class="assignment">
-																	<div class="assignment-header">
-																		<span class="assignment-target">📋 {assignment.assignedTo}</span>
-																		<span class="read-status" class:fully-read={assignment.isFullyRead} class:partially-read={assignment.readCount > 0 && !assignment.isFullyRead} class:unread={assignment.readCount === 0}>
-																			{assignment.readCount}/{assignment.totalTargets} read
-																		</span>
-																	</div>
-																	{#if assignment.targetAgents.length > 0}
-																		<div class="agents-status">
-																			{#each assignment.targetAgents as agentId}
-																				{@const readInfo = assignment.readBy.find(r => r.agentId === agentId)}
-																				<span class="agent-status" class:read={readInfo} class:acknowledged={readInfo?.acknowledged}>
-																					{agentId}
-																				</span>
-																			{/each}
-																		</div>
-																	{/if}
-																</div>
-															{/each}
-														</div>
-													{/if}
-												</div>
-											{/each}
-										{:else}
-											<div class="no-messages">
-												<p>No messages in this channel yet.</p>
-												<p>Start the conversation!</p>
-											</div>
-										{/if}
-									</div>
-								</div>
-								<div class="message-input-container">
-									<div class="message-input-wrapper">
-										<input 
-											type="text" 
-											class="message-input" 
-											placeholder="Type a message..." 
-											disabled
-										/>
-										<button class="send-btn" disabled>Send</button>
-									</div>
-									<p class="input-note">Real-time messaging coming soon...</p>
-								</div>
-							</div>
-						{:else if channelViewMode === 'settings'}
-							<div class="settings-view">
+						<div class="settings-view">
 								<div class="channel-actions-section">
 									<div class="settings-actions">
 										<button class="btn-secondary" on:click={openEditChannelDialog}>✏️ Edit Channel</button>
@@ -538,9 +529,8 @@
 									{/if}
 								</div>
 							</div>
-						{/if}
+						</div>
 					</div>
-				</div>
 			{:else}
 				<div class="empty-selection">
 					<p>Select a channel to view details</p>
@@ -831,6 +821,16 @@
 		color: #333;
 	}
 
+	.channel-stats {
+		font-size: 12px;
+		color: #666;
+	}
+
+	.unread-count {
+		color: #ef4444;
+		font-weight: 600;
+	}
+
 	.channel-details-panel {
 		background: white;
 		border: 1px solid #e5e5e5;
@@ -841,7 +841,7 @@
 	}
 
 	.channel-details-header {
-		padding: 16px;
+		padding: 0;
 		border-bottom: 1px solid #e5e5e5;
 		display: flex;
 		justify-content: space-between;
@@ -1078,35 +1078,44 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		padding: 0;
+		margin: 0;
 	}
 	
 	.messages-container {
 		flex: 1;
 		overflow-y: auto;
 		margin-bottom: 16px;
+		padding: 0;
 	}
 	
 	.messages-list {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
-		padding: 8px 0;
+		gap: 2px;
+		padding: 0;
 	}
 	
 	.message {
-		background: white;
-		border: 1px solid #e5e5e5;
-		border-radius: 8px;
-		padding: 12px;
-		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		padding: 6px 16px;
+		box-shadow: none;
+		transition: background-color 0.1s ease;
+	}
+	
+	.message:hover {
+		background: #f8f9fa;
 	}
 	
 	.message-header {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 6px;
+		align-items: baseline;
+		margin-bottom: 1px;
 		font-size: 12px;
+		gap: 8px;
 	}
 	
 	.message-author {
@@ -1120,8 +1129,9 @@
 	
 	.message-content {
 		font-size: 14px;
-		line-height: 1.4;
+		line-height: 1.3;
 		color: #333;
+		margin-bottom: 1px;
 	}
 
 	/* Ticket-specific styles */
@@ -1588,4 +1598,505 @@
 		padding-top: 16px;
 		border-top: 1px solid #e5e7eb;
 	}
+
+	/* Reply functionality styles */
+	.message-actions {
+		margin-top: 1px;
+		display: flex;
+		gap: 4px;
+		align-items: center;
+	}
+
+	.reply-btn {
+		background: transparent;
+		border: none;
+		color: #64748b;
+		padding: 2px 4px;
+		border-radius: 3px;
+		font-size: 11px;
+		cursor: pointer;
+		transition: all 0.1s ease;
+		text-decoration: none;
+		opacity: 0.7;
+	}
+
+	.reply-btn:hover {
+		background: #e2e8f0;
+		color: #334155;
+		opacity: 1;
+	}
+
+	.reply-input-container {
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 12px;
+		margin-top: 12px;
+	}
+
+	.reply-context {
+		margin-bottom: 8px;
+	}
+
+	.reply-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 4px;
+	}
+
+	.reply-icon {
+		font-size: 14px;
+	}
+
+	.reply-label {
+		font-size: 14px;
+		color: #374151;
+		flex: 1;
+	}
+
+	.cancel-reply-btn {
+		background: none;
+		border: none;
+		color: #9ca3af;
+		cursor: pointer;
+		font-size: 16px;
+		padding: 0;
+		width: 20px;
+		height: 20px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.cancel-reply-btn:hover {
+		color: #374151;
+	}
+
+	.reply-preview {
+		font-size: 12px;
+		color: #6b7280;
+		font-style: italic;
+		padding: 4px 0;
+	}
+
+	.reply-input-wrapper {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.reply-input {
+		flex: 1;
+		padding: 8px 12px;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font-size: 14px;
+	}
+
+	.reply-input:focus {
+		outline: none;
+		border-color: #2563eb;
+		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+	}
+
+	/* Message replies/threads styles */
+	.message-replies {
+		margin-top: 16px;
+		margin-left: 24px;
+		padding-left: 16px;
+		border-left: 3px solid #d1d5db;
+		background: linear-gradient(to right, #f8fafc 0%, transparent 20%);
+		border-radius: 0 8px 8px 0;
+		position: relative;
+	}
+
+	.message-replies::before {
+		content: "↳";
+		position: absolute;
+		left: -8px;
+		top: 8px;
+		color: #9ca3af;
+		font-size: 14px;
+		font-weight: bold;
+	}
+
+	.replies-header {
+		margin-bottom: 12px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.replies-count {
+		font-size: 12px;
+		color: #6b7280;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+	}
+
+	.reply-message {
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		padding: 6px 16px;
+		margin-bottom: 2px;
+		box-shadow: none;
+		position: relative;
+		transition: background-color 0.1s ease;
+	}
+	
+	.reply-message:hover {
+		background: #f8f9fa;
+	}
+
+	.reply-message::before {
+		content: "";
+		position: absolute;
+		left: -4px;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 2px;
+		height: 60%;
+		background: #3b82f6;
+		border-radius: 1px;
+	}
+
+	.reply-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.reply-author {
+		font-weight: 500;
+		font-size: 12px;
+		color: #374151;
+	}
+
+	.reply-time {
+		font-size: 11px;
+		color: #9ca3af;
+	}
+
+	.reply-content {
+		font-size: 13px;
+		color: #374151;
+		line-height: 1.4;
+	}
+
+	/* Messages container scrolling and layout */
+	.messages-view {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		overflow: hidden;
+		padding: 0;
+		margin: 0;
+	}
+
+	.messages-container {
+		flex: 1;
+		overflow-y: auto;
+		padding: 0;
+		max-height: calc(100vh - 300px); /* Adjust based on your layout */
+	}
+
+	.messages-list {
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	/* Improve message spacing and add bottom margin for input area */
+	.message {
+		margin-bottom: 1px;
+	}
+
+	.message:last-child {
+		margin-bottom: 8px;
+	}
+
+	/* Assignment section styles */
+	.assignment-section {
+		background: #f8f9fa;
+		border: 1px solid #e9ecef;
+		border-radius: 6px;
+		padding: 12px;
+		margin-bottom: 12px;
+	}
+
+	.assignment-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	.assignment-label {
+		font-size: 14px;
+		font-weight: 600;
+		color: #495057;
+	}
+
+	.add-assignment-btn {
+		background: #007acc;
+		color: white;
+		border: none;
+		padding: 4px 8px;
+		border-radius: 4px;
+		font-size: 12px;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+
+	.add-assignment-btn:hover {
+		background: #0056a3;
+	}
+
+	.assignment-row {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	.assignment-row:last-child {
+		margin-bottom: 0;
+	}
+
+	.assignment-type-select {
+		width: 100px;
+		padding: 4px 8px;
+		border: 1px solid #ced4da;
+		border-radius: 4px;
+		font-size: 12px;
+		background: white;
+	}
+
+	.assignment-target-select {
+		flex: 1;
+		padding: 4px 8px;
+		border: 1px solid #ced4da;
+		border-radius: 4px;
+		font-size: 12px;
+		background: white;
+	}
+
+	.remove-assignment-btn {
+		background: #dc3545;
+		color: white;
+		border: none;
+		width: 24px;
+		height: 24px;
+		border-radius: 4px;
+		font-size: 14px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.2s;
+	}
+
+	.remove-assignment-btn:hover {
+		background: #c82333;
+	}
+
+	.no-assignments {
+		color: #6c757d;
+		font-size: 12px;
+		font-style: italic;
+		margin: 0;
+		text-align: center;
+		padding: 8px;
+	}
+
+	.assignment-dialog {
+		width: 500px;
+		max-height: 80vh;
+	}
+	
+	.assignment-options {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	
+	.option-section h4 {
+		margin: 0 0 0.5rem 0;
+		color: #374151;
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+	
+	.option-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		max-height: 150px;
+		overflow-y: auto;
+	}
+	
+	.option-item {
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		padding: 0.5rem 0.75rem;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 0.875rem;
+		text-align: left;
+		transition: all 0.15s;
+	}
+	
+	.option-item:hover {
+		background: #e5e7eb;
+		border-color: #d1d5db;
+	}
+	
+	.btn-icon {
+		background: #f8f9fa;
+		border: 1px solid #dee2e6;
+		color: #495057;
+		padding: 0.5rem;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 1rem;
+		line-height: 1;
+		min-width: 2rem;
+		min-height: 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	
+	.btn-icon:hover {
+		background: #e9ecef;
+		border-color: #adb5bd;
+	}
+	
+	.channels-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
+	
+	.channels-header h3 {
+		margin: 0;
+	}
+	
+	.assignment-badges {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+	
+	.assignment-badge {
+		background: #e3f2fd;
+		border: 1px solid #2196f3;
+		color: #1565c0;
+		padding: 0.25rem 0.5rem;
+		border-radius: 12px;
+		font-size: 0.75rem;
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+	
+	.assignment-badge.role {
+		background: #f3e5f5;
+		border-color: #9c27b0;
+		color: #7b1fa2;
+	}
+	
+	.assignment-badge.agent {
+		background: #e8f5e8;
+		border-color: #4caf50;
+		color: #2e7d32;
+	}
+	
+	.assignment-badge.squad {
+		background: #fff3e0;
+		border-color: #ff9800;
+		color: #e65100;
+	}
+	
+	.remove-badge {
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		font-size: 0.875rem;
+		padding: 0;
+		margin-left: 0.125rem;
+		opacity: 0.7;
+	}
+	
+	.remove-badge:hover {
+		opacity: 1;
+	}
+	
+	.message-input-wrapper {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+	
+	.assign-btn {
+		flex-shrink: 0;
+	}
 </style>
+
+<!-- Assignment Dialog -->
+{#if showAssignmentDialog}
+	<div class="dialog-overlay" on:click={() => showAssignmentDialog = false}>
+		<div class="dialog assignment-dialog" on:click|stopPropagation>
+			<div class="dialog-header">
+				<h3>Add Assignment</h3>
+				<button class="close-btn" on:click={() => showAssignmentDialog = false}>×</button>
+			</div>
+			
+			<div class="dialog-body">
+				<div class="assignment-options">
+					<div class="option-section">
+						<h4>Roles</h4>
+						<div class="option-list">
+							{#each projectRoles as role}
+								<button class="option-item" on:click={() => createAssignment('role', role.name)}>
+									👥 {role.name}
+								</button>
+							{/each}
+						</div>
+					</div>
+					
+					<div class="option-section">
+						<h4>Agents</h4>
+						<div class="option-list">
+							<button class="option-item" on:click={() => createAssignment('agent', 'director')}>
+								👤 director (Human Director)
+							</button>
+							{#each agents as agent}
+								<button class="option-item" on:click={() => createAssignment('agent', agent.id)}>
+									🤖 {agent.id} ({agent.roleType})
+								</button>
+							{/each}
+						</div>
+					</div>
+					
+					<div class="option-section">
+						<h4>Squads</h4>
+						<div class="option-list">
+							{#each squads as squad}
+								<button class="option-item" on:click={() => createAssignment('squad', squad.name)}>
+									👨‍👩‍👧‍👦 {squad.name}
+								</button>
+							{/each}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}

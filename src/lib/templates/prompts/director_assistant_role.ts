@@ -46,7 +46,7 @@ POST /api/channels
   "description": "Clear description of channel purpose",
   "promptForAgents": "When agents should use this channel",
   "isMainChannel": false,
-  "projectId": PROJECT_ID
+  "projectId": $PROJECT_ID
 }
 \`\`\`
 

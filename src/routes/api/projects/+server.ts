@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { projects, roleTemplates, promptTemplates, rolePromptCompositionTemplates, roles, prompts, rolePromptCompositions, channelTemplates, channels, channelRoleAssignmentTemplates, channelRoleAssignments, squadTemplates, squads, squadRoleAssignmentTemplates, squadRoleAssignments, squadPromptAssignmentTemplates, squadPromptAssignments, phaseTemplates, phaseRoleAssignmentTemplates, content } from '$lib/db/schema';
+import { projects, roleTemplates, promptTemplates, rolePromptCompositionTemplates, roles, prompts, rolePromptCompositions, channelTemplates, channels, channelRoleAssignmentTemplates, channelRoleAssignments, squadTemplates, squads, squadRoleAssignmentTemplates, squadRoleAssignments, squadPromptAssignmentTemplates, squadPromptAssignments, phaseTemplates, phaseRoleAssignmentTemplates, content, agents } from '$lib/db/schema';
 import { desc, eq, and } from 'drizzle-orm';
 
 export async function GET() {
@@ -85,7 +85,23 @@ export async function POST({ request }) {
 				.filter(template => template.roleTemplateId === roleTemplate.id)
 				.sort((a, b) => a.orderIndex - b.orderIndex);
 
-			if (assignedPrompts.length > 0) {
+			// Special handling for Human Director (which may not have prompt compositions)
+			if (roleTemplate.name === 'Human Director') {
+				// Find the Human Director role prompt template directly
+				const humanDirectorPromptTemplate = allPromptTemplates.find(p => p.name === 'Human Director Role');
+				
+				const [newRole] = await db
+					.insert(roles)
+					.values({
+						projectId: newProject.id,
+						templateId: roleTemplate.id,
+						name: roleTemplate.name,
+						content: humanDirectorPromptTemplate ? humanDirectorPromptTemplate.content : 'Human Director role content',
+					})
+					.returning();
+
+				createdRoles.push(newRole);
+			} else if (assignedPrompts.length > 0) {
 				// Use the first assigned prompt as the role content
 				const primaryPrompt = assignedPrompts[0];
 				
@@ -115,6 +131,21 @@ export async function POST({ request }) {
 					}
 				}
 			}
+		}
+
+		// Create Human Director agent automatically (since it represents the human user)
+		const humanDirectorRole = createdRoles.find(role => role.name === 'Human Director');
+		if (humanDirectorRole) {
+			await db
+				.insert(agents)
+				.values({
+					id: 'human-director',
+					projectId: newProject.id,
+					roleId: humanDirectorRole.id,
+					roleType: 'Human Director',
+					status: 'online', // Human is always online
+					model: 'human', // Special model type for human users
+				});
 		}
 
 		// Create project channels from channel templates
@@ -257,47 +288,55 @@ export async function POST({ request }) {
 		// Create project phases as content entries from phase templates
 		console.log('📋 Creating project phases as content...');
 		const allPhaseTemplates = await db.select().from(phaseTemplates);
-		const allPhaseRoleAssignmentTemplates = await db
-			.select({
-				phaseTemplateId: phaseRoleAssignmentTemplates.phaseTemplateId,
-				roleTemplateId: phaseRoleAssignmentTemplates.roleTemplateId,
-				phaseOrder: phaseRoleAssignmentTemplates.phaseOrder,
-				phaseTemplate: phaseTemplates
-			})
-			.from(phaseRoleAssignmentTemplates)
-			.leftJoin(phaseTemplates, eq(phaseRoleAssignmentTemplates.phaseTemplateId, phaseTemplates.id));
-
+		
 		const createdPhases = [];
-		for (const assignment of allPhaseRoleAssignmentTemplates) {
-			// Find the corresponding role in this project
-			const [projectRole] = await db
-				.select()
-				.from(roles)
-				.where(and(
-					eq(roles.templateId, assignment.roleTemplateId),
-					eq(roles.projectId, newProject.id)
-				))
-				.limit(1);
+		// Create each unique phase template only once
+		for (const phaseTemplate of allPhaseTemplates) {
+			// Get all role assignments for this phase template to determine primary role
+			const roleAssignments = await db
+				.select({
+					roleTemplateId: phaseRoleAssignmentTemplates.roleTemplateId,
+					phaseOrder: phaseRoleAssignmentTemplates.phaseOrder,
+				})
+				.from(phaseRoleAssignmentTemplates)
+				.where(eq(phaseRoleAssignmentTemplates.phaseTemplateId, phaseTemplate.id))
+				.orderBy(phaseRoleAssignmentTemplates.phaseOrder);
 
-			if (projectRole && assignment.phaseTemplate) {
-				const [newPhaseContent] = await db
-					.insert(content)
-					.values({
-						projectId: newProject.id,
-						type: 'phase',
-						title: assignment.phaseTemplate.name,
-						body: assignment.phaseTemplate.workflow_description,
-						assignedToRoleType: projectRole.name,
-						phaseStatus: 'draft',
-						requiredInputs: assignment.phaseTemplate.required_inputs,
-						expectedOutputs: assignment.phaseTemplate.expected_outputs,
-						createdAt: new Date(),
-						updatedAt: new Date()
-					})
-					.returning();
+			if (roleAssignments.length > 0) {
+				// Use the first role assignment as the primary assignee
+				const primaryRoleAssignment = roleAssignments[0];
+				
+				// Find the corresponding role in this project
+				const [projectRole] = await db
+					.select()
+					.from(roles)
+					.where(and(
+						eq(roles.templateId, primaryRoleAssignment.roleTemplateId),
+						eq(roles.projectId, newProject.id)
+					))
+					.limit(1);
 
-				if (newPhaseContent) {
-					createdPhases.push(newPhaseContent);
+				if (projectRole) {
+					const [newPhaseContent] = await db
+						.insert(content)
+						.values({
+							projectId: newProject.id,
+							type: 'phase',
+							title: phaseTemplate.name,
+							body: phaseTemplate.workflow_description,
+							assignedToRoleType: projectRole.name,
+							phaseStatus: 'draft',
+							requiredInputs: phaseTemplate.required_inputs,
+							expectedOutputs: phaseTemplate.expected_outputs,
+							createdAt: new Date(),
+							updatedAt: new Date()
+						})
+						.returning();
+
+					if (newPhaseContent) {
+						createdPhases.push(newPhaseContent);
+						console.log(`✅ Created phase: ${phaseTemplate.name} assigned to ${projectRole.name}`);
+					}
 				}
 			}
 		}

@@ -27,6 +27,7 @@
 	},
 	"dependencies": {
 		"drizzle-orm": "^0.44.5",
+		"marked": "^16.2.1",
 		"pg": "^8.16.3"
 	}
 }

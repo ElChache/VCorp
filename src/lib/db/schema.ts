@@ -128,7 +128,7 @@ export const content = pgTable('content', {
 	projectId: integer('project_id').notNull().references(() => projects.id),
 	channelId: integer('channel_id').references(() => channels.id), // Can be null for DM messages
 	parentContentId: integer('parent_content_id'), // For replies and threaded conversations - self-reference added below
-	type: text('type').notNull(), // 'message', 'document', 'announcement', 'report', 'reply', 'ticket', 'phase'
+	type: text('type').notNull(), // 'message', 'document', 'reply', 'ticket', 'phase'
 	title: text('title'),
 	body: text('body').notNull(),
 	documentSlug: text('document_slug'), // Unique slug per project for referencing (e.g., 'pm-specification-document')

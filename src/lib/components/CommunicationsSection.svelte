@@ -1,13 +1,13 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { marked } from 'marked';
+	import { contentPollingService, contentPollingStore } from '$lib/services/ContentPollingService';
 
 	// Props
 	export let selectedProject: any = null;
 
 	// Communications Center variables
-	let directorInbox: any = { messages: [], categorized: { urgent: [], regular: [], read: [] }, stats: {}, summary: {} };
-	let directorActivity: any = { recentActivity: [], agentStats: [], channelStats: [], summary: {} };
-	let commsViewMode: 'urgent' | 'dashboard' | 'messages' | 'documents' | 'assistant' = 'urgent';
+	let commsViewMode: 'communications' | 'direct-messages' = 'communications';
 	let selectedMessage: any = null;
 	let showReplyDialog = false;
 	let replyContent = '';
@@ -26,58 +26,448 @@
 		assignedTo: string;
 	}> = [];
 
-	// All Messages variables
-	let allMessages: any[] = [];
-	let allMessagesSummary: any = {};
+	// Communications variables
+	let selectedChannel: any = null;
+	let channelMessages: any[] = [];
+	let newMessageContent = '';
+	let replyingToMessage: any = null;
+	let showAssignmentDialog = false;
+	let messageAssignments: Array<{
+		assignedToType: 'role' | 'agent' | 'squad';
+		assignedTo: string;
+	}> = [];
 
-	// Assistant variables
-	let assistantMessages: any[] = [];
-	let assistantMessageContent = '';
-	let assistantForwardingEnabled = false;
+	// Direct Messages variables
+	let dmAgents: any[] = [];
+	let selectedDMAgent: any = null;
+	let dmMessages: any[] = [];
+	let newDMContent = '';
 
 	// Channels for dropdown
 	let channels: any[] = [];
+	
+	// Data for dropdowns
+	let agents: any[] = [];
+	let roleTypes: any[] = [];
+	let squads: any[] = [];
 
 	// Event dispatcher for parent communication
 	import { createEventDispatcher } from 'svelte';
 	const dispatch = createEventDispatcher();
 
-	// Functions for loading director data
-	async function loadDirectorMessages() {
-		if (!selectedProject) {
-			directorInbox = { messages: [], categorized: { urgent: [], regular: [], read: [] }, stats: {}, summary: {} };
+	// Real-time updates
+	let contentUpdatesListener: any = null;
+	$: pollingState = $contentPollingStore;
+
+	// Unread message counts for badges
+	let totalUnreadCount = 0;
+	let channelUnreadCount = 0;
+	let dmUnreadCount = 0;
+
+	// Helper function to check if a message is unread by human director
+	function isUnreadByHumanDirector(message: any): boolean {
+		if (!message.readingAssignments) return false;
+		
+		return message.readingAssignments.some((assignment: any) => {
+			// Check if this assignment is for human-director
+			const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+			
+			if (!isForHumanDirector) return false;
+			
+			// Check if human-director has read this assignment
+			const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+			return !hasRead;
+		});
+	}
+
+	// Helper function to check if a message is fully read by all assigned agents
+	function isMessageFullyRead(message: any): boolean {
+		if (!message.readingAssignments) return false;
+		// Only consider assignments that have actual target agents
+		const assignmentsWithTargets = message.readingAssignments.filter((assignment: any) => assignment.totalTargets > 0);
+		if (assignmentsWithTargets.length === 0) return false;
+		return assignmentsWithTargets.every((assignment: any) => assignment.isFullyRead);
+	}
+
+	// Helper function to check if a message is partially read
+	function isMessagePartiallyRead(message: any): boolean {
+		if (!message.readingAssignments) return false;
+		// Only consider assignments that have actual target agents
+		const assignmentsWithTargets = message.readingAssignments.filter((assignment: any) => assignment.totalTargets > 0);
+		return assignmentsWithTargets.some((assignment: any) => assignment.readCount > 0 && !assignment.isFullyRead);
+	}
+
+	// Tooltip variables
+	let tooltip = null;
+	let tooltipTimeout = null;
+
+	// Global click handler to dismiss tooltip when clicking elsewhere
+	function handleGlobalClick(event: MouseEvent) {
+		if (tooltip && !tooltip.contains(event.target as Node)) {
+			// Clicked outside tooltip, hide it
+			document.body.removeChild(tooltip);
+			tooltip = null;
+			document.removeEventListener('click', handleGlobalClick);
+		}
+	}
+
+	// Toggle tooltip with agent read status
+	function toggleReadStatusTooltip(event: MouseEvent, message: any) {
+		// If tooltip is already open, close it
+		if (tooltip) {
+			document.body.removeChild(tooltip);
+			tooltip = null;
+			document.removeEventListener('click', handleGlobalClick);
+			return;
+		}
+
+		// Create tooltip content
+		const tooltipContent = createTooltipContent(message);
+		
+		// Create new tooltip
+		tooltip = document.createElement('div');
+		tooltip.className = 'read-status-tooltip';
+		tooltip.innerHTML = tooltipContent;
+		
+		document.body.appendChild(tooltip);
+		
+		// Position tooltip
+		const rect = (event.target as HTMLElement).getBoundingClientRect();
+		tooltip.style.position = 'fixed';
+		tooltip.style.left = `${rect.left + rect.width + 4}px`;
+		tooltip.style.top = `${rect.top - tooltip.offsetHeight / 2 + rect.height / 2}px`;
+		tooltip.style.zIndex = '1000';
+		tooltip.style.pointerEvents = 'auto';
+		
+		// Ensure tooltip doesn't go off-screen
+		const tooltipRect = tooltip.getBoundingClientRect();
+		if (tooltipRect.right > window.innerWidth) {
+			tooltip.style.left = `${rect.left - tooltip.offsetWidth - 4}px`;
+		}
+		if (tooltipRect.top < 0) {
+			tooltip.style.top = '8px';
+		}
+		
+		// Add global click handler to dismiss when clicking elsewhere
+		setTimeout(() => {
+			document.addEventListener('click', handleGlobalClick);
+		}, 0);
+	}
+
+	// Create tooltip content showing agent read status
+	function createTooltipContent(message: any): string {
+		if (!message.readingAssignments) return '';
+		
+		let content = '<div class="tooltip-header">Read Status</div>';
+		
+		// Group all agents from all assignments
+		const allAgents = new Map();
+		
+		message.readingAssignments.forEach((assignment: any) => {
+			if (assignment.targetAgents && assignment.readBy) {
+				assignment.targetAgents.forEach((agentId: string) => {
+					const readInfo = assignment.readBy.find((read: any) => read.agentId === agentId);
+					allAgents.set(agentId, {
+						hasRead: !!readInfo,
+						readAt: readInfo?.readAt,
+						acknowledged: readInfo?.acknowledged
+					});
+				});
+			}
+		});
+		
+		// Convert to sorted array
+		const agentEntries = Array.from(allAgents.entries()).sort(([a], [b]) => a.localeCompare(b));
+		
+		content += '<div class="agents-list">';
+		agentEntries.forEach(([agentId, status]) => {
+			const icon = status.hasRead ? '✅' : '⏳';
+			const className = status.hasRead ? 'agent-read' : 'agent-unread';
+			const readTime = status.hasRead && status.readAt ? ` (${new Date(status.readAt).toLocaleString()})` : '';
+			content += `<div class="agent-status ${className}">
+				<span class="agent-icon">${icon}</span>
+				<span class="agent-name">${agentId}</span>
+				<span class="read-time">${readTime}</span>
+			</div>`;
+		});
+		content += '</div>';
+		
+		return content;
+	}
+
+	// Fetch current unread counts from the server
+	async function loadUnreadCounts() {
+		if (!selectedProject) return;
+
+		try {
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				const data = await response.json();
+				calculateUnreadCountsFromData(data.updates);
+			}
+		} catch (error) {
+			console.error('Failed to load unread counts:', error);
+		}
+	}
+
+	// Calculate unread counts from content data
+	function calculateUnreadCountsFromData(updates: any) {
+		if (!updates) return;
+		
+		// Count unread channel messages (type "message" or "reply")
+		channelUnreadCount = updates.channelMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		).length || 0;
+
+		// Count unread direct messages (type "message" or "reply")
+		const unreadDMs = updates.directMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		) || [];
+		dmUnreadCount = unreadDMs.length;
+		
+		// Debug logging
+		console.log(`📊 DM Count Debug - Found ${updates.directMessages?.length || 0} total DMs, ${unreadDMs.length} unread:`, 
+			unreadDMs.map(dm => `ID:${dm.id} from:${dm.authorAgentId} type:${dm.type}`)
+		);
+
+		// Count unread documents  
+		const unreadDocs = updates.documents?.filter((doc: any) => 
+			isUnreadByHumanDirector(doc)
+		) || [];
+		const documentsUnreadCount = unreadDocs.length;
+		
+		// Total unread count (matching main page calculation)
+		totalUnreadCount = channelUnreadCount + dmUnreadCount + documentsUnreadCount;
+		
+		console.log(`📊 Total Unread Debug - Channels: ${channelUnreadCount}, DMs: ${dmUnreadCount}, Docs: ${documentsUnreadCount}, Total: ${totalUnreadCount}`);
+	}
+
+	// Update counts when new updates arrive
+	function updateUnreadCountsFromNewData(updates: any) {
+		if (!updates) return;
+
+		// Add new unread messages to existing counts
+		const newChannelUnread = updates.channelMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		).length || 0;
+
+		const newDmUnread = updates.directMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		).length || 0;
+
+		if (newChannelUnread > 0 || newDmUnread > 0) {
+			channelUnreadCount += newChannelUnread;
+			dmUnreadCount += newDmUnread;
+			totalUnreadCount = channelUnreadCount + dmUnreadCount;
+			
+			console.log(`📊 New unread messages - Channels: +${newChannelUnread}, DMs: +${newDmUnread}, Total: ${totalUnreadCount}`);
+		}
+	}
+
+	// Handle real-time content updates
+	function handleContentUpdates(event: CustomEvent) {
+		const { updates } = event.detail;
+		
+		console.log('📬 Processing real-time content updates:', updates);
+
+		// Update unread counts with new messages
+		updateUnreadCountsFromNewData(updates);
+
+		// Update channel messages if we have a selected channel
+		if (selectedChannel && updates.channelMessages?.length > 0) {
+			const relevantMessages = updates.channelMessages.filter(
+				(msg: any) => msg.channelId === selectedChannel.id
+			);
+			
+			if (relevantMessages.length > 0) {
+				console.log(`🔄 Adding ${relevantMessages.length} new messages to channel ${selectedChannel.name}`);
+				// Add new messages to existing messages, avoiding duplicates
+				const existingIds = new Set(channelMessages.map(m => m.id));
+				const newMessages = relevantMessages.filter(msg => !existingIds.has(msg.id));
+				
+				if (newMessages.length > 0) {
+					channelMessages = [...channelMessages, ...newMessages].sort(
+						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+					);
+				}
+			}
+		}
+
+		// Update direct messages if we have a selected DM agent
+		if (selectedDMAgent && updates.directMessages?.length > 0) {
+			const relevantDMs = updates.directMessages.filter(
+				(msg: any) => 
+					msg.authorAgentId === selectedDMAgent.id || 
+					(msg.readingAssignments?.some((assignment: any) => 
+						assignment.assignedToType === 'agent' && assignment.assignedTo === selectedDMAgent.id
+					))
+			);
+			
+			if (relevantDMs.length > 0) {
+				console.log(`🔄 Adding ${relevantDMs.length} new DMs with ${selectedDMAgent.id}`);
+				// Add new DMs to existing messages, avoiding duplicates
+				const existingIds = new Set(dmMessages.map(m => m.id));
+				const newDMs = relevantDMs.filter(msg => !existingIds.has(msg.id));
+				
+				if (newDMs.length > 0) {
+					dmMessages = [...dmMessages, ...newDMs].sort(
+						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+					);
+				}
+			}
+		}
+
+		// Update channel list with new unread counts
+		if (updates.channelMessages?.length > 0) {
+			loadChannels(); // Refresh channel list to update unread counts
+		}
+
+		// Update DM agent list with new message indicators
+		if (updates.directMessages?.length > 0) {
+			loadDMAgents(); // Refresh DM agents list
+		}
+	}
+
+	// Start polling when project changes
+	function startPolling() {
+		if (selectedProject && selectedProject.id) {
+			console.log(`🚀 Starting real-time polling for project ${selectedProject.id}`);
+			contentPollingService.startPolling(selectedProject.id);
+		}
+	}
+
+	// Stop polling
+	function stopPolling() {
+		console.log('⏹️ Stopping real-time polling');
+		contentPollingService.stopPolling();
+	}
+
+	// Functions for loading channel messages
+	async function loadChannelMessages(channel) {
+		if (!channel) {
+			channelMessages = [];
 			return;
 		}
 
 		try {
-			const response = await fetch(`/api/director/inbox?projectId=${selectedProject.id}`);
+			console.log(`Loading messages for channel: ${channel.name} (ID: ${channel.id})`);
+			const response = await fetch(`/api/channels/${channel.id}/messages`);
 			if (response.ok) {
-				directorInbox = await response.json();
+				channelMessages = await response.json();
+				console.log(`✅ Loaded ${channelMessages.length} messages for channel ${channel.name}`);
 			} else {
-				console.error('Failed to load director messages:', response.status);
+				console.error('Failed to load channel messages:', response.status);
+				channelMessages = [];
 			}
 		} catch (error) {
-			console.error('Failed to load director messages:', error);
+			console.error('Error loading channel messages:', error);
+			channelMessages = [];
 		}
 	}
 
-	async function loadDirectorActivity() {
-		if (!selectedProject) {
-			directorActivity = { recentActivity: [], agentStats: [], channelStats: [], summary: {} };
-			return;
-		}
+	function onChannelSelect(channel) {
+		selectedChannel = channel;
+		loadChannelMessages(channel);
+	}
 
+	// Helper functions for messages
+	function formatMessageTime(timestamp) {
+		const date = new Date(timestamp);
+		const now = new Date();
+		const diffMs = now.getTime() - date.getTime();
+		const diffMins = Math.floor(diffMs / 60000);
+		
+		if (diffMins < 1) return 'Just now';
+		if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
+		
+		const diffHours = Math.floor(diffMins / 60);
+		if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+		
+		const diffDays = Math.floor(diffHours / 24);
+		if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+		
+		return date.toLocaleDateString();
+	}
+
+	function hasUnreadAssignmentForHumanDirector(message) {
+		if (!message.readingAssignments) return false;
+		
+		return message.readingAssignments.some(assignment => {
+			// Check if this assignment is for human-director
+			const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+			
+			if (!isForHumanDirector) return false;
+			
+			// Check if human-director has read this assignment
+			const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
+			return !hasRead;
+		});
+	}
+
+	function startReply(message) {
+		replyingToMessage = message;
+		replyContent = '';
+	}
+
+	function cancelReply() {
+		replyingToMessage = null;
+		replyContent = '';
+	}
+
+	async function markMessageAsRead(message) {
+		if (!message.readingAssignments) return;
+		
 		try {
-			const response = await fetch(`/api/director/activity?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				directorActivity = await response.json();
-			} else {
-				console.error('Failed to load director activity:', response.status);
+			// Find the assignment(s) for human-director
+			const humanDirectorAssignments = message.readingAssignments.filter(assignment => {
+				return (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				       (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+			});
+			
+			// Mark each assignment as read
+			let markedAsRead = false;
+			for (const assignment of humanDirectorAssignments) {
+				// Check if already read to avoid duplicate marking
+				const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
+				if (!hasRead) {
+					await fetch('/api/reading-assignments/mark-read', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							assignmentId: assignment.id,
+							agentId: 'human-director'
+						})
+					});
+					markedAsRead = true;
+				}
+			}
+			
+			// Update unread counts if we marked something as read
+			if (markedAsRead && (message.type === 'message' || message.type === 'reply')) {
+				if (message.channelId) {
+					channelUnreadCount = Math.max(0, channelUnreadCount - 1);
+				} else {
+					dmUnreadCount = Math.max(0, dmUnreadCount - 1);
+				}
+				totalUnreadCount = channelUnreadCount + dmUnreadCount;
+				console.log(`📖 Marked message as read. Updated counts - Total: ${totalUnreadCount}, Channels: ${channelUnreadCount}, DMs: ${dmUnreadCount}`);
+			}
+			
+			// Refresh the channel messages and channel list
+			if (selectedChannel) {
+				await loadChannelMessages(selectedChannel);
+				await loadChannels();
 			}
 		} catch (error) {
-			console.error('Failed to load director activity:', error);
+			console.error('Failed to mark message as read:', error);
 		}
 	}
+
+
+
+
 
 	async function loadChannels() {
 		if (!selectedProject) {
@@ -88,7 +478,52 @@
 		try {
 			const response = await fetch(`/api/channels?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				channels = await response.json();
+				const channelsData = await response.json();
+				
+				// Load message counts for each channel
+				const channelsWithCounts = await Promise.all(
+					channelsData.map(async (channel) => {
+						try {
+							const msgResponse = await fetch(`/api/channels/${channel.id}/messages?projectId=${selectedProject.id}`);
+							if (msgResponse.ok) {
+								const messages = await msgResponse.json();
+								
+								// Calculate unread messages for human-director
+								let unreadCount = 0;
+								messages.forEach(message => {
+									if (message.readingAssignments) {
+										message.readingAssignments.forEach(assignment => {
+											// Check if this assignment is for human-director and unread
+											if ((assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+											    (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director')) {
+												// Check if human-director has read this assignment
+												const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
+												if (!hasRead) {
+													unreadCount++;
+												}
+											}
+										});
+									}
+								});
+								
+								return {
+									...channel,
+									messageCount: messages.length,
+									unreadCount: unreadCount
+								};
+							}
+						} catch (error) {
+							console.error(`Failed to load messages for channel ${channel.id}:`, error);
+						}
+						return {
+							...channel,
+							messageCount: 0,
+							unreadCount: 0
+						};
+					})
+				);
+				
+				channels = channelsWithCounts;
 			} else {
 				console.error('Failed to load channels:', response.status);
 			}
@@ -97,164 +532,211 @@
 		}
 	}
 
-	async function loadAllMessages() {
+	async function loadAgents() {
 		if (!selectedProject) {
-			allMessages = [];
-			allMessagesSummary = {};
+			agents = [];
 			return;
 		}
 
 		try {
-			const response = await fetch(`/api/messages/all?projectId=${selectedProject.id}`);
+			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				const data = await response.json();
-				allMessages = data.messages;
-				allMessagesSummary = data.summary;
-				console.log(`📬 Loaded ${allMessages.length} messages for All Messages view`);
+				agents = await response.json();
 			} else {
-				console.error('Failed to load all messages:', response.status);
+				console.error('Failed to load agents:', response.status);
 			}
 		} catch (error) {
-			console.error('Failed to load all messages:', error);
+			console.error('Failed to load agents:', error);
 		}
 	}
-	
-	async function loadAssistantMessages() {
+
+	async function loadRoleTypes() {
 		if (!selectedProject) {
-			assistantMessages = [];
+			roleTypes = [];
 			return;
 		}
-		
+
 		try {
-			const response = await fetch(`/api/messages/assistant?projectId=${selectedProject.id}`);
+			const response = await fetch(`/api/projects/${selectedProject.id}/role-types`);
+			if (response.ok) {
+				roleTypes = await response.json();
+			} else {
+				console.error('Failed to load role types:', response.status);
+			}
+		} catch (error) {
+			console.error('Failed to load role types:', error);
+		}
+	}
+
+	async function loadSquads() {
+		if (!selectedProject) {
+			squads = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/squads?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				squads = await response.json();
+			} else {
+				console.error('Failed to load squads:', response.status);
+			}
+		} catch (error) {
+			console.error('Failed to load squads:', error);
+		}
+	}
+
+	async function loadDMAgents() {
+		if (!selectedProject) {
+			dmAgents = [];
+			return;
+		}
+
+		try {
+			// Use the polling data to get direct messages (much more reliable)
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
 			if (response.ok) {
 				const data = await response.json();
-				assistantMessages = data.messages;
-				console.log(`🤖 Loaded ${assistantMessages.length} assistant messages`);
-			} else {
-				console.error('Failed to load assistant messages:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load assistant messages:', error);
-		}
-	}
-	
-	async function sendAssistantMessage() {
-		if (!assistantMessageContent.trim() || !selectedProject) return;
-		
-		try {
-			// Create the message
-			const response = await fetch(`/api/channels/0/messages`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					type: 'message',
-					title: null,
-					body: assistantMessageContent,
-					authorAgentId: null, // Human director
-					projectId: selectedProject.id
-				})
-			});
-			
-			if (response.ok) {
-				const newMessage = await response.json();
+				const directMessages = data.updates.directMessages || [];
 				
-				// Create reading assignment for Director Assistant role
-				await fetch(`/api/reading-assignments`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						contentId: newMessage.id,
-						assignedToType: 'role',
-						assignedTo: 'Director Assistant'
-					})
+				// Get unique agents from DMs (either as author or recipient to human-director)
+				const agentIds = new Set();
+				directMessages.forEach(dm => {
+					// Add the author if it's not human-director
+					if (dm.authorAgentId && dm.authorAgentId !== 'human-director') {
+						agentIds.add(dm.authorAgentId);
+					}
+					// Add agents who have reading assignments from human-director messages
+					if (dm.authorAgentId === 'human-director' && dm.readingAssignments) {
+						dm.readingAssignments.forEach(assignment => {
+							if (assignment.assignedToType === 'agent' && 
+							    assignment.assignedTo !== 'human-director') {
+								agentIds.add(assignment.assignedTo);
+							}
+						});
+					}
+				});
+
+				// Create agent objects for the UI
+				dmAgents = Array.from(agentIds).map(agentId => {
+					// Find the most recent message with this agent
+					const recentMessage = directMessages
+						.filter(dm => 
+							dm.authorAgentId === agentId || 
+							(dm.authorAgentId === 'human-director' && 
+							 dm.readingAssignments?.some(a => a.assignedToType === 'agent' && a.assignedTo === agentId))
+						)
+						.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+					// Count unread messages from this agent to human-director (using same logic as badge)
+					const unreadCount = directMessages.filter(dm => 
+						dm.authorAgentId === agentId && 
+						(dm.type === 'message' || dm.type === 'reply') &&
+						isUnreadByHumanDirector(dm)
+					).length;
+
+					// Get display name for the agent
+					let roleType = 'Unknown';
+					if (agentId === 'pm_001') roleType = 'Product Manager';
+					else if (agentId.startsWith('be_')) roleType = 'Backend Developer';
+					else if (agentId.startsWith('fe_')) roleType = 'Frontend Developer';
+					else if (agentId.startsWith('ai_')) roleType = 'AI Developer';
+					else if (agentId.startsWith('ux_')) roleType = 'UX Expert';
+					else if (agentId.startsWith('design_')) roleType = 'Graphic Designer';
+					else if (agentId.startsWith('qa_')) roleType = 'Technical QA';
+					else if (agentId.startsWith('sa_')) roleType = 'System Architect';
+
+					return {
+						id: agentId,
+						roleType: roleType,
+						status: 'online',
+						lastMessageAt: recentMessage?.createdAt || null,
+						unreadCount: unreadCount
+					};
 				});
 				
-				// Reset form and reload messages
-				assistantMessageContent = '';
-				await loadAssistantMessages();
-				console.log('✅ Message sent to Director Assistant');
-			} else {
-				console.error('Failed to send assistant message:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to send assistant message:', error);
-		}
-	}
-
-	async function toggleAssistantForwarding() {
-		try {
-			const response = await fetch('/api/assistant/forwarding', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					enabled: assistantForwardingEnabled,
-					projectId: selectedProject?.id
-				})
-			});
-
-			if (response.ok) {
-				console.log(`✅ Assistant forwarding ${assistantForwardingEnabled ? 'enabled' : 'disabled'}`);
-				
-				// Send notification to assistant about forwarding status
-				if (assistantForwardingEnabled) {
-					await notifyAssistantAboutForwarding();
-				}
-			} else {
-				console.error('Failed to toggle assistant forwarding:', response.status);
-				// Revert the toggle on failure
-				assistantForwardingEnabled = !assistantForwardingEnabled;
-			}
-		} catch (error) {
-			console.error('Failed to toggle assistant forwarding:', error);
-			// Revert the toggle on failure
-			assistantForwardingEnabled = !assistantForwardingEnabled;
-		}
-	}
-
-	async function notifyAssistantAboutForwarding() {
-		if (!selectedProject) return;
-
-		try {
-			const response = await fetch(`/api/channels/0/messages`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					type: 'message',
-					title: 'Assistant Forwarding Activated',
-					body: `🤖 ASSISTANT FORWARDING ENABLED
-
-The Human Director has enabled message forwarding to you. You are now authorized to:
-
-• Receive copies of all messages directed to 'human-director'
-• Respond on behalf of the Human Director when appropriate
-• Make decisions within your defined authority scope
-• Escalate only when necessary per your role guidelines
-
-You should now actively monitor for incoming messages and respond promptly to keep projects moving forward during unsupervised periods.
-
-Status: ACTIVE - Ready to assist with full authority`,
-					authorAgentId: null,
-					projectId: selectedProject.id
-				})
-			});
-
-			if (response.ok) {
-				// Create reading assignment for Director Assistant
-				await fetch('/api/reading-assignments', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						contentId: (await response.json()).id,
-						assignedToType: 'role',
-						assignedTo: 'Director Assistant'
-					})
+				// Sort by most recent message date (desc)
+				dmAgents.sort((a, b) => {
+					if (!a.lastMessageAt && !b.lastMessageAt) return 0;
+					if (!a.lastMessageAt) return 1;
+					if (!b.lastMessageAt) return -1;
+					return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
 				});
+
+				console.log(`📱 DM Agents Debug:`, {
+					totalDMs: directMessages.length,
+					agentIds: Array.from(agentIds),
+					loadedAgents: dmAgents.length,
+					agentDetails: dmAgents.map(a => `${a.id} (unread: ${a.unreadCount}, last: ${a.lastMessageAt})`)
+				});
+			} else {
+				console.error('Failed to load DM content:', response.status);
 			}
 		} catch (error) {
-			console.error('Failed to notify assistant about forwarding:', error);
+			console.error('Failed to load DM agents:', error);
 		}
 	}
+
+	async function loadDMMessages(agentId) {
+		if (!selectedProject || !agentId) {
+			dmMessages = [];
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/messages/conversation?projectId=${selectedProject.id}&agent1=human-director&agent2=${agentId}`);
+			if (response.ok) {
+				dmMessages = await response.json();
+				console.log(`📬 Loaded ${dmMessages.length} DM messages with ${agentId}`);
+			} else {
+				console.error('Failed to load DM messages:', response.status);
+				dmMessages = [];
+			}
+		} catch (error) {
+			console.error('Error loading DM messages:', error);
+			dmMessages = [];
+		}
+	}
+
+	function onDMAgentSelect(agent) {
+		selectedDMAgent = agent;
+		loadDMMessages(agent.id);
+	}
+
+	async function sendDMMessage() {
+		if (!newDMContent.trim() || !selectedDMAgent || !selectedProject) return;
+
+		try {
+			const response = await fetch('/api/send-message', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					projectId: selectedProject.id,
+					authorAgentId: 'human-director',
+					body: newDMContent,
+					channelId: null, // This makes it a DM
+					type: 'message',
+					assignTo: [
+						{
+							type: 'agent',
+							target: selectedDMAgent.id
+						}
+					]
+				})
+			});
+
+			if (response.ok) {
+				newDMContent = '';
+				await loadDMMessages(selectedDMAgent.id);
+				await loadDMAgents(); // Refresh agent list to update timestamps
+			} else {
+				console.error('Failed to send DM:', response.status);
+			}
+		} catch (error) {
+			console.error('Failed to send DM:', error);
+		}
+	}
+
 
 	function openReplyDialog(message: any) {
 		selectedMessage = message;
@@ -271,7 +753,11 @@ Status: ACTIVE - Ready to assist with full authority`,
 	}
 
 	async function sendReply() {
-		if (!replyContent.trim() || !replyToMessageId || !selectedProject) return;
+		// Support both dialog reply (replyToMessageId) and inline reply (replyingToMessage)
+		const messageId = replyToMessageId || replyingToMessage?.id;
+		const message = selectedMessage || replyingToMessage;
+		
+		if (!replyContent.trim() || !messageId || !selectedProject) return;
 
 		try {
 			const response = await fetch('/api/send-message', {
@@ -279,24 +765,33 @@ Status: ACTIVE - Ready to assist with full authority`,
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					projectId: selectedProject.id,
-					authorAgentId: null, // Human director
+					authorAgentId: 'human-director', // Human director
 					title: null,
 					body: replyContent,
-					channelId: selectedMessage?.channelId || null,
-					parentContentId: replyToMessageId,
+					channelId: message?.channelId || selectedChannel?.id || null,
+					parentContentId: messageId,
 					type: 'reply',
 					assignTo: [
 						{
 							type: 'agent',
-							target: selectedMessage?.authorAgentId || 'unknown'
+							target: message?.authorAgentId || 'unknown'
 						}
 					]
 				})
 			});
 
 			if (response.ok) {
-				closeReplyDialog();
-				await loadDirectorMessages(); // Refresh inbox
+				// Handle dialog reply
+				if (replyToMessageId) {
+					closeReplyDialog();
+				} 
+				// Handle inline reply
+				else if (replyingToMessage) {
+					cancelReply(); // Clear inline reply state
+					if (selectedChannel) {
+						await loadChannelMessages(selectedChannel); // Refresh channel messages
+					}
+				}
 			} else {
 				console.error('Failed to send reply:', response.status);
 			}
@@ -329,18 +824,22 @@ Status: ACTIVE - Ready to assist with full authority`,
 	}
 
 	async function sendMessage() {
-		if (!newMessage.body.trim() || !selectedProject) return;
+		// Handle both channel messaging (newMessageContent) and dialog messaging (newMessage.body)
+		const messageBody = newMessageContent || newMessage.body;
+		const channelId = selectedChannel?.id || newMessage.channelId;
+		
+		if (!messageBody.trim() || !selectedProject) return;
 
 		try {
 			// Create the message
-			const response = await fetch(`/api/channels/${newMessage.channelId || 0}/messages`, {
+			const response = await fetch(`/api/channels/${channelId || 0}/messages`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					type: newMessage.type,
+					type: newMessage.type || 'message',
 					title: newMessage.title || null,
-					body: newMessage.body,
-					authorAgentId: null, // Human director
+					body: messageBody,
+					authorAgentId: 'human-director', // Human director
 					projectId: selectedProject.id
 				})
 			});
@@ -373,31 +872,22 @@ Status: ACTIVE - Ready to assist with full authority`,
 				}
 			}
 
-			resetSendMessageDialog();
-			await loadDirectorMessages(); // Refresh inbox
+			// Clear the appropriate input field
+			if (newMessageContent) {
+				// Channel messaging - clear the channel input and reload channel messages
+				newMessageContent = '';
+				if (selectedChannel) {
+					await loadChannelMessages(selectedChannel);
+				}
+			} else {
+				// Dialog messaging - reset dialog
+				resetSendMessageDialog();
+			}
 		} catch (error) {
 			console.error('Failed to send message:', error);
 		}
 	}
 
-	async function markAsRead(messageId: number, assignmentId: number) {
-		try {
-			const response = await fetch('/api/reading-assignments/mark-read', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					assignmentId,
-					agentId: 'director'
-				})
-			});
-
-			if (response.ok) {
-				await loadDirectorMessages(); // Refresh inbox
-			}
-		} catch (error) {
-			console.error('Failed to mark as read:', error);
-		}
-	}
 
 	function formatTimeAgo(timestamp: string): string {
 		const now = new Date();
@@ -418,26 +908,63 @@ Status: ACTIVE - Ready to assist with full authority`,
 	}
 
 	function getMessageIcon(message: any): string {
+		if (message.isReply) return '↩️';
 		if (message.isDM) return '💬';
 		if (message.isDirectorChannel) return '📢';
-		if (message.isReply) return '↩️';
-		if (message.type === 'announcement') return '📣';
-		if (message.type === 'report') return '📊';
 		if (message.type === 'document') return '📄';
 		return '💭';
 	}
 
 	// Load data when project changes
 	$: if (selectedProject) {
-		loadDirectorMessages();
-		loadDirectorActivity();
 		loadChannels();
+		loadAgents();
+		loadRoleTypes();
+		loadSquads();
+		loadDMAgents();
+		loadUnreadCounts(); // Load initial unread counts
+		startPolling(); // Start real-time polling for the new project
 	}
+
+	// Lifecycle management
+	onMount(() => {
+		// Set up event listener for content updates
+		contentUpdatesListener = (event: CustomEvent) => handleContentUpdates(event);
+		window.addEventListener('contentUpdates', contentUpdatesListener);
+		
+		// Start polling if we already have a selected project
+		if (selectedProject) {
+			startPolling();
+		}
+	});
+
+	onDestroy(() => {
+		// Clean up event listener
+		if (contentUpdatesListener) {
+			window.removeEventListener('contentUpdates', contentUpdatesListener);
+		}
+		
+		// Stop polling
+		stopPolling();
+	});
 </script>
 
 <div class="communications-section">
 	<div class="section-header">
-		<h2>📬 Communications Center</h2>
+		<div class="header-left">
+			<h2>📬 Communications Center</h2>
+			{#if pollingState.isPolling}
+				<div class="polling-indicator">
+					<span class="polling-dot"></span>
+					<span class="polling-text">Live updates</span>
+				</div>
+			{:else if pollingState.error}
+				<div class="polling-error">
+					<span class="error-dot"></span>
+					<span class="error-text">Connection error</span>
+				</div>
+			{/if}
+		</div>
 		<button 
 			class="btn-primary"
 			on:click={() => showSendMessageDialog = true}
@@ -449,396 +976,409 @@ Status: ACTIVE - Ready to assist with full authority`,
 	<div class="comms-nav">
 		<button 
 			class="comms-nav-btn" 
-			class:active={commsViewMode === 'urgent'}
-			on:click={() => commsViewMode = 'urgent'}
+			class:active={commsViewMode === 'communications'}
+			on:click={() => commsViewMode = 'communications'}
 		>
-			🚨 Urgent ({directorInbox.categorized?.urgent?.length || 0})
+			<span class="nav-btn-content">
+				📺 Channels
+				{#if channelUnreadCount > 0}
+					<span class="unread-badge nav-badge">{channelUnreadCount}</span>
+				{/if}
+			</span>
 		</button>
 		<button 
 			class="comms-nav-btn" 
-			class:active={commsViewMode === 'dashboard'}
-			on:click={() => commsViewMode = 'dashboard'}
+			class:active={commsViewMode === 'direct-messages'}
+			on:click={() => commsViewMode = 'direct-messages'}
 		>
-			📊 Dashboard
-		</button>
-		<button 
-			class="comms-nav-btn" 
-			class:active={commsViewMode === 'messages'}
-			on:click={() => { commsViewMode = 'messages'; loadAllMessages(); }}
-		>
-			💬 All Messages ({allMessagesSummary.total || 0})
-		</button>
-		<button 
-			class="comms-nav-btn" 
-			class:active={commsViewMode === 'assistant'}
-			on:click={() => { commsViewMode = 'assistant'; loadAssistantMessages(); }}
-		>
-			🤖 Assistant ({assistantMessages.length || 0})
+			<span class="nav-btn-content">
+				📩 Direct Messages
+				{#if dmUnreadCount > 0}
+					<span class="unread-badge nav-badge">{dmUnreadCount}</span>
+				{/if}
+			</span>
 		</button>
 	</div>
 
 	<div class="comms-content">
-		{#if commsViewMode === 'urgent'}
-			<div class="urgent-view">
-				<h3>🚨 Urgent Messages</h3>
-				{#if directorInbox.categorized?.urgent?.length > 0}
-					<div class="message-list">
-						{#each directorInbox.categorized.urgent as message}
-							<div class="message-card urgent" class:unread={!message.isRead}>
-								<div class="message-header">
-									<div class="message-meta">
-										<span class="message-icon">{getMessageIcon(message)}</span>
-										<span class="message-source">
-											{#if message.isDM}
-												DM from {message.authorAgentId}
-											{:else if message.isDirectorChannel}
-												#{message.channelName} (Director Channel)
-											{:else}
-												#{message.channelName}
+		{#if commsViewMode === 'communications'}
+			<div class="communications-view">
+				<div class="communications-left">
+					<div class="channels-panel">
+						<div class="channels-header">
+							<h3>Channels ({channels.length})</h3>
+						</div>
+						
+						<div class="channel-list">
+							{#each channels.sort((a, b) => (b.isForHumanDirector ? 1 : 0) - (a.isForHumanDirector ? 1 : 0)) as channel}
+								<div 
+									class="channel-item"
+									class:active={selectedChannel?.id === channel.id}
+									on:click={() => onChannelSelect(channel)}
+								>
+									<div class="channel-header">
+										<span class="channel-name">#{channel.name}</span>
+										{#if channel.isForHumanDirector}
+											<span class="channel-badge human-director">👤 Human</span>
+										{/if}
+										{#if channel.isMainChannel}
+											<span class="channel-badge">Main</span>
+										{/if}
+									</div>
+									<div class="channel-details">
+										<span class="channel-stats">
+											{channel.messageCount || 0} messages
+											{#if channel.unreadCount > 0}
+												• <span class="unread-count">{channel.unreadCount} unread</span>
 											{/if}
 										</span>
-										<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-									</div>
-									<div class="message-actions">
-										{#if !message.isRead}
-											<button class="btn-small" on:click={() => markAsRead(message.messageId, message.assignmentId)}>
-												Mark Read
-											</button>
-										{/if}
-										<button class="btn-small btn-primary" on:click={() => openReplyDialog(message)}>
-											Reply
-										</button>
 									</div>
 								</div>
-								<div class="message-content">
-									<div class="message-body">{message.body}</div>
-									{#if message.parentMessage}
-										<div class="parent-context">
-											<small>↩️ Replying to: "{message.parentMessage.body.substring(0, 50)}..."</small>
+							{/each}
+						</div>
+					</div>
+				</div>
+				
+				<div class="communications-right">
+					{#if selectedChannel}
+						<div class="messages-view">
+							<div class="messages-container">
+								<div class="messages-list">
+									{#if channelMessages.length > 0}
+										{#each channelMessages as message}
+											<div class="message" class:ticket={message.type === 'ticket'} class:reply={message.parentContentId}>
+												<div class="message-header">
+													<span class="message-author">{message.authorAgentId || 'System'}</span>
+													{#if message.type === 'ticket'}
+														<span class="message-type ticket-badge">🎫 TICKET</span>
+													{/if}
+													<span class="message-time">{formatMessageTime(message.createdAt)}</span>
+												</div>
+												
+												{#if message.type === 'ticket'}
+													<div class="ticket-info">
+														<div class="ticket-header">
+															<h4 class="ticket-title">{message.title}</h4>
+															<div class="ticket-badges">
+																{#if message.priority}
+																	<span class="priority-badge priority-{message.priority}">{message.priority.toUpperCase()}</span>
+																{/if}
+																{#if message.status}
+																	<span class="status-badge status-{message.status.replace('_', '-')}">{message.status.replace('_', ' ').toUpperCase()}</span>
+																{/if}
+															</div>
+														</div>
+														
+														<div class="ticket-assignment">
+															{#if message.assignedToRoleType}
+																<span class="assigned-role">👥 {message.assignedToRoleType}</span>
+															{/if}
+															{#if message.claimedByAgent}
+																<span class="claimed-agent">👤 {message.claimedByAgent}</span>
+															{/if}
+														</div>
+														
+														<div class="ticket-body markdown-content">
+															{@html marked((message.body || '').replace(/\\n/g, '\n'))}
+														</div>
+														
+														{#if message.updatedAt && message.updatedAt !== message.createdAt}
+															<div class="ticket-updated">
+																Last updated: {formatMessageTime(message.updatedAt)}
+															</div>
+														{/if}
+													</div>
+												{:else}
+													<div class="message-content markdown-content">
+														{#if message.title && message.title !== message.body}
+															<strong>{message.title}</strong><br>
+														{/if}
+														{@html marked((message.body || '').replace(/\\n/g, '\n'))}
+													</div>
+													<div class="message-actions">
+														{#if message.readingAssignments && message.readingAssignments.length > 0}
+															<div class="read-status-icon-container" 
+																 on:click={(e) => toggleReadStatusTooltip(e, message)}>
+																<span class="read-status-icon" class:fully-read={isMessageFullyRead(message)} class:partially-read={isMessagePartiallyRead(message)}>
+																	{#if isMessageFullyRead(message)}
+																		✅
+																	{:else if isMessagePartiallyRead(message)}
+																		👀
+																	{:else}
+																		📩
+																	{/if}
+																</span>
+															</div>
+														{/if}
+														{#if hasUnreadAssignmentForHumanDirector(message)}
+															<button 
+																class="reply-btn mark-read-btn" 
+																on:click={() => markMessageAsRead(message)}
+															>
+																Mark Read
+															</button>
+														{/if}
+														<button 
+															class="reply-btn" 
+															on:click={() => startReply(message)}
+														>
+															Reply
+														</button>
+													</div>
+												{/if}
+												
+												<!-- Replies section -->
+												{#if message.replies && message.replies.length > 0}
+													<div class="message-replies">
+														<div class="replies-header">
+															<span class="replies-count">{message.replies.length} {message.replies.length === 1 ? 'reply' : 'replies'}</span>
+														</div>
+														{#each message.replies as reply}
+															<div class="reply-message">
+																<div class="reply-header">
+																	<span class="reply-author">{reply.authorAgentId || 'System'}</span>
+																	<span class="reply-time">{formatMessageTime(reply.createdAt)}</span>
+																</div>
+																<div class="reply-content">
+																	{reply.body}
+																</div>
+															</div>
+														{/each}
+													</div>
+												{/if}
+												
+												<!-- Reply input interface - appears only for the message being replied to -->
+												{#if replyingToMessage && replyingToMessage.id === message.id}
+													<div class="reply-input-container">
+														<div class="reply-input-wrapper">
+															<input 
+																type="text" 
+																class="reply-input" 
+																placeholder="Type your reply..." 
+																bind:value={replyContent}
+																on:keydown={(e) => {
+																	if (e.key === 'Enter' && !e.shiftKey) {
+																		e.preventDefault();
+																		sendReply();
+																	} else if (e.key === 'Escape') {
+																		cancelReply();
+																	}
+																}}
+																autofocus
+															/>
+															<button 
+																class="send-btn" 
+																on:click={sendReply}
+																disabled={!replyContent.trim()}
+															>
+																Reply
+															</button>
+															<button class="cancel-reply-btn" on:click={cancelReply}>×</button>
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									{:else}
+										<div class="no-messages">
+											<p>No messages in this channel yet.</p>
+											<p>Start the conversation!</p>
 										</div>
 									{/if}
 								</div>
 							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class="empty-state">
-						<h4>✅ No urgent messages!</h4>
-						<p>All caught up on priority communications.</p>
-					</div>
-				{/if}
-			</div>
-
-		{:else if commsViewMode === 'assistant'}
-			<div class="assistant-view">
-				<div class="assistant-header">
-					<div class="assistant-title-row">
-						<div>
-							<h3>🤖 Director Assistant</h3>
-							<p class="assistant-description">Direct communication with your assistant</p>
-						</div>
-						<div class="assistant-controls">
-							<label class="toggle-container">
-								<span class="toggle-label">Forward messages to assistant</span>
-								<input 
-									type="checkbox" 
-									bind:checked={assistantForwardingEnabled}
-									on:change={toggleAssistantForwarding}
-								/>
-								<span class="toggle-slider"></span>
-							</label>
-						</div>
-					</div>
-					{#if assistantForwardingEnabled}
-						<div class="forwarding-notice">
-							<span class="notice-icon">📬</span>
-							<span>Assistant will receive copies of all messages directed to you and can respond on your behalf</span>
-						</div>
-					{/if}
-				</div>
-				
-				<div class="assistant-chat">
-					{#if assistantMessages.length > 0}
-						<div class="message-list">
-							{#each assistantMessages as message}
-								<div class="assistant-message" class:from-assistant={message.isFromAssistant} class:from-director={message.isFromDirector}>
-									<div class="message-header">
-										<span class="message-author">
-											{#if message.isFromAssistant}
-												🤖 Assistant ({message.authorAgentId})
-											{:else}
-												👤 You
-											{/if}
-										</span>
-										<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-									</div>
-									<div class="message-body">{message.body}</div>
+							<div class="message-input-container">
+								
+								<div class="message-input-wrapper">
+									<input 
+										type="text" 
+										class="message-input" 
+										placeholder="Type a message..." 
+										bind:value={newMessageContent}
+										on:keydown={(e) => {
+											if (e.key === 'Enter' && !e.shiftKey) {
+												e.preventDefault();
+												sendMessage();
+											}
+										}}
+									/>
+									<button 
+										class="send-btn" 
+										on:click={sendMessage}
+										disabled={!newMessageContent.trim()}
+									>
+										Send
+									</button>
 								</div>
-							{/each}
+								<p class="input-note">Press Enter to send message</p>
+							</div>
 						</div>
 					{:else}
-						<div class="empty-chat">
-							<div class="empty-icon">💬</div>
-							<h4>No messages yet</h4>
-							<p>Start a conversation with your Director Assistant</p>
+						<div class="communications-placeholder">
+							<h3>💬 Communications</h3>
+							<p>Select a channel from the left to start chatting.</p>
 						</div>
 					{/if}
 				</div>
-				
-				<div class="assistant-input">
-					<div class="input-container">
-						<textarea
-							bind:value={assistantMessageContent}
-							placeholder="Type your message to the assistant..."
-							rows="3"
-							on:keydown={(e) => {
-								if (e.key === 'Enter' && !e.shiftKey) {
-									e.preventDefault();
-									sendAssistantMessage();
-								}
-							}}
-						></textarea>
-						<button 
-							class="send-btn" 
-							on:click={sendAssistantMessage}
-							disabled={!assistantMessageContent.trim()}
-						>
-							Send
-						</button>
-					</div>
-					<div class="input-hint">
-						<span>📝 Press Enter to send, Shift+Enter for new line</span>
-					</div>
-				</div>
 			</div>
-
-		{:else if commsViewMode === 'dashboard'}
-			<div class="dashboard-view">
-				<div class="dashboard-grid">
-					<div class="dashboard-card">
-						<h3>📊 Activity Overview</h3>
-						{#if directorActivity.summary}
-							<div class="activity-stats">
-								<div class="stat-item">
-									<span class="stat-number">{directorActivity.summary.totalMessages}</span>
-									<span class="stat-label">Total Messages</span>
-								</div>
-								<div class="stat-item">
-									<span class="stat-number">{directorActivity.summary.activeAgents}</span>
-									<span class="stat-label">Active Agents</span>
-								</div>
-								<div class="stat-item">
-									<span class="stat-number">{directorActivity.summary.activeChannels}</span>
-									<span class="stat-label">Active Channels</span>
-								</div>
-							</div>
-						{/if}
-					</div>
-
-					<div class="dashboard-card">
-						<h3>🤖 Agent Activity</h3>
-						{#if directorActivity.agentStats?.length > 0}
-							<div class="agent-activity-list">
-								{#each directorActivity.agentStats.slice(0, 5) as agentStat}
-									<div class="activity-item">
-										<span class="agent-name">{agentStat.agentId}</span>
-										<span class="activity-count">{agentStat.messageCount} messages</span>
-										<span class="activity-time">{formatTimeAgo(agentStat.lastActivity)}</span>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="empty-note">No agent activity yet</p>
-						{/if}
-					</div>
-
-					<div class="dashboard-card">
-						<h3>📢 Channel Activity</h3>
-						{#if directorActivity.channelStats?.length > 0}
-							<div class="channel-activity-list">
-								{#each directorActivity.channelStats.slice(0, 5) as channelStat}
-									<div class="activity-item">
-										<span class="channel-name">
-											#{channelStat.channelName}
-										</span>
-										<span class="activity-count">{channelStat.messageCount} messages</span>
-										<span class="activity-time">{formatTimeAgo(channelStat.lastActivity)}</span>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="empty-note">No channel activity yet</p>
-						{/if}
-					</div>
-
-					<div class="dashboard-card">
-						<h3>📈 Recent Activity</h3>
-						{#if directorActivity.recentActivity?.length > 0}
-							<div class="recent-activity-list">
-								{#each directorActivity.recentActivity.slice(0, 5) as activity}
-									<div class="activity-item recent">
-										<span class="activity-icon">{getMessageIcon(activity)}</span>
-										<div class="activity-details">
-											<span class="activity-summary">
-												{activity.authorAgentId || 'System'} 
-												{#if activity.channelName}in #{activity.channelName}{/if}
-											</span>
-											<span class="activity-preview">{activity.body.substring(0, 40)}...</span>
-										</div>
-										<span class="activity-time">{formatTimeAgo(activity.createdAt)}</span>
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="empty-note">No recent activity</p>
-						{/if}
-					</div>
-				</div>
-			</div>
-
-		{:else if commsViewMode === 'messages'}
-			<div class="all-messages-view">
-				<div class="messages-header">
-					<h3>💬 All Messages</h3>
-					{#if allMessagesSummary.total}
-						<div class="messages-stats">
-							<span class="stat">Total: {allMessagesSummary.total}</span>
-							<span class="stat">With Assignments: {allMessagesSummary.withAssignments}</span>
-							<span class="stat">Direct: {allMessagesSummary.withoutAssignments}</span>
+		{:else if commsViewMode === 'direct-messages'}
+			<div class="direct-messages-view">
+				<div class="dm-left">
+					<div class="dm-agents-panel">
+						<div class="dm-agents-header">
+							<h3>Agents ({dmAgents.length})</h3>
 						</div>
-					{/if}
+						
+						<div class="dm-agent-list">
+							{#each dmAgents as agent}
+								<div 
+									class="dm-agent-item"
+									class:active={selectedDMAgent?.id === agent.id}
+									on:click={() => onDMAgentSelect(agent)}
+								>
+									<div class="dm-agent-header">
+										<span class="dm-agent-name">{agent.id}</span>
+										<span class="dm-agent-role">{agent.roleType}</span>
+									</div>
+									{#if agent.lastMessageAt}
+										<div class="dm-agent-details">
+											<span class="dm-last-message">{formatMessageTime(agent.lastMessageAt)}</span>
+										</div>
+									{/if}
+								</div>
+							{/each}
+							{#if dmAgents.length === 0}
+								<div class="no-dm-agents">
+									<p>No direct message conversations yet.</p>
+									<p>Send a message to an agent to start!</p>
+								</div>
+							{/if}
+						</div>
+					</div>
 				</div>
 				
-				{#if allMessages.length > 0}
-					<div class="message-list">
-						{#each allMessages as message}
-							<div class="message-card enhanced">
-								<div class="message-header">
-									<div class="message-meta">
-										<span class="message-icon">{getMessageIcon(message)}</span>
-										<div class="message-info">
-											<div class="message-title-line">
-												{#if message.title}
-													<strong>{message.title}</strong>
-												{:else}
-													<span class="message-type">{message.type}</span>
-												{/if}
-												{#if message.isReply}
-													<span class="reply-badge">Reply</span>
-												{/if}
-											</div>
-											<div class="message-source-line">
-												<span class="message-source">
-													{#if message.authorAgentId}
-														{message.authorAgentId}
-													{:else}
-														Director
-													{/if}
-												</span>
-												{#if message.channelName}
-													<span class="channel-name">#{message.channelName}</span>
-												{:else if message.isDM}
-													<span class="dm-badge">DM</span>
-												{/if}
-												<span class="message-time">{formatTimeAgo(message.createdAt)}</span>
-											</div>
-										</div>
-									</div>
-									<div class="message-actions">
-										<button 
-											class="btn-small btn-primary" 
-											on:click={() => { selectedMessage = message; replyToMessageId = message.id; showReplyDialog = true; }}
-										>
-											Reply
-										</button>
-									</div>
-								</div>
-								
-								<div class="message-content">
-									<div class="message-body">{message.body}</div>
-								</div>
-
-								<!-- Reading Assignments Status -->
-								{#if message.readingAssignments && message.readingAssignments.length > 0}
-									{@const assignmentsByType = message.readingAssignments.reduce((groups, assignment) => {
-										const key = assignment.assignedToType;
-										if (!groups[key]) groups[key] = [];
-										groups[key].push(assignment);
-										return groups;
-									}, {})}
-									<div class="reading-status-section">
-										<h5>📋 Reading Assignments ({message.readingAssignments.length})</h5>
-										<div class="assignments-grouped">
-											
-											{#each Object.entries(assignmentsByType) as [type, assignments]}
-												<div class="assignment-group">
-													<div class="group-header">
-														<span class="group-type-icon">
-															{#if type === 'role'}👥{:else if type === 'agent'}🤖{:else if type === 'squad'}👨‍👩‍👧‍👦{/if}
-														</span>
-														<strong>{type.charAt(0).toUpperCase() + type.slice(1)}s</strong>
-														<span class="group-count">({assignments.length})</span>
-													</div>
-													<div class="assignment-items">
-														{#each assignments as assignment}
-															<div class="assignment-item" class:fully-read={assignment.isFullyRead}>
-																<div class="assignment-info">
-																	<span class="assignment-name">{assignment.assignedTo}</span>
-																	<div class="read-indicators">
-																		<span class="read-count" class:all-read={assignment.isFullyRead}>
-																			{assignment.readCount}/{assignment.totalTargets}
-																		</span>
-																		{#if assignment.isFullyRead}
-																			<span class="status-indicator read">✓</span>
-																		{:else if assignment.readCount > 0}
-																			<span class="status-indicator partial">◐</span>
-																		{:else}
-																			<span class="status-indicator unread">○</span>
-																		{/if}
-																	</div>
-																</div>
-																
-																{#if assignment.readBy && assignment.readBy.length > 0}
-																	<div class="read-by-list">
-																		<span class="read-by-label">Read:</span>
-																		{#each assignment.readBy as read}
-																			<span class="read-by-agent">
-																				{read.agentId}
-																				<small>({formatTimeAgo(read.readAt)})</small>
-																			</span>
-																		{/each}
-																	</div>
-																{/if}
-																
-																{#if assignment.unreadAgents && assignment.unreadAgents.length > 0}
-																	<div class="unread-agents-list">
-																		<span class="unread-label">Unread:</span>
-																		{#each assignment.unreadAgents as agentId}
-																			<span class="unread-agent">{agentId}</span>
-																		{/each}
-																	</div>
-																{/if}
-															</div>
-														{/each}
-													</div>
+				<div class="dm-right">
+					{#if selectedDMAgent}
+						<div class="dm-messages-view">
+							<div class="dm-messages-container">
+								<div class="dm-messages-list">
+									{#if dmMessages.length > 0}
+										{#each dmMessages as message}
+											<div class="message" class:reply={message.parentContentId}>
+												<div class="message-header">
+													<span class="message-author">{message.authorAgentId || 'System'}</span>
+													<span class="message-time">{formatMessageTime(message.createdAt)}</span>
 												</div>
-											{/each}
+												
+												<div class="message-content markdown-content">
+													{#if message.title && message.title !== message.body}
+														<strong>{message.title}</strong><br>
+													{/if}
+													{@html marked((message.body || '').replace(/\\n/g, '\n'))}
+												</div>
+												<div class="message-actions">
+													{#if message.readingAssignments && message.readingAssignments.length > 0}
+														<div class="read-status-icon-container" 
+															 on:click={(e) => toggleReadStatusTooltip(e, message)}>
+															<span class="read-status-icon" class:fully-read={isMessageFullyRead(message)} class:partially-read={isMessagePartiallyRead(message)}>
+																{#if isMessageFullyRead(message)}
+																	✅
+																{:else if isMessagePartiallyRead(message)}
+																	👀
+																{:else}
+																	📩
+																{/if}
+															</span>
+														</div>
+													{/if}
+													{#if hasUnreadAssignmentForHumanDirector(message)}
+														<button 
+															class="reply-btn mark-read-btn" 
+															on:click={() => markMessageAsRead(message)}
+														>
+															Mark Read
+														</button>
+													{/if}
+													<button 
+														class="reply-btn" 
+														on:click={() => startReply(message)}
+													>
+														Reply
+													</button>
+												</div>
+												
+												<!-- Reply input interface -->
+												{#if replyingToMessage && replyingToMessage.id === message.id}
+													<div class="reply-input-container">
+														<div class="reply-input-wrapper">
+															<input 
+																type="text" 
+																class="reply-input" 
+																placeholder="Type your reply..." 
+																bind:value={replyContent}
+																on:keydown={(e) => {
+																	if (e.key === 'Enter' && !e.shiftKey) {
+																		e.preventDefault();
+																		sendReply();
+																	} else if (e.key === 'Escape') {
+																		cancelReply();
+																	}
+																}}
+																autofocus
+															/>
+															<button 
+																class="send-btn" 
+																on:click={sendReply}
+																disabled={!replyContent.trim()}
+															>
+																Reply
+															</button>
+															<button class="cancel-reply-btn" on:click={cancelReply}>×</button>
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									{:else}
+										<div class="no-messages">
+											<p>No messages with {selectedDMAgent.id} yet.</p>
+											<p>Start the conversation!</p>
 										</div>
-									</div>
-								{:else}
-									<div class="no-assignments">
-										<small>📝 No reading assignments</small>
-									</div>
-								{/if}
+									{/if}
+								</div>
 							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class="empty-state">
-						<h4>📭 No messages yet</h4>
-						<p>All project messages will appear here with reading assignment status.</p>
-					</div>
-				{/if}
+							<div class="dm-input-container">
+								<div class="dm-input-wrapper">
+									<input 
+										type="text" 
+										class="message-input" 
+										placeholder="Type a direct message..." 
+										bind:value={newDMContent}
+										on:keydown={(e) => {
+											if (e.key === 'Enter' && !e.shiftKey) {
+												e.preventDefault();
+												sendDMMessage();
+											}
+										}}
+									/>
+									<button 
+										class="send-btn" 
+										on:click={sendDMMessage}
+										disabled={!newDMContent.trim()}
+									>
+										Send
+									</button>
+								</div>
+								<p class="input-note">Press Enter to send DM to {selectedDMAgent.id}</p>
+							</div>
+						</div>
+					{:else}
+						<div class="dm-placeholder">
+							<h3>📩 Direct Messages</h3>
+							<p>Select an agent from the left to view your conversation.</p>
+						</div>
+					{/if}
+				</div>
 			</div>
 		{/if}
 	</div>
@@ -898,8 +1438,6 @@ Status: ACTIVE - Ready to assist with full authority`,
 				<label for="message-type">Type:</label>
 				<select id="message-type" bind:value={newMessage.type}>
 					<option value="message">Message</option>
-					<option value="announcement">Announcement</option>
-					<option value="report">Report</option>
 					<option value="document">Document</option>
 				</select>
 			</div>
@@ -930,7 +1468,7 @@ Status: ACTIVE - Ready to assist with full authority`,
 					id="message-channel"
 					bind:value={newMessage.channelId}
 				>
-					<option value={null}>General (no specific channel)</option>
+					<option value={null}>Direct Message</option>
 					{#each channels as channel}
 						<option value={channel.id}>{channel.name}</option>
 					{/each}
@@ -952,11 +1490,30 @@ Status: ACTIVE - Ready to assist with full authority`,
 							<option value="agent">Agent</option>
 							<option value="squad">Squad</option>
 						</select>
-						<input 
-							type="text" 
-							bind:value={assignment.assignedTo} 
-							placeholder="Enter {assignment.assignedToType} name"
-						/>
+						
+						{#if assignment.assignedToType === 'role'}
+							<select bind:value={assignment.assignedTo}>
+								<option value="">Select a role type...</option>
+								{#each roleTypes as roleType}
+									<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
+								{/each}
+							</select>
+						{:else if assignment.assignedToType === 'agent'}
+							<select bind:value={assignment.assignedTo}>
+								<option value="">Select an agent...</option>
+								{#each agents as agent}
+									<option value={agent.id}>{agent.id} ({agent.roleType})</option>
+								{/each}
+							</select>
+						{:else if assignment.assignedToType === 'squad'}
+							<select bind:value={assignment.assignedTo}>
+								<option value="">Select a squad...</option>
+								{#each squads as squad}
+									<option value={squad.id}>{squad.name}</option>
+								{/each}
+							</select>
+						{/if}
+						
 						<button type="button" class="remove-btn" on:click={() => removeReadingAssignment(index)}>
 							Remove
 						</button>
@@ -969,6 +1526,62 @@ Status: ACTIVE - Ready to assist with full authority`,
 				<button class="send-btn" on:click={sendMessage} disabled={!newMessage.body.trim()}>
 					Send Message
 				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Assignment Dialog for Channel Messaging -->
+{#if showAssignmentDialog}
+	<div class="dialog-overlay" on:click={closeAssignmentDialog}>
+		<div class="dialog" on:click|stopPropagation>
+			<div class="dialog-header">
+				<h3>Add Assignment</h3>
+				<button class="close-btn" on:click={closeAssignmentDialog}>×</button>
+			</div>
+			
+			<div class="assignment-options">
+				<div class="assignment-section">
+					<h4>👥 Roles</h4>
+					<div class="option-grid">
+						{#each roleTypes as roleType}
+							<button 
+								class="option-btn"
+								on:click={() => addMessageAssignment('role', roleType.roleType)}
+							>
+								{roleType.roleType} ({roleType.count})
+							</button>
+						{/each}
+					</div>
+				</div>
+				
+				<div class="assignment-section">
+					<h4>🤖 Agents</h4>
+					<div class="option-grid">
+						{#each agents as agent}
+							<button 
+								class="option-btn"
+								on:click={() => addMessageAssignment('agent', agent.id)}
+							>
+								{agent.id} ({agent.roleType})
+							</button>
+						{/each}
+					</div>
+				</div>
+				
+				<div class="assignment-section">
+					<h4>👥 Squads</h4>
+					<div class="option-grid">
+						{#each squads as squad}
+							<button 
+								class="option-btn"
+								on:click={() => addMessageAssignment('squad', squad.id)}
+							>
+								{squad.name}
+							</button>
+						{/each}
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -993,11 +1606,96 @@ Status: ACTIVE - Ready to assist with full authority`,
 		background: #f9fafb;
 	}
 
+	.header-left {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+	}
+
 	.section-header h2 {
 		margin: 0;
 		font-size: 20px;
 		font-weight: 600;
 		color: #374151;
+	}
+
+	.unread-badge {
+		background: #ef4444;
+		color: white;
+		border-radius: 10px;
+		padding: 2px 6px;
+		font-size: 11px;
+		font-weight: 700;
+		min-width: 18px;
+		height: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		animation: pulse-badge 2s infinite;
+	}
+
+
+	.nav-badge {
+		margin-left: 6px;
+	}
+
+	@keyframes pulse-badge {
+		0% { transform: scale(1); }
+		50% { transform: scale(1.1); }
+		100% { transform: scale(1); }
+	}
+
+	.polling-indicator {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 8px;
+		background: #dcfce7;
+		border: 1px solid #bbf7d0;
+		border-radius: 12px;
+		font-size: 12px;
+	}
+
+	.polling-dot {
+		width: 8px;
+		height: 8px;
+		background: #22c55e;
+		border-radius: 50%;
+		animation: pulse 2s infinite;
+	}
+
+	.polling-text {
+		color: #15803d;
+		font-weight: 500;
+	}
+
+	.polling-error {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 4px 8px;
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		border-radius: 12px;
+		font-size: 12px;
+	}
+
+	.error-dot {
+		width: 8px;
+		height: 8px;
+		background: #ef4444;
+		border-radius: 50%;
+	}
+
+	.error-text {
+		color: #dc2626;
+		font-weight: 500;
+	}
+
+	@keyframes pulse {
+		0% { opacity: 1; }
+		50% { opacity: 0.5; }
+		100% { opacity: 1; }
 	}
 
 	.btn-primary {
@@ -1020,6 +1718,167 @@ Status: ACTIVE - Ready to assist with full authority`,
 		cursor: not-allowed;
 	}
 
+	/* Assignment Dialog Styles */
+	.dialog-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+	}
+
+	.dialog {
+		background: white;
+		border-radius: 8px;
+		max-width: 500px;
+		width: 90%;
+		max-height: 80vh;
+		overflow-y: auto;
+		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+	}
+
+	.dialog-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 20px;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.dialog-header h3 {
+		margin: 0;
+		font-size: 18px;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.close-btn {
+		background: none;
+		border: none;
+		font-size: 24px;
+		cursor: pointer;
+		color: #6b7280;
+		padding: 0;
+		width: 32px;
+		height: 32px;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.close-btn:hover {
+		background: #f3f4f6;
+		color: #374151;
+	}
+
+	.assignment-options {
+		padding: 20px;
+	}
+
+	.assignment-section {
+		margin-bottom: 24px;
+	}
+
+	.assignment-section:last-child {
+		margin-bottom: 0;
+	}
+
+	.assignment-section h4 {
+		margin: 0 0 12px 0;
+		font-size: 14px;
+		font-weight: 600;
+		color: #374151;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.option-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+		gap: 8px;
+	}
+
+	.option-btn {
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		padding: 8px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 13px;
+		color: #374151;
+		transition: all 0.2s ease;
+		text-align: center;
+	}
+
+	.option-btn:hover {
+		background: #f3f4f6;
+		border-color: #d1d5db;
+	}
+
+	.option-btn:active {
+		background: #e5e7eb;
+		transform: translateY(1px);
+	}
+
+	/* Reply Input Interface Styles */
+	.reply-input-container {
+		margin-top: 8px;
+		padding: 12px;
+		background: #f9fafb;
+		border-radius: 6px;
+		border: 1px solid #e5e7eb;
+	}
+
+	.reply-input-wrapper {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.reply-input {
+		flex: 1;
+		padding: 8px 12px;
+		border: 1px solid #d1d5db;
+		border-radius: 4px;
+		font-size: 14px;
+		background: white;
+		outline: none;
+		transition: border-color 0.2s ease;
+	}
+
+	.reply-input:focus {
+		border-color: #2563eb;
+		box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1);
+	}
+
+	.cancel-reply-btn {
+		background: #f3f4f6;
+		border: 1px solid #d1d5db;
+		color: #6b7280;
+		padding: 6px 10px;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 500;
+		transition: all 0.2s ease;
+		min-width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.cancel-reply-btn:hover {
+		background: #e5e7eb;
+		color: #374151;
+	}
+
 	.comms-nav {
 		display: flex;
 		border-bottom: 1px solid #e5e7eb;
@@ -1038,6 +1897,12 @@ Status: ACTIVE - Ready to assist with full authority`,
 		transition: all 0.2s ease;
 	}
 
+	.nav-btn-content {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
 	.comms-nav-btn:hover {
 		color: #374151;
 		background: #f3f4f6;
@@ -1053,6 +1918,388 @@ Status: ACTIVE - Ready to assist with full authority`,
 		flex: 1;
 		overflow: hidden;
 		padding: 20px;
+	}
+
+	.communications-view {
+		height: 100%;
+		display: flex;
+		gap: 20px;
+		overflow: hidden;
+	}
+
+	.communications-left {
+		width: 400px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		overflow-y: auto;
+	}
+
+	.communications-right {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.communications-placeholder {
+		padding: 40px;
+		text-align: center;
+		color: #6b7280;
+		background: #f9fafb;
+		border: 2px dashed #d1d5db;
+		border-radius: 8px;
+		margin: 20px;
+	}
+
+	.communications-placeholder h3 {
+		margin: 0 0 16px 0;
+		font-size: 20px;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.communications-placeholder p {
+		margin: 8px 0;
+		font-size: 14px;
+		line-height: 1.5;
+	}
+
+	/* Channel list styles - copied from ChannelsSection */
+	.channels-panel {
+		background: #f9f9f9;
+		border: 1px solid #e5e5e5;
+		border-radius: 6px;
+		padding: 16px;
+	}
+
+	.channels-panel h3 {
+		margin: 0 0 12px 0;
+		color: #333;
+	}
+
+	.channels-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 12px;
+	}
+
+	.channels-header h3 {
+		margin: 0;
+	}
+
+	.channel-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.channel-item {
+		background: white;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		padding: 12px;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		transition: all 0.2s ease;
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.channel-item:hover {
+		border-color: #007acc;
+		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	}
+
+	.channel-item.active {
+		border-color: #007acc;
+		background: #f0f8ff;
+	}
+
+	.channel-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.channel-name {
+		font-weight: 500;
+		color: #333;
+	}
+
+	.channel-badge {
+		background: #28a745;
+		color: white;
+		padding: 2px 6px;
+		border-radius: 10px;
+		font-size: 11px;
+		font-weight: 500;
+	}
+
+	.channel-badge.human-director {
+		background: #f59e0b;
+		color: white;
+	}
+
+	.channel-badge.unread-badge {
+		background: #ef4444;
+		color: white;
+		font-weight: 700;
+		min-width: 20px;
+		text-align: center;
+		animation: pulse 2s infinite;
+	}
+
+	@keyframes pulse {
+		0% { transform: scale(1); }
+		50% { transform: scale(1.05); }
+		100% { transform: scale(1); }
+	}
+
+	.channel-details {
+		display: flex;
+		gap: 8px;
+		font-size: 12px;
+		color: #666;
+	}
+
+	.channel-stats {
+		font-size: 12px;
+		color: #666;
+	}
+
+	.unread-count {
+		color: #ef4444;
+		font-weight: 600;
+	}
+
+	/* Messages view styles - copied from ChannelsSection */
+	.messages-view {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		padding: 0;
+		margin: 0;
+	}
+	
+	.messages-container {
+		flex: 1;
+		overflow-y: auto;
+		margin-bottom: 16px;
+		padding: 0;
+	}
+	
+	.messages-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 0;
+	}
+	
+	.message {
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		padding: 6px 16px;
+		box-shadow: none;
+		transition: background-color 0.1s ease;
+		margin-bottom: 4px;
+		border-bottom: 1px solid #f3f4f6;
+	}
+
+	.message:last-child {
+		border-bottom: none;
+	}
+	
+	.message:hover {
+		background: #f8f9fa;
+	}
+
+	.message.reply {
+		margin-left: 24px;
+		border-left: 2px solid #e5e7eb;
+		padding-left: 12px;
+	}
+
+	.message-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		margin-bottom: 1px;
+		font-size: 12px;
+		gap: 8px;
+	}
+
+	.message-author {
+		font-weight: 600;
+		color: #007acc;
+	}
+	
+	.message-time {
+		color: #999;
+	}
+	
+	.message-content {
+		font-size: 14px;
+		line-height: 1.3;
+		color: #333;
+		margin-bottom: 1px;
+	}
+
+	.message-actions {
+		margin-top: 1px;
+		display: flex;
+		gap: 4px;
+		align-items: center;
+	}
+
+	.reply-btn {
+		background: transparent;
+		border: none;
+		color: #64748b;
+		padding: 2px 4px;
+		border-radius: 3px;
+		font-size: 11px;
+		cursor: pointer;
+		transition: all 0.1s ease;
+		text-decoration: none;
+		opacity: 0.7;
+	}
+
+	.reply-btn:hover {
+		background: #e2e8f0;
+		color: #334155;
+		opacity: 1;
+	}
+
+	.mark-read-btn {
+		color: #059669 !important;
+		opacity: 0.8;
+	}
+
+	.mark-read-btn:hover {
+		background: #dcfce7 !important;
+		color: #047857 !important;
+		opacity: 1;
+	}
+
+	.no-messages {
+		text-align: center;
+		padding: 40px;
+		color: #6b7280;
+	}
+
+	.no-messages p {
+		margin: 8px 0;
+		font-size: 14px;
+	}
+
+	/* Message input styles */
+	.message-input-container {
+		border-top: 1px solid #e5e5e5;
+		padding-top: 16px;
+	}
+	
+	.message-input-wrapper {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+	
+	.message-input {
+		flex: 1;
+		padding: 8px 12px;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		font-size: 14px;
+		outline: none;
+	}
+
+	.message-input:disabled {
+		background: #f5f5f5;
+		color: #999;
+	}
+	
+	.send-btn {
+		background: #007acc;
+		color: white;
+		border: none;
+		padding: 8px 16px;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 500;
+		transition: background-color 0.2s ease;
+	}
+
+	.send-btn:hover {
+		background: #0056a3;
+	}
+
+	.send-btn:disabled {
+		background: #ccc;
+		cursor: not-allowed;
+	}
+
+	.input-note {
+		font-size: 12px;
+		color: #666;
+		margin: 0;
+	}
+
+	.btn-icon {
+		background: #f5f5f5;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		font-size: 14px;
+		color: #666;
+		transition: all 0.2s ease;
+	}
+
+	.btn-icon:hover {
+		background: #e5e5e5;
+		color: #333;
+	}
+
+	/* Inline assignment badges */
+	.inline-assignments {
+		display: flex;
+		gap: 4px;
+		margin-top: 4px;
+		flex-wrap: wrap;
+	}
+
+	.assignment-badge {
+		font-size: 11px;
+		padding: 2px 6px;
+		border-radius: 10px;
+		font-weight: 500;
+		transition: all 0.2s ease;
+	}
+
+	.assignment-badge.fully-read {
+		background: #dcfce7;
+		color: #166534;
+		border: 1px solid #bbf7d0;
+	}
+
+	.assignment-badge.unread {
+		background: #fef2f2;
+		color: #dc2626;
+		border: 1px solid #fecaca;
+	}
+
+	.assignment-badge:not(.fully-read):not(.unread) {
+		background: #fef3c7;
+		color: #d97706;
+		border: 1px solid #fed7aa;
 	}
 
 	.urgent-view {
@@ -1565,6 +2812,177 @@ Status: ACTIVE - Ready to assist with full authority`,
 		margin: 0;
 	}
 
+	.direct-messages-view {
+		height: 100%;
+		display: flex;
+		gap: 20px;
+		overflow: hidden;
+	}
+
+	.dm-left {
+		width: 400px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		overflow-y: auto;
+	}
+
+	.dm-right {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+	}
+
+	/* DM Agent List Styles */
+	.dm-agents-panel {
+		background: #f9f9f9;
+		border: 1px solid #e5e5e5;
+		border-radius: 6px;
+		padding: 16px;
+	}
+
+	.dm-agents-panel h3 {
+		margin: 0 0 12px 0;
+		color: #333;
+	}
+
+	.dm-agents-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 12px;
+	}
+
+	.dm-agents-header h3 {
+		margin: 0;
+	}
+
+	.dm-agent-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.dm-agent-item {
+		background: white;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		padding: 12px;
+		transition: all 0.2s ease;
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.dm-agent-item:hover {
+		border-color: #007acc;
+		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	}
+
+	.dm-agent-item.active {
+		border-color: #007acc;
+		background: #f0f8ff;
+	}
+
+	.dm-agent-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.dm-agent-name {
+		font-weight: 500;
+		color: #333;
+	}
+
+	.dm-agent-role {
+		font-size: 12px;
+		color: #666;
+		background: #f3f4f6;
+		padding: 2px 6px;
+		border-radius: 10px;
+	}
+
+	.dm-agent-details {
+		display: flex;
+		gap: 8px;
+		font-size: 12px;
+		color: #666;
+	}
+
+	.dm-last-message {
+		font-size: 12px;
+		color: #666;
+	}
+
+	.no-dm-agents {
+		text-align: center;
+		padding: 20px;
+		color: #6b7280;
+	}
+
+	.no-dm-agents p {
+		margin: 4px 0;
+		font-size: 14px;
+	}
+
+	/* DM Messages View Styles */
+	.dm-messages-view {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		padding: 0;
+		margin: 0;
+	}
+	
+	.dm-messages-container {
+		flex: 1;
+		overflow-y: auto;
+		margin-bottom: 16px;
+		padding: 0;
+	}
+	
+	.dm-messages-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 0;
+	}
+
+	.dm-input-container {
+		border-top: 1px solid #e5e5e5;
+		padding-top: 16px;
+	}
+	
+	.dm-input-wrapper {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+
+	.dm-placeholder {
+		padding: 40px;
+		text-align: center;
+		color: #6b7280;
+		background: #f9fafb;
+		border: 2px dashed #d1d5db;
+		border-radius: 8px;
+		margin: 20px;
+	}
+
+	.dm-placeholder h3 {
+		margin: 0 0 16px 0;
+		font-size: 20px;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.dm-placeholder p {
+		margin: 8px 0;
+		font-size: 14px;
+		line-height: 1.5;
+	}
+
 	.all-messages-view {
 		height: 100%;
 		overflow-y: auto;
@@ -1938,5 +3356,265 @@ Status: ACTIVE - Ready to assist with full authority`,
 
 	.cancel-btn:hover {
 		background: #e5e7eb;
+	}
+
+	/* Simple Reading Assignments */
+	.reading-assignments-simple {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 4px;
+		font-size: 12px;
+	}
+
+	.assignment-tag {
+		font-weight: 500;
+	}
+
+	.assignment-tag.read {
+		color: #22c55e;
+	}
+
+	.assignment-tag.partial {
+		color: #f59e0b;
+	}
+
+	.assignment-tag.unread {
+		color: #ef4444;
+	}
+
+	/* FROM/TO styling */
+	.message-from, .message-to {
+		font-size: 12px;
+		margin-right: 12px;
+	}
+
+	.message-from strong, .message-to strong {
+		color: #6b7280;
+		font-weight: 600;
+		margin-right: 4px;
+	}
+
+	.assignment-name.read {
+		color: #22c55e;
+		font-weight: 500;
+	}
+
+	.assignment-name.partial {
+		color: #f59e0b;
+		font-weight: 500;
+	}
+
+	.assignment-name.unread {
+		color: #ef4444;
+		font-weight: 500;
+	}
+
+	/* Markdown Content Styling */
+	.markdown-content {
+		line-height: 1.6;
+	}
+
+	.markdown-content h1,
+	.markdown-content h2,
+	.markdown-content h3,
+	.markdown-content h4,
+	.markdown-content h5,
+	.markdown-content h6 {
+		margin: 1.5em 0 0.5em 0;
+		font-weight: 600;
+		color: #111827;
+	}
+
+	.markdown-content h1 {
+		font-size: 1.5rem;
+		border-bottom: 1px solid #e5e7eb;
+		padding-bottom: 0.5rem;
+	}
+
+	.markdown-content h2 {
+		font-size: 1.25rem;
+	}
+
+	.markdown-content h3 {
+		font-size: 1.125rem;
+	}
+
+	.markdown-content h4 {
+		font-size: 1rem;
+	}
+
+	.markdown-content p {
+		margin: 1em 0;
+	}
+
+	.markdown-content ul,
+	.markdown-content ol {
+		margin: 1em 0;
+		padding-left: 2em;
+	}
+
+	.markdown-content li {
+		margin: 0.25em 0;
+	}
+
+	.markdown-content blockquote {
+		margin: 1em 0;
+		padding: 0.5em 1em;
+		border-left: 4px solid #d1d5db;
+		background: #f9fafb;
+		color: #6b7280;
+	}
+
+	.markdown-content code {
+		background: #f3f4f6;
+		padding: 0.125em 0.25em;
+		border-radius: 0.25rem;
+		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+		font-size: 0.875em;
+		color: #dc2626;
+	}
+
+	.markdown-content pre {
+		background: #1f2937;
+		color: #f9fafb;
+		padding: 1rem;
+		border-radius: 0.5rem;
+		overflow-x: auto;
+		margin: 1em 0;
+	}
+
+	.markdown-content pre code {
+		background: none;
+		padding: 0;
+		color: inherit;
+		font-size: 0.875rem;
+	}
+
+	.markdown-content table {
+		border-collapse: collapse;
+		width: 100%;
+		margin: 1em 0;
+	}
+
+	.markdown-content th,
+	.markdown-content td {
+		border: 1px solid #d1d5db;
+		padding: 0.5em;
+		text-align: left;
+	}
+
+	.markdown-content th {
+		background: #f9fafb;
+		font-weight: 600;
+	}
+
+	.markdown-content a {
+		color: #2563eb;
+		text-decoration: underline;
+	}
+
+	.markdown-content a:hover {
+		color: #1d4ed8;
+	}
+
+	.markdown-content strong {
+		font-weight: 600;
+	}
+
+	.markdown-content em {
+		font-style: italic;
+	}
+
+	.markdown-content hr {
+		border: none;
+		border-top: 1px solid #e5e7eb;
+		margin: 2em 0;
+	}
+
+	/* Read status icon */
+	.read-status-icon-container {
+		display: inline-flex;
+		align-items: center;
+		margin-right: 8px;
+		padding: 4px;
+		cursor: pointer;
+		border-radius: 6px;
+		transition: background-color 0.2s ease;
+		min-width: 32px;
+		min-height: 24px;
+		justify-content: center;
+	}
+	
+	.read-status-icon-container:hover {
+		background-color: rgba(0, 0, 0, 0.05);
+	}
+	
+	.read-status-icon {
+		font-size: 16px;
+		transition: all 0.2s ease;
+		user-select: none;
+	}
+	
+	.read-status-icon-container:hover .read-status-icon {
+		transform: scale(1.1);
+	}
+
+	/* Tooltip styles */
+	:global(.read-status-tooltip) {
+		background: #1f2937;
+		color: white;
+		padding: 8px 12px;
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		font-size: 12px;
+		max-width: 300px;
+		min-width: 200px;
+		pointer-events: auto;
+		user-select: none;
+	}
+	
+	
+	:global(.read-status-tooltip .tooltip-header) {
+		font-weight: 600;
+		margin-bottom: 6px;
+		color: #f3f4f6;
+		font-size: 13px;
+	}
+	
+	:global(.read-status-tooltip .agents-list) {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+	
+	:global(.read-status-tooltip .agent-status) {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 2px 0;
+	}
+	
+	:global(.read-status-tooltip .agent-icon) {
+		width: 16px;
+		font-size: 11px;
+	}
+	
+	:global(.read-status-tooltip .agent-name) {
+		font-weight: 500;
+		flex-grow: 1;
+	}
+	
+	:global(.read-status-tooltip .read-time) {
+		font-size: 10px;
+		color: #9ca3af;
+	}
+	
+	:global(.read-status-tooltip .agent-read) {
+		color: #10b981;
+	}
+	
+	:global(.read-status-tooltip .agent-unread) {
+		color: #f59e0b;
 	}
 </style>

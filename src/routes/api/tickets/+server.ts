@@ -3,7 +3,7 @@ import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-// POST /api/documents - Create a new document
+// POST /api/tickets - Create a work ticket
 export async function POST({ request }) {
 	try {
 		const {
@@ -11,7 +11,9 @@ export async function POST({ request }) {
 			authorAgentId,
 			title,
 			body,
-			documentSlug, // Optional unique slug for referencing
+			status = 'open', // 'open', 'in_progress', 'blocked', 'ready_for_review', 'reviewing', 'review_passed', 'needs_attention', 'resolved', 'closed'
+			priority = 'medium', // 'low', 'medium', 'high', 'critical'
+			assignedToRoleType, // Role type to assign ticket to
 			assignTo // Array of assignments: { type: 'agent'|'role'|'squad', target: 'be_001'|'Backend Developer'|'leadership' }
 		} = await request.json();
 
@@ -28,10 +30,9 @@ export async function POST({ request }) {
 			}, { status: 400 });
 		}
 
-		// Title is recommended for documents
 		if (!title) {
 			return json({ 
-				error: 'Missing required field: title is required for documents'
+				error: 'Missing required field: title is required for tickets'
 			}, { status: 400 });
 		}
 
@@ -43,26 +44,20 @@ export async function POST({ request }) {
 			}, { status: 400 });
 		}
 
-		// Validate documentSlug if provided (must be unique per project)
-		if (documentSlug) {
-			if (typeof documentSlug !== 'string' || documentSlug.trim() === '') {
-				return json({ 
-					error: 'Invalid documentSlug: must be a non-empty string'
-				}, { status: 400 });
-			}
+		// Validate status
+		const validStatuses = ['open', 'in_progress', 'blocked', 'ready_for_review', 'reviewing', 'review_passed', 'needs_attention', 'resolved', 'closed'];
+		if (status && !validStatuses.includes(status)) {
+			return json({ 
+				error: `Invalid status: must be one of ${validStatuses.join(', ')}`
+			}, { status: 400 });
+		}
 
-			// Check if slug already exists in this project
-			const [existingDoc] = await db
-				.select({ id: content.id })
-				.from(content)
-				.where(eq(content.documentSlug, documentSlug.trim()))
-				.limit(1);
-
-			if (existingDoc) {
-				return json({ 
-					error: `Document slug '${documentSlug.trim()}' already exists in this project`
-				}, { status: 409 });
-			}
+		// Validate priority
+		const validPriorities = ['low', 'medium', 'high', 'critical'];
+		if (priority && !validPriorities.includes(priority)) {
+			return json({ 
+				error: `Invalid priority: must be one of ${validPriorities.join(', ')}`
+			}, { status: 400 });
 		}
 
 		// Validate assignment targets (if provided)
@@ -117,31 +112,33 @@ export async function POST({ request }) {
 			}
 		}
 
-		// Create the document
-		const [newDocument] = await db
+		// Create the ticket
+		const [newTicket] = await db
 			.insert(content)
 			.values({
 				projectId: parsedProjectId,
-				channelId: null, // Documents are not posted to channels
-				parentContentId: null, // Documents are not replies
-				type: 'document',
+				channelId: null, // Tickets are not posted to channels directly
+				parentContentId: null, // Tickets are not replies
+				type: 'ticket',
 				title: title.trim(),
 				body: body.trim(),
-				documentSlug: documentSlug ? documentSlug.trim() : null,
 				authorAgentId: authorAgentId || null,
+				status: status,
+				priority: priority,
+				assignedToRoleType: assignedToRoleType || null,
 			})
 			.returning();
 
 		// Create reading assignments
 		let assignmentSummary = [];
 		
-		// Only manual assignments for documents (no automatic channel assignments)
+		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
 			const assignmentPromises = assignTo.map(async (assignment) => {
 				return await db
 					.insert(readingAssignments)
 					.values({
-						contentId: newDocument.id,
+						contentId: newTicket.id,
 						assignedToType: assignment.type,
 						assignedTo: assignment.target,
 					})
@@ -157,22 +154,44 @@ export async function POST({ request }) {
 				assignmentId: createdAssignments[index][0].id
 			}));
 		}
+		
+		// 2. Automatic assignment to assigned role type (if provided)
+		if (assignedToRoleType) {
+			const [roleAssignment] = await db
+				.insert(readingAssignments)
+				.values({
+					contentId: newTicket.id,
+					assignedToType: 'role',
+					assignedTo: assignedToRoleType,
+				})
+				.returning();
+			
+			assignmentSummary.push({
+				type: 'role',
+				target: assignedToRoleType,
+				assignmentId: roleAssignment.id,
+				auto: true
+			});
+		}
 
 		return json({
-			id: newDocument.id,
-			projectId: newDocument.projectId,
-			type: newDocument.type,
-			title: newDocument.title,
-			body: newDocument.body,
-			documentSlug: newDocument.documentSlug,
-			authorAgentId: newDocument.authorAgentId,
-			createdAt: newDocument.createdAt,
-			updatedAt: newDocument.updatedAt,
+			id: newTicket.id,
+			projectId: newTicket.projectId,
+			type: newTicket.type,
+			title: newTicket.title,
+			body: newTicket.body,
+			status: newTicket.status,
+			priority: newTicket.priority,
+			assignedToRoleType: newTicket.assignedToRoleType,
+			claimedByAgent: newTicket.claimedByAgent,
+			authorAgentId: newTicket.authorAgentId,
+			createdAt: newTicket.createdAt,
+			updatedAt: newTicket.updatedAt,
 			assignments: assignmentSummary
 		}, { status: 201 });
 
 	} catch (error) {
-		console.error('Failed to create document:', error);
+		console.error('Failed to create ticket:', error);
 		
 		// Provide more specific error messages based on the error type
 		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
@@ -183,12 +202,12 @@ export async function POST({ request }) {
 		
 		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
 			return json({ 
-				error: 'Constraint violation: Document slug may already exist or other unique constraint failed'
+				error: 'Constraint violation: This ticket conflicts with existing data'
 			}, { status: 409 });
 		}
 		
 		return json({ 
-			error: 'Internal server error occurred while creating document',
+			error: 'Internal server error occurred while creating ticket',
 			details: process.env.NODE_ENV === 'development' ? error.message : undefined
 		}, { status: 500 });
 	}

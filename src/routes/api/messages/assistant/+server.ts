@@ -22,44 +22,40 @@ export async function GET({ url }) {
 		const assistantAgents = await db
 			.select({ id: agents.id })
 			.from(agents)
-			.innerJoin(roles, eq(agents.roleId, roles.id))
 			.where(
 				and(
 					eq(agents.projectId, parseInt(projectId)),
-					eq(roles.name, 'Director Assistant')
+					eq(agents.roleType, 'Director Assistant')
 				)
 			);
 		
 		const assistantAgentIds = assistantAgents.map(a => a.id);
 
-		// Get all DM messages from assistant agents OR messages from director (null authorAgentId)
-		const messages = await db
-			.select({
-				id: content.id,
-				type: content.type,
-				title: content.title,
-				body: content.body,
-				authorAgentId: content.authorAgentId,
-				createdAt: content.createdAt,
-				updatedAt: content.updatedAt,
-			})
-			.from(content)
-			.where(
-				and(
-					eq(content.projectId, parseInt(projectId)),
-					isNull(content.channelId), // DM messages only
-					eq(content.type, 'message'), // Only message type
-					or(
-						// Messages from assistant agents
-						assistantAgentIds.length > 0 
-							? or(...assistantAgentIds.map(id => eq(content.authorAgentId, id)))
-							: eq(content.authorAgentId, 'never_matches'), // Fallback if no assistants
-						// Messages from director (null authorAgentId) - we'll filter these by reading assignments on frontend
-						isNull(content.authorAgentId)
+		// Get all DM messages from assistant agents
+		let messages = [];
+		
+		if (assistantAgentIds.length > 0) {
+			messages = await db
+				.select({
+					id: content.id,
+					type: content.type,
+					title: content.title,
+					body: content.body,
+					authorAgentId: content.authorAgentId,
+					createdAt: content.createdAt,
+					updatedAt: content.updatedAt,
+				})
+				.from(content)
+				.where(
+					and(
+						eq(content.projectId, parseInt(projectId)),
+						isNull(content.channelId), // DM messages only
+						eq(content.type, 'message'), // Only message type
+						or(...assistantAgentIds.map(id => eq(content.authorAgentId, id)))
 					)
 				)
-			)
-			.orderBy(desc(content.createdAt));
+				.orderBy(desc(content.createdAt));
+		}
 
 		console.log(`✅ Loaded ${messages.length} assistant messages`);
 
@@ -69,7 +65,7 @@ export async function GET({ url }) {
 				isDM: true,
 				isReply: false,
 				isFromAssistant: assistantAgentIds.includes(msg.authorAgentId),
-				isFromDirector: msg.authorAgentId === null
+				isFromDirector: false // No longer including director messages
 			}))
 		});
 

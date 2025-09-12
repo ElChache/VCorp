@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { projects, roles, prompts, rolePromptCompositions, channels, content, readingAssignments, readingAssignmentReads, agents, tasks, roleAssignments, channelRoleAssignments, squads, squadPromptAssignments, rolePromptOrders } from '$lib/db/schema';
+import { projects, roles, prompts, rolePromptCompositions, channels, content, readingAssignments, readingAssignmentReads, agents, tasks, roleAssignments, channelRoleAssignments, squads, squadPromptAssignments, rolePromptOrders, scheduledReminders, phases } from '$lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 
 // GET /api/projects/[id] - Get project details
@@ -49,46 +49,66 @@ export async function DELETE({ params }) {
 		}
 
 		// Delete all related data in correct order using sql template literals
+		
+		// Delete scheduled reminders first (depends on project)
+		await db.execute(sql`DELETE FROM scheduled_reminders WHERE project_id = ${projectId}`);
+		
+		// Delete phases (depends on roles)
+		await db.execute(sql`DELETE FROM phases WHERE project_id = ${projectId}`);
+		
+		// Delete reading assignment reads (depends on reading assignments)
 		await db.execute(sql`DELETE FROM reading_assignment_reads WHERE reading_assignment_id IN (
 			SELECT ra.id FROM reading_assignments ra 
 			JOIN content c ON ra.content_id = c.id 
 			WHERE c.project_id = ${projectId}
 		)`);
 		
+		// Delete reading assignments (depends on content)
 		await db.execute(sql`DELETE FROM reading_assignments WHERE content_id IN (
 			SELECT id FROM content WHERE project_id = ${projectId}
 		)`);
 		
+		// Delete content (depends on channels)
 		await db.execute(sql`DELETE FROM content WHERE project_id = ${projectId}`);
 		
+		// Delete channel role assignments (depends on channels)
 		await db.execute(sql`DELETE FROM channel_role_assignments WHERE channel_id IN (
 			SELECT id FROM channels WHERE project_id = ${projectId}
 		)`);
 		
+		// Delete channels
 		await db.execute(sql`DELETE FROM channels WHERE project_id = ${projectId}`);
 		
+		// Delete squad role assignments (depends on squads)
 		await db.execute(sql`DELETE FROM squad_role_assignments WHERE squad_id IN (
 			SELECT id FROM squads WHERE project_id = ${projectId}
 		)`);
 		
-		await db.execute(sql`DELETE FROM squads WHERE project_id = ${projectId}`);
-		
-		await db.execute(sql`DELETE FROM role_prompt_orders WHERE role_id IN (
-			SELECT id FROM roles WHERE project_id = ${projectId}
-		)`);
-		
+		// Delete squad prompt assignments (depends on squads)
 		await db.execute(sql`DELETE FROM squad_prompt_assignments WHERE squad_id IN (
 			SELECT id FROM squads WHERE project_id = ${projectId}
 		)`);
 		
+		// Delete squads
+		await db.execute(sql`DELETE FROM squads WHERE project_id = ${projectId}`);
+		
+		// Delete role prompt orders (depends on roles)
+		await db.execute(sql`DELETE FROM role_prompt_orders WHERE role_id IN (
+			SELECT id FROM roles WHERE project_id = ${projectId}
+		)`);
+		
+		// Delete role prompt compositions (depends on roles)
 		await db.execute(sql`DELETE FROM role_prompt_compositions WHERE role_id IN (
 			SELECT id FROM roles WHERE project_id = ${projectId}
 		)`);
 		
+		// Delete prompts, agents, tasks, role assignments
 		await db.execute(sql`DELETE FROM prompts WHERE project_id = ${projectId}`);
 		await db.execute(sql`DELETE FROM agents WHERE project_id = ${projectId}`);
 		await db.execute(sql`DELETE FROM tasks WHERE project_id = ${projectId}`);
 		await db.execute(sql`DELETE FROM role_assignments WHERE project_id = ${projectId}`);
+		
+		// Delete roles last (since other tables depend on it)
 		await db.execute(sql`DELETE FROM roles WHERE project_id = ${projectId}`);
 
 		// Finally delete the project

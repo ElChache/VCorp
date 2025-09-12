@@ -445,12 +445,14 @@ This is just a gentle reminder - no action needed if you're already working! �
 			);
 		}
 
-		return await db
+		const unreadMessages = await db
 			.select({
 				id: content.id,
 				title: content.title,
 				body: content.body,
 				type: content.type,
+				parentContentId: content.parentContentId,
+				authorAgentId: content.authorAgentId,
 				createdAt: content.createdAt
 			})
 			.from(readingAssignments)
@@ -467,13 +469,106 @@ This is just a gentle reminder - no action needed if you're already working! �
 				)
 			))
 			.limit(5); // Limit for notification
+
+		// For each message, if it's a reply, get the full thread context
+		const messagesWithContext = await Promise.all(
+			unreadMessages.map(async (message) => {
+				if (message.parentContentId) {
+					// This is a reply - get the full thread
+					const thread = await this.getMessageThread(message.parentContentId);
+					return {
+						...message,
+						isReply: true,
+						thread: thread
+					};
+				}
+				return {
+					...message,
+					isReply: false,
+					thread: null
+				};
+			})
+		);
+
+		return messagesWithContext;
+	}
+
+	private async getMessageThread(parentContentId: number): Promise<any[]> {
+		// Get the original parent message
+		const parentMessage = await db
+			.select({
+				id: content.id,
+				title: content.title,
+				body: content.body,
+				type: content.type,
+				authorAgentId: content.authorAgentId,
+				createdAt: content.createdAt
+			})
+			.from(content)
+			.where(eq(content.id, parentContentId))
+			.limit(1);
+
+		if (parentMessage.length === 0) {
+			return [];
+		}
+
+		// Get all replies to this parent message
+		const replies = await db
+			.select({
+				id: content.id,
+				title: content.title,
+				body: content.body,
+				type: content.type,
+				authorAgentId: content.authorAgentId,
+				createdAt: content.createdAt
+			})
+			.from(content)
+			.where(eq(content.parentContentId, parentContentId))
+			.orderBy(content.createdAt);
+
+		// Return the thread: parent message first, then replies in chronological order
+		return [parentMessage[0], ...replies];
+	}
+
+	private buildThreadContextWithLimit(thread: any[], characterLimit: number): string {
+		let totalCharacters = 0;
+		const threadMessages = [];
+		
+		for (let i = 0; i < thread.length; i++) {
+			const threadMsg = thread[i];
+			const author = threadMsg.authorAgentId || 'System';
+			const prefix = i === 0 ? '📝 Original' : '↳ Reply';
+			const messageText = `  ${prefix} (${author}): ${threadMsg.body}`;
+			
+			// Check if adding this message would exceed the limit
+			if (totalCharacters + messageText.length + 1 > characterLimit && threadMessages.length > 0) {
+				// Add truncation indicator
+				const remainingMessages = thread.length - i;
+				threadMessages.push(`  ... (${remainingMessages} more message${remainingMessages === 1 ? '' : 's'} truncated)`);
+				break;
+			}
+			
+			threadMessages.push(messageText);
+			totalCharacters += messageText.length + 1; // +1 for newline
+		}
+		
+		return threadMessages.join('\n');
 	}
 
 	private async sendNotificationToAgent(agent: any, messages: any[]): Promise<boolean> {
 		const preview = messages
 			.slice(0, 2)
-			.map(msg => `• ${msg.title || msg.type}: ${msg.body.substring(0, 80)}${msg.body.length > 80 ? '...' : ''}`)
-			.join('\n');
+			.map(msg => {
+				if (msg.isReply && msg.thread && msg.thread.length > 0) {
+					// This is a reply - include the thread context with character limit
+					const threadContext = this.buildThreadContextWithLimit(msg.thread, 3000);
+					return `• THREAD UPDATE (${msg.type}):\n${threadContext}`;
+				} else {
+					// Regular message
+					return `• ${msg.title || msg.type}: ${msg.body}`;
+				}
+			})
+			.join('\n\n');
 
 		const notification = this.NOTIFICATION_TEMPLATE
 			.replace('{count}', messages.length.toString())

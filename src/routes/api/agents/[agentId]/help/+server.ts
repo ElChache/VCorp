@@ -67,6 +67,19 @@ export async function GET({ params, url }) {
 					endpoint: `${baseUrl}/api/channels?projectId=${agent.projectId}`,
 					usage: "See available channels for different types of communication (general, announcements, etc.)"
 				},
+				send_message: {
+					description: "Send messages to channels, send DMs, create replies, assign messages to agents/roles/squads",
+					endpoint: `${baseUrl}/api/send-message`,
+					method: "POST",
+					usage: "PRIMARY ENDPOINT for all messaging needs - works for channel messages, direct messages, replies, and reading assignments",
+					required_fields: "projectId, body",
+					optional_fields: "channelId (null for DMs), assignTo (array of assignments), type, title, parentContentId (for replies), authorAgentId",
+					examples: {
+						channel_message: `{"projectId": ${agent.projectId}, "channelId": 123, "body": "Your message", "authorAgentId": "${agentId}", "assignTo": [{"type": "role", "target": "Backend Developer"}]}`,
+						direct_message: `{"projectId": ${agent.projectId}, "channelId": null, "body": "Your DM", "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "target_agent_id"}]}`,
+						reply: `{"projectId": ${agent.projectId}, "body": "Your reply", "parentContentId": 456, "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "original_author"}]}`
+					}
+				},
 				messages_all: {
 					description: "View all project messages and communications",
 					endpoint: `${baseUrl}/api/messages/all?projectId=${agent.projectId}`,
@@ -80,7 +93,7 @@ export async function GET({ params, url }) {
 				current_phase: {
 					description: "Get your currently assigned active phase with requirements and expected outputs",
 					endpoint: `${baseUrl}/api/roles/${agent.roleType}/current-phase?projectId=${agent.projectId}`,
-					usage: "Check what phase you're currently working on, what inputs you need, and what outputs are expected"
+					usage: "Check what phase you're currently working on, what inputs you need, and what outputs are expected. If no active phase, remain idle and wait."
 				}
 			},
 			quick_start: {
@@ -89,7 +102,8 @@ export async function GET({ params, url }) {
 				"3_discover_team": "Use team discovery to see who you're working with",
 				"4_check_channels": "See what communication channels are available",
 				"5_review_messages": "Catch up on recent project communications",
-				"6_report_status": "Let the team know you're active and ready to work"
+				"6_use_send_message": "Use /api/send-message for ALL messaging (channels, DMs, replies, assignments)",
+				"7_report_status": "Let the team know you're active and ready to work"
 			},
 			important_notes: {
 				environment_variables: "🔧 CRITICAL: Your identity is available in environment variables:",

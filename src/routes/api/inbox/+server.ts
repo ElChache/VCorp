@@ -129,19 +129,76 @@ export async function GET({ url }) {
 		const unreadMessages = messagesWithStatus.filter(m => !m.isRead);
 		const readMessages = messagesWithStatus.filter(m => m.isRead);
 
+		// AUTO-MARK: Mark all unread messages as read before returning response
+		if (unreadMessages.length > 0) {
+			try {
+				// Find all reading assignment IDs for unread messages
+				const unreadAssignmentIds = unreadMessages.map(msg => {
+					// Find the assignment ID for this message and agent
+					return assignedMessages.find(am => am.messageId === msg.messageId)?.assignmentId;
+				}).filter(Boolean);
+
+				// Batch create read records for all unread assignments
+				if (unreadAssignmentIds.length > 0) {
+					const readRecordsToCreate = unreadAssignmentIds.map(assignmentId => ({
+						readingAssignmentId: assignmentId,
+						agentId: agentId,
+						acknowledged: false,
+					}));
+
+					await db.insert(readingAssignmentReads).values(readRecordsToCreate);
+					console.log(`Auto-marked ${unreadAssignmentIds.length} messages as read for agent ${agentId}`);
+				}
+			} catch (autoMarkError) {
+				console.error('Failed to auto-mark messages as read:', autoMarkError);
+				// Don't fail the request if auto-mark fails, just log it
+			}
+		}
+
+		// Format response with different data for read vs unread
+		const formattedReadMessages = readMessages.map(msg => ({
+			messageId: msg.messageId,
+			readAt: msg.readAt,
+			type: msg.type,
+			title: msg.title, // Include title for context
+			createdAt: msg.createdAt
+		}));
+
+		const formattedUnreadMessages = unreadMessages.map(msg => ({
+			messageId: msg.messageId,
+			title: msg.title,
+			body: msg.body,
+			type: msg.type,
+			authorAgentId: msg.authorAgentId,
+			channelId: msg.channelId,
+			parentContentId: msg.parentContentId,
+			createdAt: msg.createdAt,
+			assignedAt: msg.assignedAt,
+			assignmentType: msg.assignmentType,
+			assignmentTarget: msg.assignmentTarget,
+			isDM: msg.isDM,
+			isReply: msg.isReply,
+			// These will be false since we just auto-marked them, but keeping structure
+			isRead: false,
+			readAt: null,
+			acknowledged: false
+		}));
+
 		return json({
 			agent: {
 				id: agent.id,
 				roleType: agent.roleType,
 				squadId: agent.squadId
 			},
+			// Keep full messages array for backward compatibility (if needed)
 			messages: messagesWithStatus,
-			unreadMessages,
-			readMessages,
+			unreadMessages: formattedUnreadMessages,
+			readMessages: formattedReadMessages,
 			summary: {
 				total: messagesWithStatus.length,
 				unread: unreadMessages.length,
 				read: readMessages.length,
+				autoMarked: unreadMessages.length, // New field showing how many were auto-marked
 				directAssignments: messagesWithStatus.filter(m => m.assignmentType === 'agent').length,
 				roleAssignments: messagesWithStatus.filter(m => m.assignmentType === 'role').length,
 				squadAssignments: messagesWithStatus.filter(m => m.assignmentType === 'squad').length

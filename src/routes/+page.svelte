@@ -11,6 +11,7 @@
 	import TicketsSection from '$lib/components/TicketsSection.svelte';
 	import DocumentsSection from '$lib/components/DocumentsSection.svelte';
 	import CommunicationsSection from '$lib/components/CommunicationsSection.svelte';
+	import { contentPollingStore } from '$lib/services/ContentPollingService';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -45,6 +46,72 @@
 
 	// Monitoring variables
 	let monitoringStatus: any = { isRunning: false, stats: null };
+
+	// Communications Center unread count
+	$: pollingState = $contentPollingStore;
+	$: totalUnreadCount = calculateTotalUnreadCount(pollingState.updates);
+	$: documentsUnreadCount = calculateDocumentsUnreadCount(pollingState.updates);
+
+	function calculateTotalUnreadCount(updates: any): number {
+		if (!updates) return 0;
+
+		// Helper function to check if a message is unread by human director
+		function isUnreadByHumanDirector(message: any): boolean {
+			if (!message.readingAssignments) return false;
+			
+			return message.readingAssignments.some((assignment: any) => {
+				// Check if this assignment is for human-director
+				const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+				
+				if (!isForHumanDirector) return false;
+				
+				// Check if human-director has read this assignment
+				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+				return !hasRead;
+			});
+		}
+
+		// Count unread channel messages + unread direct messages (type "message" or "reply")
+		const channelUnread = updates.channelMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		).length || 0;
+
+		const dmUnread = updates.directMessages?.filter((msg: any) => 
+			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+		).length || 0;
+
+		// Count unread documents
+		const documentsUnread = updates.documents?.filter((doc: any) => 
+			isUnreadByHumanDirector(doc)
+		).length || 0;
+
+		return channelUnread + dmUnread + documentsUnread;
+	}
+
+	function calculateDocumentsUnreadCount(updates: any): number {
+		if (!updates) return 0;
+
+		// Helper function to check if a document is unread by human director
+		function isUnreadByHumanDirector(document: any): boolean {
+			if (!document.readingAssignments) return false;
+			
+			return document.readingAssignments.some((assignment: any) => {
+				// Check if this assignment is for human-director
+				const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+				
+				if (!isForHumanDirector) return false;
+				
+				// Check if human-director has read this assignment
+				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+				return !hasRead;
+			});
+		}
+
+		// Count only unread documents
+		return updates.documents?.filter((doc: any) => isUnreadByHumanDirector(doc)).length || 0;
+	}
 
 	onMount(async () => {
 		await loadProjects();
@@ -364,13 +431,21 @@
 					on:click={() => { currentSection = 'documents'; }}
 				>
 					📄 Documents
+					{#if documentsUnreadCount > 0}
+						<span class="unread-badge">{documentsUnreadCount}</span>
+					{/if}
 				</button>
 				<button 
-					class="nav-btn director-btn" 
+					class="nav-btn director-btn nav-btn-with-badge" 
 					class:active={currentSection === 'communications'}
 					on:click={() => { currentSection = 'communications'; }}
 				>
-					📬 Communications Center
+					<span class="btn-content">
+						📬 Communications Center
+						{#if totalUnreadCount > 0}
+							<span class="unread-badge">{totalUnreadCount}</span>
+						{/if}
+					</span>
 				</button>
 			</div>
 		{/if}
@@ -736,6 +811,37 @@
 		background: #007acc;
 		color: white;
 		border-color: #007acc;
+	}
+
+	.nav-btn-with-badge {
+		position: relative;
+	}
+
+	.btn-content {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.unread-badge {
+		background: #ef4444;
+		color: white;
+		border-radius: 10px;
+		padding: 2px 6px;
+		font-size: 11px;
+		font-weight: 700;
+		min-width: 18px;
+		height: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		animation: pulse-badge 2s infinite;
+	}
+
+	@keyframes pulse-badge {
+		0% { transform: scale(1); }
+		50% { transform: scale(1.1); }
+		100% { transform: scale(1); }
 	}
 
 

@@ -5,25 +5,24 @@ import { agents, projects, roleTemplates, roles } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // Get startup prompt from settings (configurable)
-let STARTUP_PROMPT = `You are a development agent in a coordinated multi-agent software project! 🚀
+let STARTUP_PROMPT = `You are a development agent in a coordinated multi-agent software project.
 
-🔧 **Environment Variables Available:**
+Environment Variables Available:
 - \$AGENT_ID = "{{AGENT_ID}}" (your unique agent identifier)
-- \$AGENT_ROLE = "{{AGENT_ROLE}}" (your role type)
+- \$AGENT_ROLE = "{{AGENT_ROLE}}" (your role type)  
+- \$PROJECT_ID = "{{PROJECT_ID}}" (your project ID for all API calls)
 
-Your first task is to register and get your role instructions by calling this endpoint:
+CRITICAL: You must register first and check for active phases before doing ANY work.
+
+Step 1 - Register:
 curl -X POST http://localhost:5173/api/agents/register -H "Content-Type: application/json" -d '{"agentId": "{{AGENT_ID}}"}'
 
-This will:
-1. Activate your agent status  
-2. Give you your complete role-specific prompt and responsibilities
-3. Provide your workspace and project context
+Step 2 - Check for active phase:
+curl -X GET "http://localhost:5173/api/roles/$(echo '{{AGENT_ROLE}}' | sed 's/ /%20/g')/current-phase?projectId={{PROJECT_ID}}"
 
-Once registered, follow the role instructions you receive exactly - they contain everything you need to begin productive work on the project.
+DO NOT create documents or take initiative without an assigned active phase. Wait for phase assignment if none exists.
 
-📚 Need help? Your complete guide: http://localhost:5173/api/agents/{{AGENT_ID}}/help
-
-Good luck, agent! The team is counting on you. 💪`;
+Help guide: http://localhost:5173/api/agents/{{AGENT_ID}}/help`;
 
 // Human names for agents - mix of common names that work well for AI agents
 const HUMAN_NAMES = [
@@ -158,7 +157,8 @@ export async function POST({ request }) {
 				...process.env, 
 				ENABLE_BACKGROUND_TASKS: '1',
 				AGENT_ID: agentId,
-				AGENT_ROLE: roleType
+				AGENT_ROLE: roleType,
+				PROJECT_ID: projectId.toString()
 			}
 		});
 
@@ -176,7 +176,7 @@ export async function POST({ request }) {
 		}
 
 		// Send the startup prompt to the agent (two-stage approach like farm-config)
-		const startupMessage = STARTUP_PROMPT.replace(/\{\{AGENT_ID\}\}/g, agentId).replace(/\{\{AGENT_ROLE\}\}/g, roleType);
+		const startupMessage = STARTUP_PROMPT.replace(/\{\{AGENT_ID\}\}/g, agentId).replace(/\{\{AGENT_ROLE\}\}/g, roleType).replace(/\{\{PROJECT_ID\}\}/g, projectId.toString());
 		console.log(`💬 Sending startup prompt to agent (two-stage)...`);
 		
 		// Stage 1: Send the prompt text

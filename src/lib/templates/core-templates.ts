@@ -171,6 +171,12 @@ export const CORE_ROLE_TEMPLATES = [
     name: 'System Architect',
     description: 'Designs system architecture and creates technical task breakdowns',
     prefix: 'sa'
+  },
+  {
+    id: 11,
+    name: 'Human Director',
+    description: 'Strategic leader and ultimate decision-maker overseeing all AI agents and project activities',
+    prefix: 'hd'
   }
 ];
 
