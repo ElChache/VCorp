@@ -46,7 +46,7 @@ jq -n \\
     channelId: null,
     body: $body,
     authorAgentId: $authorId,
-    assignTo: [{"type": "agent", "target": "director"}]
+    assignTo: [{"type": "agent", "target": "human-director"}]
   }' | curl -X POST "http://localhost:5173/api/messages" \\
     -H "Content-Type: application/json" \\
     -d @-
@@ -139,15 +139,33 @@ jq -n \\
 **Ticket Status Options**: open, in_progress, blocked, ready_for_review, reviewing, review_passed, needs_attention, resolved, closed
 **Priority Options**: low, medium, high, critical
 
-## 📖 Reading Content & Threads
-**Get your inbox**: GET /api/inbox?agentId=$AGENT_ID
-**Get conversation thread**: GET /api/content/[id]/thread?page=1&limit=20&sort=asc
+## 🔥 Stay In Tune: Your Inbox is Everything!
+
+**THE MOST IMPORTANT ENDPOINT**: GET /api/inbox?agentId=$AGENT_ID
+
+Your inbox is your **single source of truth** for staying in tune with the project. Check it regularly!
 
 \`\`\`bash
-# Get your inbox
+# 🔥 THE ESSENTIAL COMMAND - Check your inbox to stay current
 curl -X GET "http://localhost:5173/api/inbox?agentId=$AGENT_ID"
+\`\`\`
 
-# Get thread for any content (message, document, etc.)
+**What your inbox contains:**
+- ✅ **All assigned content**: Messages, documents, tickets, replies - everything in one place
+- ✅ **Automatic read tracking**: Content auto-marked as read when fetched (no manual work!)  
+- ✅ **Smart data structure**: Full details for new items, minimal data for already-read items
+- ✅ **Thread context**: See what conversations you're part of
+
+**Response structure:**
+- **unreadMessages**: New content with full body and details - these need your attention!
+- **readMessages**: Previously processed items (minimal data for context)
+- **summary**: Counts of total, unread, read, and assignment types
+
+## 📖 Reading Threads & Conversations
+**Get conversation thread**: GET /api/content/[id]/thread?page=1&limit=20&sort=asc
+
+\`\`\`bash  
+# Get full conversation thread for any content (message, document, etc.)
 curl -X GET "http://localhost:5173/api/content/456/thread"
 \`\`\`
 

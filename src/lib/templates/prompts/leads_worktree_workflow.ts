@@ -130,7 +130,7 @@ npm run lint
 1. **STOP all development** immediately
 2. Assess damage and scope
 3. Restore from last known good commit
-4. Notify director and all teams
+4. Notify human-director and all teams
 5. Investigate root cause
 6. Implement prevention measures
 
@@ -157,7 +157,7 @@ npm run lint
 ### Daily Responsibilities
 - **Main branch health reports** in leadership channel
 - **Immediate alerts** when main breaks
-- **Weekly architecture updates** to director
+- **Weekly architecture updates** to human-director
 - **Blocker escalation** for critical issues
 
 ### Enforcement Duties - CRITICAL VIOLATIONS 🚨
@@ -173,7 +173,7 @@ MAIN BRANCH VIOLATION DETECTED
 
 As a [role], you must ONLY work in your dedicated worktree branch. The main branch is exclusively managed by Lead Developers and System Architects.
 
-@director - Please note this serious workflow violation requiring immediate correction.
+@human-director - Please note this serious workflow violation requiring immediate correction.
 
 Next steps:
 1. Immediately revert your changes from main
@@ -192,7 +192,7 @@ PROJECT FOLDER VIOLATION DETECTED
 
 As a [role], you must ONLY work within your agent worktree folder: PROJECT_FOLDER/agent_workspaces/your_agent_id/
 
-@director - Please note this serious workspace violation requiring immediate correction.
+@human-director - Please note this serious workspace violation requiring immediate correction.
 
 The project folder is exclusively for Lead Developers and System Architects. All other developers must work within their isolated worktree environments.
 

@@ -52,6 +52,16 @@ export async function GET({ params, url }) {
 					endpoint: `${baseUrl}/api/agents/${agentId}/prompts`,
 					usage: "Your complete instruction set - read this first to understand your role and responsibilities"
 				},
+				inbox: {
+					description: "🔥 PRIMARY ENDPOINT: Get your inbox with automatic read tracking - all assigned content in one call!",
+					endpoint: `${baseUrl}/api/inbox?agentId=${agentId}`,
+					usage: "ESSENTIAL: Check this regularly to stay in tune with all assigned messages, documents, tickets, and replies. Content is automatically marked as read when fetched!",
+					features: "Auto-marks content as read, includes all content types (messages/documents/tickets/replies), efficient data structure",
+					response_structure: {
+						unreadMessages: "Full content with body and details - these are new items for you to process",
+						readMessages: "Minimal data (just ID, title, readAt) - previously processed items for context"
+					}
+				},
 				team_discovery: {
 					description: "Discover all agents in your project, their roles, and how to communicate",
 					endpoint: `${baseUrl}/api/agents?projectId=${agent.projectId}`,
@@ -62,33 +72,27 @@ export async function GET({ params, url }) {
 					endpoint: `${baseUrl}/api/projects/${agent.projectId}`,
 					usage: "Understand the overall project goals and context for your work"
 				},
-				channels: {
-					description: "List all communication channels and how to post messages",
-					endpoint: `${baseUrl}/api/channels?projectId=${agent.projectId}`,
-					usage: "See available channels for different types of communication (general, announcements, etc.)"
-				},
-				send_message: {
-					description: "Send messages to channels, send DMs, create replies, assign messages to agents/roles/squads",
-					endpoint: `${baseUrl}/api/send-message`,
-					method: "POST",
-					usage: "PRIMARY ENDPOINT for all messaging needs - works for channel messages, direct messages, replies, and reading assignments",
-					required_fields: "projectId, body",
-					optional_fields: "channelId (null for DMs), assignTo (array of assignments), type, title, parentContentId (for replies), authorAgentId",
+				rest_api: {
+					description: "New clean REST API endpoints for creating content",
+					endpoints: {
+						messages: `${baseUrl}/api/messages - POST to create channel messages or DMs`,
+						documents: `${baseUrl}/api/documents - POST to create documents with optional slugs`,
+						replies: `${baseUrl}/api/replies - POST to reply to any content (automatic flat threading)`,
+						tickets: `${baseUrl}/api/tickets - POST to create work tickets with status/priority`,
+						threads: `${baseUrl}/api/content/[id]/thread - GET conversation threads for any content`
+					},
 					examples: {
-						channel_message: `{"projectId": ${agent.projectId}, "channelId": 123, "body": "Your message", "authorAgentId": "${agentId}", "assignTo": [{"type": "role", "target": "Backend Developer"}]}`,
-						direct_message: `{"projectId": ${agent.projectId}, "channelId": null, "body": "Your DM", "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "target_agent_id"}]}`,
-						reply: `{"projectId": ${agent.projectId}, "body": "Your reply", "parentContentId": 456, "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "original_author"}]}`
+						channel_message: `{"projectId": ${agent.projectId}, "channelId": 123, "body": "Your message", "authorAgentId": "${agentId}"}`,
+						direct_message: `{"projectId": ${agent.projectId}, "channelId": null, "body": "Your DM", "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "human-director"}]}`,
+						document: `{"projectId": ${agent.projectId}, "title": "API Spec", "body": "Documentation...", "documentSlug": "api-spec", "authorAgentId": "${agentId}"}`,
+						reply: `{"projectId": ${agent.projectId}, "body": "Your reply", "parentContentId": 456, "authorAgentId": "${agentId}"}`,
+						ticket: `{"projectId": ${agent.projectId}, "title": "Fix bug", "body": "Description", "priority": "high", "assignedToRoleType": "Backend Developer", "authorAgentId": "${agentId}"}`
 					}
 				},
-				messages_all: {
-					description: "View all project messages and communications",
-					endpoint: `${baseUrl}/api/messages/all?projectId=${agent.projectId}`,
-					usage: "Stay updated on all project communications and decisions"
-				},
-				status_report: {
-					description: "Report your current status and activities",
-					endpoint: `${baseUrl}/api/agents/${agentId}/status`,
-					usage: "Let the system know what you're working on and your current status"
+				legacy_send_message: {
+					description: "Legacy endpoint (still works but use REST API above instead)",
+					endpoint: `${baseUrl}/api/send-message`,
+					usage: "Old unified endpoint - works but the new REST endpoints are cleaner and more predictable"
 				},
 				current_phase: {
 					description: "Get your currently assigned active phase with requirements and expected outputs",
@@ -98,12 +102,11 @@ export async function GET({ params, url }) {
 			},
 			quick_start: {
 				"1_read_prompts": "Start by reading your prompts to understand your role and responsibilities",
-				"2_check_current_phase": "Check if you have an active phase assigned to work on",
-				"3_discover_team": "Use team discovery to see who you're working with",
-				"4_check_channels": "See what communication channels are available",
-				"5_review_messages": "Catch up on recent project communications",
-				"6_use_send_message": "Use /api/send-message for ALL messaging (channels, DMs, replies, assignments)",
-				"7_report_status": "Let the team know you're active and ready to work"
+				"2_check_inbox": "🔥 ESSENTIAL: Check your inbox regularly to stay in tune with all assigned work",
+				"3_check_current_phase": "Check if you have an active phase assigned to work on",
+				"4_discover_team": "Use team discovery to see who you're working with",
+				"5_use_rest_api": "Use the clean REST API endpoints (POST /api/messages, /api/documents, /api/replies, /api/tickets)",
+				"6_auto_read_benefits": "Content automatically marked as read when you fetch your inbox - no manual tracking needed!"
 			},
 			important_notes: {
 				environment_variables: "🔧 CRITICAL: Your identity is available in environment variables:",
@@ -112,6 +115,7 @@ export async function GET({ params, url }) {
 				agent_id: `Your agent ID is '${agentId}' - use this in screenshots and file naming`,
 				role_type: `Your role is '${agent.roleType}' - focus on tasks appropriate for this role`,
 				squad: agent.squadId ? `You're part of the '${agent.squadId}' squad` : "You're not assigned to a specific squad",
+				director_distinction: "🚨 IMPORTANT: To message the director use agent ID 'human-director', NOT 'director'. The role is 'Human Director'.",
 				visual_testing: "If you're in the Visual Testers squad, remember to take screenshots to verify your work",
 				communication: "Use channels for team communication, DMs for private messages",
 				api_usage: "In all API examples that show 'your_agent_id' or 'your_role', use $AGENT_ID and $AGENT_ROLE instead"
@@ -121,6 +125,7 @@ export async function GET({ params, url }) {
 		return json({
 			title: `Agent Help Center - ${agentId}`,
 			description: "Everything you need to know about your role, team, and project",
+			full_api_docs: "AGENTS_API.md - Complete API documentation with examples and best practices",
 			...helpIndex
 		});
 

@@ -31,6 +31,11 @@
 	let channelMessages: any[] = [];
 	let newMessageContent = '';
 	let replyingToMessage: any = null;
+	
+	// Thread variables for 3-column layout
+	let selectedThreadMessage: any = null;
+	let threadReplies: any[] = [];
+	let isThreadsColumnOpen: boolean = false;
 	let showAssignmentDialog = false;
 	let messageAssignments: Array<{
 		assignedToType: 'role' | 'agent' | 'squad';
@@ -753,9 +758,9 @@
 	}
 
 	async function sendReply() {
-		// Support both dialog reply (replyToMessageId) and inline reply (replyingToMessage)
-		const messageId = replyToMessageId || replyingToMessage?.id;
-		const message = selectedMessage || replyingToMessage;
+		// Support thread replies (selectedThreadMessage) and legacy replies 
+		const messageId = selectedThreadMessage?.id || replyToMessageId || replyingToMessage?.id;
+		const message = selectedThreadMessage || selectedMessage || replyingToMessage;
 		
 		if (!replyContent.trim() || !messageId || !selectedProject) return;
 
@@ -781,8 +786,13 @@
 			});
 
 			if (response.ok) {
+				// Handle thread reply
+				if (selectedThreadMessage) {
+					replyContent = '';
+					await loadThreadReplies(selectedThreadMessage); // Refresh thread replies
+				}
 				// Handle dialog reply
-				if (replyToMessageId) {
+				else if (replyToMessageId) {
 					closeReplyDialog();
 				} 
 				// Handle inline reply
@@ -888,6 +898,49 @@
 		}
 	}
 
+	// Thread handling functions for 3-column layout
+	function onMessageSelect(message: any) {
+		selectedThreadMessage = message;
+		isThreadsColumnOpen = true;
+		loadThreadReplies(message);
+	}
+
+	function closeThreadsColumn() {
+		isThreadsColumnOpen = false;
+		selectedThreadMessage = null;
+		threadReplies = [];
+	}
+
+	async function loadThreadReplies(message: any) {
+		if (!message?.id) {
+			threadReplies = [];
+			return;
+		}
+
+		try {
+			// Use content updates API to get replies with full reading assignment data
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
+			if (response.ok) {
+				const data = await response.json();
+				// Filter replies for this specific message
+				threadReplies = data.updates.replies?.filter((reply: any) => 
+					reply.parentContentId === message.id
+				) || [];
+			}
+		} catch (err) {
+			console.error('Failed to load thread replies:', err);
+			threadReplies = [];
+		}
+	}
+
+	// Build flat comment list sorted by timestamp - all replies are to the selected message
+	function buildThreadTree(replies: any[]) {
+		return replies
+			.map((reply: any) => ({ ...reply, children: [] }))
+			.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+	}
+
+	$: threadTree = buildThreadTree(threadReplies);
 
 	function formatTimeAgo(timestamp: string): string {
 		const now = new Date();
@@ -950,28 +1003,7 @@
 </script>
 
 <div class="communications-section">
-	<div class="section-header">
-		<div class="header-left">
-			<h2>📬 Communications Center</h2>
-			{#if pollingState.isPolling}
-				<div class="polling-indicator">
-					<span class="polling-dot"></span>
-					<span class="polling-text">Live updates</span>
-				</div>
-			{:else if pollingState.error}
-				<div class="polling-error">
-					<span class="error-dot"></span>
-					<span class="error-text">Connection error</span>
-				</div>
-			{/if}
-		</div>
-		<button 
-			class="btn-primary"
-			on:click={() => showSendMessageDialog = true}
-		>
-			✉️ Send Message
-		</button>
-	</div>
+	<!-- Removed section header to save space -->
 
 	<div class="comms-nav">
 		<button 
@@ -1002,51 +1034,55 @@
 
 	<div class="comms-content">
 		{#if commsViewMode === 'communications'}
-			<div class="communications-view">
-				<div class="communications-left">
-					<div class="channels-panel">
-						<div class="channels-header">
-							<h3>Channels ({channels.length})</h3>
-						</div>
-						
-						<div class="channel-list">
-							{#each channels.sort((a, b) => (b.isForHumanDirector ? 1 : 0) - (a.isForHumanDirector ? 1 : 0)) as channel}
-								<div 
-									class="channel-item"
-									class:active={selectedChannel?.id === channel.id}
-									on:click={() => onChannelSelect(channel)}
-								>
-									<div class="channel-header">
-										<span class="channel-name">#{channel.name}</span>
-										{#if channel.isForHumanDirector}
-											<span class="channel-badge human-director">👤 Human</span>
-										{/if}
-										{#if channel.isMainChannel}
-											<span class="channel-badge">Main</span>
-										{/if}
-									</div>
-									<div class="channel-details">
-										<span class="channel-stats">
-											{channel.messageCount || 0} messages
-											{#if channel.unreadCount > 0}
-												• <span class="unread-count">{channel.unreadCount} unread</span>
-											{/if}
-										</span>
-									</div>
+			<!-- Flexible Layout with Sliding Threads Column -->
+			<div class="communications-layout">
+				<!-- Column 1: Channels List (Fixed width) -->
+				<div class="channels-sidebar">
+					<div class="channels-header">
+						<h3>Channels ({channels.length})</h3>
+					</div>
+					
+					<div class="channel-list">
+						{#each channels.sort((a, b) => (b.isForHumanDirector ? 1 : 0) - (a.isForHumanDirector ? 1 : 0)) as channel}
+							<div 
+								class="channel-item"
+								class:selected={selectedChannel?.id === channel.id}
+								on:click={() => onChannelSelect(channel)}
+							>
+								<div class="channel-header">
+									<span class="channel-name">#{channel.name}</span>
+									{#if channel.isForHumanDirector}
+										<span class="channel-badge human-director">👤</span>
+									{/if}
 								</div>
-							{/each}
-						</div>
+								<div class="channel-meta">
+									<span class="message-count">{channel.messageCount || 0} messages</span>
+									{#if channel.unreadCount > 0}
+										<span class="unread-count">{channel.unreadCount} unread</span>
+									{/if}
+								</div>
+							</div>
+						{/each}
 					</div>
 				</div>
 				
-				<div class="communications-right">
+				<!-- Column 2: Messages View -->
+				<div class="messages-viewer">
 					{#if selectedChannel}
 						<div class="messages-view">
 							<div class="messages-container">
 								<div class="messages-list">
 									{#if channelMessages.length > 0}
-										{#each channelMessages as message}
-											<div class="message" class:ticket={message.type === 'ticket'} class:reply={message.parentContentId}>
+										{#each channelMessages.filter(msg => !msg.parentContentId) as message}
+											<div class="message" 
+												class:ticket={message.type === 'ticket'} 
+												class:selected={selectedThreadMessage?.id === message.id}
+												on:click={() => onMessageSelect(message)}>
+												<div class="message-indicator">
+													{#if message.replies && message.replies.length > 0}
+														<span class="replies-count">{message.replies.length}</span>
+													{/if}
+												</div>
 												<div class="message-header">
 													<span class="message-author">{message.authorAgentId || 'System'}</span>
 													{#if message.type === 'ticket'}
@@ -1126,57 +1162,6 @@
 														</button>
 													</div>
 												{/if}
-												
-												<!-- Replies section -->
-												{#if message.replies && message.replies.length > 0}
-													<div class="message-replies">
-														<div class="replies-header">
-															<span class="replies-count">{message.replies.length} {message.replies.length === 1 ? 'reply' : 'replies'}</span>
-														</div>
-														{#each message.replies as reply}
-															<div class="reply-message">
-																<div class="reply-header">
-																	<span class="reply-author">{reply.authorAgentId || 'System'}</span>
-																	<span class="reply-time">{formatMessageTime(reply.createdAt)}</span>
-																</div>
-																<div class="reply-content">
-																	{reply.body}
-																</div>
-															</div>
-														{/each}
-													</div>
-												{/if}
-												
-												<!-- Reply input interface - appears only for the message being replied to -->
-												{#if replyingToMessage && replyingToMessage.id === message.id}
-													<div class="reply-input-container">
-														<div class="reply-input-wrapper">
-															<input 
-																type="text" 
-																class="reply-input" 
-																placeholder="Type your reply..." 
-																bind:value={replyContent}
-																on:keydown={(e) => {
-																	if (e.key === 'Enter' && !e.shiftKey) {
-																		e.preventDefault();
-																		sendReply();
-																	} else if (e.key === 'Escape') {
-																		cancelReply();
-																	}
-																}}
-																autofocus
-															/>
-															<button 
-																class="send-btn" 
-																on:click={sendReply}
-																disabled={!replyContent.trim()}
-															>
-																Reply
-															</button>
-															<button class="cancel-reply-btn" on:click={cancelReply}>×</button>
-														</div>
-													</div>
-												{/if}
 											</div>
 										{/each}
 									{:else}
@@ -1220,6 +1205,112 @@
 						</div>
 					{/if}
 				</div>
+				
+				<!-- Column 3: Sliding Threads/Replies -->
+				<div class="threads-column" class:open={isThreadsColumnOpen}>
+					{#if selectedThreadMessage}
+						<div class="threads-header">
+							<h3>💬 Thread ({threadReplies.length})</h3>
+							<button class="close-threads-btn" on:click={closeThreadsColumn} title="Close thread">
+								×
+							</button>
+						</div>
+						
+						<div class="threads-container">
+							<div class="original-message">
+								<div class="message-header">
+									<span class="message-author">
+										{selectedThreadMessage.authorAgentId || 'System'}
+									</span>
+									<span class="message-time">{formatTimeAgo(selectedThreadMessage.createdAt)}</span>
+									{#if selectedThreadMessage.readingAssignments && selectedThreadMessage.readingAssignments.length > 0}
+										<div class="read-status-icon-container" 
+											 on:click={(e) => toggleReadStatusTooltip(e, selectedThreadMessage)}>
+											<span class="read-status-icon" class:fully-read={isMessageFullyRead(selectedThreadMessage)} class:partially-read={isMessagePartiallyRead(selectedThreadMessage)}>
+												{#if isMessageFullyRead(selectedThreadMessage)}
+													✅
+												{:else if isMessagePartiallyRead(selectedThreadMessage)}
+													👀
+												{:else}
+													📩
+												{/if}
+											</span>
+										</div>
+									{/if}
+								</div>
+								<div class="message-content markdown-content">
+									{#if selectedThreadMessage.title && selectedThreadMessage.title !== selectedThreadMessage.body}
+										<strong>{selectedThreadMessage.title}</strong><br>
+									{/if}
+									{@html marked((selectedThreadMessage.body || '').replace(/\\n/g, '\n'))}
+								</div>
+							</div>
+							
+							{#if threadTree.length > 0}
+								{#each threadTree as reply}
+									<div class="thread-reply">
+										<div class="message-header">
+											<span class="message-author">
+												{reply.authorAgentId === 'human-director' ? 'Human Director' : reply.authorAgentId || 'System'}
+											</span>
+											<span class="message-time">{formatTimeAgo(reply.createdAt)}</span>
+											{#if reply.readingAssignments && reply.readingAssignments.length > 0}
+												<div class="read-status-icon-container" 
+													 on:click={(e) => toggleReadStatusTooltip(e, reply)}>
+													<span class="read-status-icon" class:fully-read={isMessageFullyRead(reply)} class:partially-read={isMessagePartiallyRead(reply)}>
+														{#if isMessageFullyRead(reply)}
+															✅
+														{:else if isMessagePartiallyRead(reply)}
+															👀
+														{:else}
+															📩
+														{/if}
+													</span>
+												</div>
+											{/if}
+										</div>
+										<div class="message-content markdown-content">
+											{@html marked((reply.body || '').replace(/\\n/g, '\n'))}
+										</div>
+									</div>
+								{/each}
+							{:else}
+								<div class="no-replies">
+									<p>No replies yet. Start the discussion!</p>
+								</div>
+							{/if}
+						</div>
+
+						<!-- Add Reply Form -->
+						<div class="add-reply-form">
+							<textarea 
+								bind:value={replyContent} 
+								placeholder="Add a reply..."
+								rows="3"
+								class="reply-input"
+								on:keydown={(e) => {
+									if (e.key === 'Enter' && !e.shiftKey) {
+										e.preventDefault();
+										if (replyContent.trim()) {
+											sendReply();
+										}
+									}
+								}}
+							></textarea>
+							<button 
+								class="btn-primary btn-sm" 
+								on:click={sendReply}
+								disabled={!replyContent.trim()}
+							>
+								💬 Reply
+							</button>
+						</div>
+					{:else}
+						<div class="no-thread-selected">
+							<p>Select a message to view thread</p>
+						</div>
+					{/if}
+				</div>
 			</div>
 		{:else if commsViewMode === 'direct-messages'}
 			<div class="direct-messages-view">
@@ -1227,6 +1318,13 @@
 					<div class="dm-agents-panel">
 						<div class="dm-agents-header">
 							<h3>Agents ({dmAgents.length})</h3>
+							<button 
+								class="btn-primary btn-sm"
+								on:click={() => showSendMessageDialog = true}
+								title="Send Message"
+							>
+								✉️ Send Message
+							</button>
 						</div>
 						
 						<div class="dm-agent-list">
@@ -1591,7 +1689,7 @@
 	.communications-section {
 		display: flex;
 		flex-direction: column;
-		height: 100%;
+		height: calc(100vh - 170px); /* Increased to fully eliminate scroll */
 		background: white;
 		border-radius: 8px;
 		overflow: hidden;
@@ -1917,28 +2015,352 @@
 	.comms-content {
 		flex: 1;
 		overflow: hidden;
-		padding: 20px;
+		padding: 0; /* Remove padding to give full space to columns */
+		height: 100%; /* Ensure it takes full available height */
 	}
 
-	.communications-view {
-		height: 100%;
+	/* Flexible Layout with Sliding Threads Column */
+	.communications-layout {
 		display: flex;
-		gap: 20px;
+		height: 100%;
+		flex: 1;
+		min-height: 0;
+		position: relative;
 		overflow: hidden;
 	}
 
-	.communications-left {
-		width: 400px;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		overflow-y: auto;
+	/* Subtle backdrop when threads are open - only over messages area */
+	.messages-viewer::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0);
+		pointer-events: none;
+		transition: background 0.3s ease;
+		z-index: 1;
+		opacity: 0;
 	}
 
-	.communications-right {
+	.communications-layout:has(.threads-column.open) .messages-viewer::before {
+		background: rgba(0, 0, 0, 0.05);
+		opacity: 1;
+	}
+
+	/* Column 1: Channels Sidebar (Fixed width) */
+	.channels-sidebar {
+		width: 300px;
+		flex-shrink: 0;
+		border-right: 1px solid #ddd;
+		padding: 1rem;
+		overflow-y: auto;
+		background: white;
+		height: 100%; /* Full height of layout */
+	}
+
+	.channels-header {
+		padding-bottom: 1rem;
+		border-bottom: 1px solid #e5e7eb;
+		margin-bottom: 1rem;
+	}
+
+	.channels-header h3 {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.channel-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.channel-item {
+		border: 1px solid #e0e0e0;
+		border-radius: 8px;
+		padding: 12px;
+		cursor: pointer;
+		transition: all 0.2s;
+		background: white;
+	}
+
+	.channel-item:hover {
+		border-color: #007bff;
+		box-shadow: 0 2px 4px rgba(0,123,255,0.1);
+	}
+
+	.channel-item.selected {
+		border-color: #007bff;
+		background-color: #f8f9ff;
+		box-shadow: 0 2px 8px rgba(0,123,255,0.15);
+	}
+
+	.channel-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 4px;
+	}
+
+	.channel-name {
+		font-weight: 600;
+		color: #333;
+		font-size: 0.9rem;
+	}
+
+	.channel-badge {
+		font-size: 0.7rem;
+		padding: 2px 6px;
+		border-radius: 8px;
+		background: #e9ecef;
+		color: #495057;
+	}
+
+	.channel-badge.human-director {
+		background: #fee2e2;
+		color: #dc2626;
+	}
+
+	.channel-meta {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		font-size: 0.75rem;
+		color: #6b7280;
+	}
+
+	.message-count {
+		font-weight: 500;
+	}
+
+	.unread-count {
+		color: #ef4444;
+		font-weight: 600;
+	}
+
+	/* Column 2: Messages Viewer (Flexible) */
+	.messages-viewer {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
+		background: white;
+		min-width: 0;
+		position: relative;
+		height: 100%; /* Full height of layout */
+		overflow: hidden;
+	}
+
+	.messages-container {
+		flex: 1;
+		overflow-y: auto;
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		min-height: 0; /* Allow shrinking for scroll */
+	}
+
+	.messages-list {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	/* Messages in column 2 - flat style like documents */
+	.message {
+		padding: 0.5rem 0;
+		border-bottom: 2px solid #d1d5db;
+		margin-bottom: 0.25rem;
+		cursor: pointer;
+		transition: background-color 0.2s;
+		position: relative;
+	}
+
+	.message:hover {
+		background-color: rgba(59, 130, 246, 0.05);
+	}
+
+	.message.selected {
+		background-color: rgba(59, 130, 246, 0.1);
+		border-left: 4px solid #3b82f6;
+		padding-left: calc(0.5rem - 4px);
+	}
+
+	.message:last-child {
+		border-bottom: 2px solid #d1d5db;
+	}
+
+	.message-indicator {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		font-size: 0.75rem;
+		color: #6b7280;
+	}
+
+	.replies-count {
+		background: #e5e7eb;
+		padding: 2px 6px;
+		border-radius: 12px;
+		font-weight: 500;
+	}
+
+	/* Column 3: Sliding Threads Column */
+	.threads-column {
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 600px; /* Wider for better content viewing */
+		height: 100%; /* Full height of parent layout */
+		background: #f9fafb;
+		border-left: 1px solid #e5e7eb;
+		box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1);
+		display: flex;
+		flex-direction: column;
+		transform: translateX(100%);
+		transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		z-index: 10;
+		overflow: hidden; /* Prevent content overflow */
+	}
+
+	.threads-column.open {
+		transform: translateX(0); /* Slides out completely to right edge, overlapping messages */
+	}
+
+	.threads-header {
+		padding: 1rem 0.5rem 1rem 1rem; /* Less padding on right to move X closer to edge */
+		border-bottom: 1px solid #e5e7eb;
+		background: white;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+	}
+
+	.threads-header h3 {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.close-threads-btn {
+		background: none;
+		border: none;
+		font-size: 24px;
+		color: #6b7280;
+		cursor: pointer;
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 6px;
+		transition: all 0.2s;
+		line-height: 1;
+	}
+
+	.close-threads-btn:hover {
+		background-color: #f3f4f6;
+		color: #374151;
+	}
+
+	.threads-container {
+		flex: 1;
+		overflow-y: auto;
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		min-height: 0; /* Force flex item to respect container height and enable scrolling */
+	}
+
+	.no-thread-selected, .no-replies {
+		text-align: center;
+		padding: 2rem 1rem;
+		color: #6b7280;
+		font-style: italic;
+	}
+
+	.original-message {
+		background: white;
+		border: 2px solid #3b82f6;
+		border-radius: 8px;
+		padding: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.thread-reply {
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 1rem;
+		margin-left: 1rem;
+	}
+
+	/* Message components */
+	.message-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 0.125rem;
+	}
+
+	.message-author {
+		font-weight: 700;
+		color: #1f2937;
+		font-size: 0.8rem;
+	}
+
+	.message-time {
+		font-size: 0.7rem;
+		color: #6b7280;
+	}
+
+	.message-content {
+		font-size: 0.85rem;
+		line-height: 1.4;
+		color: #374151;
+		margin: 0;
+	}
+
+	.message-actions {
+		display: flex;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	/* Add Reply Form */
+	.add-reply-form {
+		padding: 1rem;
+		border-top: 1px solid #e5e7eb;
+		background: white;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.reply-input {
+		resize: vertical;
+		min-height: 60px;
+		padding: 0.75rem;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font-size: 0.875rem;
+		font-family: inherit;
+	}
+
+	.reply-input:focus {
+		outline: 2px solid #3b82f6;
+		outline-offset: -1px;
+		border-color: #3b82f6;
+	}
+
+	.reply-input::placeholder {
+		color: #9ca3af;
 	}
 
 	.communications-placeholder {
@@ -2198,7 +2620,9 @@
 	/* Message input styles */
 	.message-input-container {
 		border-top: 1px solid #e5e5e5;
-		padding-top: 16px;
+		padding: 16px 1rem 1rem 1rem;
+		background: white;
+		flex-shrink: 0; /* Don't shrink when messages grow */
 	}
 	
 	.message-input-wrapper {

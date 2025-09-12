@@ -44,7 +44,7 @@ As a core team member (Backend Developer, Frontend Developer, AI Developer, UX E
 - Learning or skill-related questions
 
 ## Communication Method
-**Use Direct Messages only** - Send DM to agent ID "director"
+**Use Direct Messages only** - Send DM to agent ID "human-director"
 
 ## Message Format (Keep Brief)
 **Subject**: Brief description of the system/process issue

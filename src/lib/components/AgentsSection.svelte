@@ -66,9 +66,110 @@
 		}
 	}
 
+	async function sendAgentHome() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+		
+		if (!confirm(`Ask ${selectedAgent.id} to wrap up their day?\n\nThis will send them a polite message asking them to finish their current work and clock out when ready. They'll remain active until they choose to clock out.`)) {
+			return;
+		}
+		
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/send-home`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				}
+			});
+			
+			if (response.ok) {
+				console.log('Agent sent home successfully');
+				await loadAgentsData();
+			} else {
+				const error = await response.json();
+				console.error('Failed to send agent home:', error.error);
+				alert(`Failed to send agent home: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error sending agent home:', error);
+			alert('Failed to send agent home');
+		}
+	}
+
+	async function forceAgentHome() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+		
+		if (!confirm(`⚡ FORCE ${selectedAgent.id} home?\n\nThis will immediately terminate their session (for unresponsive agents). Their data and assignments will be preserved.\n\nUse this only if they didn't respond to the polite wrap-up request.`)) {
+			return;
+		}
+		
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/force-home`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				}
+			});
+			
+			if (response.ok) {
+				console.log('Agent forced home successfully');
+				await loadAgentsData();
+			} else {
+				const error = await response.json();
+				console.error('Failed to force agent home:', error.error);
+				alert(`Failed to force agent home: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error forcing agent home:', error);
+			alert('Failed to force agent home');
+		}
+	}
+
+	async function bringAgentBack() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+		
+		if (!confirm(`Bring ${selectedAgent.id} back?\n\nThis will start a new session for them to continue their existing work.`)) {
+			return;
+		}
+		
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/bring-back`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ projectId: selectedProject.id })
+			});
+			
+			if (response.ok) {
+				console.log('Agent brought back successfully');
+				await loadAgentsData();
+			} else {
+				const error = await response.json();
+				console.error('Failed to bring agent back:', error.error);
+				alert(`Failed to bring agent back: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error bringing agent back:', error);
+			alert('Failed to bring agent back');
+		}
+	}
+
 	async function killAgent() {
 		if (!selectedAgent) {
 			console.error('No agent selected');
+			return;
+		}
+		
+		if (!confirm(`⚠️ PERMANENTLY DELETE agent ${selectedAgent.id}?\n\nThis will:\n- Kill their session\n- Remove them from the database\n- Remove all their content references\n\nThis action CANNOT be undone. Consider using Refresh instead.`)) {
 			return;
 		}
 		
@@ -314,6 +415,12 @@
 						<h3>{selectedAgent.id}</h3>
 						<div class="agent-actions">
 							<button class="btn-secondary">💬 Send Command</button>
+							{#if selectedAgent.status === 'offline'}
+								<button class="btn-primary" on:click={bringAgentBack}>🔄 Bring Back</button>
+							{:else}
+								<button class="btn-warning" on:click={sendAgentHome}>🏠 Send Home</button>
+								<button class="btn-orange" on:click={forceAgentHome}>⚡ Force Home</button>
+							{/if}
 							<button class="btn-danger" on:click={killAgent}>🗲 Kill Agent</button>
 						</div>
 					</div>
@@ -481,7 +588,7 @@
 		min-width: 100px;
 	}
 
-	.btn-primary, .btn-secondary, .btn-danger {
+	.btn-primary, .btn-secondary, .btn-warning, .btn-orange, .btn-danger {
 		padding: 8px 16px;
 		border-radius: 4px;
 		font-size: 14px;
@@ -513,6 +620,26 @@
 
 	.btn-secondary:hover {
 		background: #e5e7eb;
+	}
+
+	.btn-warning {
+		background: #fef3c7;
+		color: #f59e0b;
+		border: 1px solid #fde68a;
+	}
+
+	.btn-warning:hover {
+		background: #fde68a;
+	}
+
+	.btn-orange {
+		background: #fed7aa;
+		color: #ea580c;
+		border: 1px solid #fdba74;
+	}
+
+	.btn-orange:hover {
+		background: #fdba74;
 	}
 
 	.btn-danger {

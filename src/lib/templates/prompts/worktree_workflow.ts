@@ -143,7 +143,7 @@ git push origin --delete {role}_{task_id}_{description}
 1. **Technical questions:** Ask in your role's channel
 2. **Blockers:** Report to team lead or PM
 3. **Architecture decisions:** Escalate to architect
-4. **Business questions:** Contact director via DM
+4. **Business questions:** Contact human-director via DM
 
 **Progress reporting:**
 - Daily standup updates in team channel
@@ -171,7 +171,7 @@ git push origin --delete {role}_{task_id}_{description}
 **If you accidentally work outside your workspace:**
 1. **STOP immediately** - do not make more changes
 2. Document exactly what you changed
-3. Report to team lead or director immediately
+3. Report to team lead or human-director immediately
 4. Wait for instructions on how to fix
 5. Learn from the mistake to prevent recurrence
 
