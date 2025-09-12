@@ -74,14 +74,15 @@
 		if (!message.readingAssignments) return false;
 		
 		return message.readingAssignments.some((assignment: any) => {
-			// Check if this assignment is for human-director
-			const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+			// Check if this assignment is for human-director (including old 'director' assignments)
+			const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
 			
 			if (!isForHumanDirector) return false;
 			
-			// Check if human-director has read this assignment
-			const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+			// Check if human-director has read this assignment (including old 'director' reads)
+			const hasRead = assignment.readBy ? assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director') : 
+			                assignment.reads ? assignment.reads.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director') : false;
 			return !hasRead;
 		});
 	}
@@ -89,18 +90,58 @@
 	// Helper function to check if a message is fully read by all assigned agents
 	function isMessageFullyRead(message: any): boolean {
 		if (!message.readingAssignments) return false;
-		// Only consider assignments that have actual target agents
-		const assignmentsWithTargets = message.readingAssignments.filter((assignment: any) => assignment.totalTargets > 0);
-		if (assignmentsWithTargets.length === 0) return false;
-		return assignmentsWithTargets.every((assignment: any) => assignment.isFullyRead);
+		
+		const assignments = message.readingAssignments;
+		
+		// Filter to only assignments that have targets/should be read
+		const assignmentsToCheck = assignments.filter((assignment: any) => {
+			// Old format: use totalTargets
+			if (assignment.totalTargets !== undefined) {
+				return assignment.totalTargets > 0;
+			}
+			// New format: assume all assignments should be checked (simplified)
+			return true;
+		});
+		
+		if (assignmentsToCheck.length === 0) return false;
+		
+		return assignmentsToCheck.every((assignment: any) => {
+			// Old format: use isFullyRead
+			if (assignment.isFullyRead !== undefined) {
+				return assignment.isFullyRead;
+			}
+			// New format: assignment is fully read if it has reads
+			return assignment.reads && assignment.reads.length > 0;
+		});
 	}
 
 	// Helper function to check if a message is partially read
 	function isMessagePartiallyRead(message: any): boolean {
 		if (!message.readingAssignments) return false;
-		// Only consider assignments that have actual target agents
-		const assignmentsWithTargets = message.readingAssignments.filter((assignment: any) => assignment.totalTargets > 0);
-		return assignmentsWithTargets.some((assignment: any) => assignment.readCount > 0 && !assignment.isFullyRead);
+		
+		const assignments = message.readingAssignments;
+		
+		// Calculate read status for each assignment based on available data
+		const hasFullyReadAssignments = assignments.some((assignment: any) => {
+			// Check if assignment has the pre-calculated isFullyRead field (old format)
+			if (assignment.isFullyRead !== undefined) {
+				return assignment.isFullyRead;
+			}
+			// For new format, assignment is "fully read" if it has any reads (simplified logic)
+			return assignment.reads && assignment.reads.length > 0;
+		});
+		
+		const hasUnreadAssignments = assignments.some((assignment: any) => {
+			// Check if assignment has the pre-calculated isFullyRead field (old format)
+			if (assignment.isFullyRead !== undefined) {
+				return !assignment.isFullyRead;
+			}
+			// For new format, assignment is "unread" if it has no reads
+			return !assignment.reads || assignment.reads.length === 0;
+		});
+		
+		// Partially read = some assignments are fully read AND some are not fully read
+		return hasFullyReadAssignments && hasUnreadAssignments;
 	}
 
 	// Tooltip variables
@@ -160,44 +201,48 @@
 		}, 0);
 	}
 
-	// Create tooltip content showing agent read status
+	// Create tooltip content showing assignment read status
 	function createTooltipContent(message: any): string {
 		if (!message.readingAssignments) return '';
 		
 		let content = '<div class="tooltip-header">Read Status</div>';
-		
-		// Group all agents from all assignments
-		const allAgents = new Map();
+		content += '<div class="assignments-list">';
 		
 		message.readingAssignments.forEach((assignment: any) => {
-			if (assignment.targetAgents && assignment.readBy) {
-				assignment.targetAgents.forEach((agentId: string) => {
-					const readInfo = assignment.readBy.find((read: any) => read.agentId === agentId);
-					allAgents.set(agentId, {
-						hasRead: !!readInfo,
-						readAt: readInfo?.readAt,
-						acknowledged: readInfo?.acknowledged
-					});
-				});
+			const assignmentTarget = `${assignment.assignedToType}: ${assignment.assignedTo}`;
+			
+			// Determine read status based on available data format
+			let isRead = false;
+			let readDetails = '';
+			
+			if (assignment.isFullyRead !== undefined) {
+				// Old format: use pre-calculated isFullyRead
+				isRead = assignment.isFullyRead;
+				if (isRead && assignment.readBy && assignment.readBy.length > 0) {
+					const readInfo = assignment.readBy[0];
+					readDetails = ` (by ${readInfo.agentId})`;
+				}
+			} else if (assignment.reads) {
+				// New format: check reads array
+				isRead = assignment.reads.length > 0;
+				if (isRead) {
+					const readInfo = assignment.reads[0];
+					readDetails = ` (by ${readInfo.agentId})`;
+				}
 			}
-		});
-		
-		// Convert to sorted array
-		const agentEntries = Array.from(allAgents.entries()).sort(([a], [b]) => a.localeCompare(b));
-		
-		content += '<div class="agents-list">';
-		agentEntries.forEach(([agentId, status]) => {
-			const icon = status.hasRead ? '✅' : '⏳';
-			const className = status.hasRead ? 'agent-read' : 'agent-unread';
-			const readTime = status.hasRead && status.readAt ? ` (${new Date(status.readAt).toLocaleString()})` : '';
-			content += `<div class="agent-status ${className}">
-				<span class="agent-icon">${icon}</span>
-				<span class="agent-name">${agentId}</span>
-				<span class="read-time">${readTime}</span>
+			
+			const icon = isRead ? '✅' : '❌';
+			const className = isRead ? 'assignment-read' : 'assignment-unread';
+			const statusText = isRead ? 'Read' : 'Unread';
+			
+			content += `<div class="assignment-status ${className}">
+				<span class="assignment-icon">${icon}</span>
+				<span class="assignment-target">${assignmentTarget}</span>
+				<span class="assignment-status-text">${statusText}${readDetails}</span>
 			</div>`;
 		});
-		content += '</div>';
 		
+		content += '</div>';
 		return content;
 	}
 
@@ -279,23 +324,16 @@
 		// Update unread counts with new messages
 		updateUnreadCountsFromNewData(updates);
 
-		// Update channel messages if we have a selected channel
+		// Refresh channel messages if we have a selected channel and there are updates
 		if (selectedChannel && updates.channelMessages?.length > 0) {
 			const relevantMessages = updates.channelMessages.filter(
 				(msg: any) => msg.channelId === selectedChannel.id
 			);
 			
 			if (relevantMessages.length > 0) {
-				console.log(`🔄 Adding ${relevantMessages.length} new messages to channel ${selectedChannel.name}`);
-				// Add new messages to existing messages, avoiding duplicates
-				const existingIds = new Set(channelMessages.map(m => m.id));
-				const newMessages = relevantMessages.filter(msg => !existingIds.has(msg.id));
-				
-				if (newMessages.length > 0) {
-					channelMessages = [...channelMessages, ...newMessages].sort(
-						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-					);
-				}
+				console.log(`🔄 Refreshing ${selectedChannel.name} channel messages (${relevantMessages.length} updates detected)`);
+				// Reload all messages to get updated read statuses
+				loadChannelMessages(selectedChannel);
 			}
 		}
 
@@ -317,6 +355,26 @@
 				
 				if (newDMs.length > 0) {
 					dmMessages = [...dmMessages, ...newDMs].sort(
+						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+					);
+				}
+			}
+		}
+
+		// Update thread replies if we have a selected thread message and there are new replies
+		if (selectedThreadMessage && updates.replies?.length > 0) {
+			const relevantReplies = updates.replies.filter(
+				(reply: any) => reply.parentContentId === selectedThreadMessage.id
+			);
+			
+			if (relevantReplies.length > 0) {
+				console.log(`🔄 Adding ${relevantReplies.length} new replies to thread ${selectedThreadMessage.id}`);
+				// Add new replies to existing thread replies, avoiding duplicates
+				const existingIds = new Set(threadReplies.map(r => r.id));
+				const newReplies = relevantReplies.filter(reply => !existingIds.has(reply.id));
+				
+				if (newReplies.length > 0) {
+					threadReplies = [...threadReplies, ...newReplies].sort(
 						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
 					);
 				}
@@ -357,10 +415,17 @@
 
 		try {
 			console.log(`Loading messages for channel: ${channel.name} (ID: ${channel.id})`);
-			const response = await fetch(`/api/channels/${channel.id}/messages`);
+			const response = await fetch(`/api/messages?projectId=${selectedProject.id}&channelId=${channel.id}`);
 			if (response.ok) {
 				channelMessages = await response.json();
 				console.log(`✅ Loaded ${channelMessages.length} messages for channel ${channel.name}`);
+				
+				// Automatically mark all messages as read
+				for (const message of channelMessages) {
+					if (hasUnreadAssignmentForHumanDirector(message)) {
+						await markMessageAsRead(message);
+					}
+				}
 			} else {
 				console.error('Failed to load channel messages:', response.status);
 				channelMessages = [];
@@ -399,14 +464,15 @@
 		if (!message.readingAssignments) return false;
 		
 		return message.readingAssignments.some(assignment => {
-			// Check if this assignment is for human-director
-			const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+			// Check if this assignment is for human-director (including old 'director' assignments)
+			const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
 			
 			if (!isForHumanDirector) return false;
 			
 			// Check if human-director has read this assignment
-			const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
+			const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director') : 
+			                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director') : false;
 			return !hasRead;
 		});
 	}
@@ -425,17 +491,18 @@
 		if (!message.readingAssignments) return;
 		
 		try {
-			// Find the assignment(s) for human-director
+			// Find the assignment(s) for human-director (including old 'director' assignments)
 			const humanDirectorAssignments = message.readingAssignments.filter(assignment => {
-				return (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				return (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 				       (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
 			});
 			
 			// Mark each assignment as read
 			let markedAsRead = false;
 			for (const assignment of humanDirectorAssignments) {
-				// Check if already read to avoid duplicate marking
-				const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
+				// Check if already read to avoid duplicate marking (handle both data formats, including old 'director' reads)
+				const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
+				                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
 				if (!hasRead) {
 					await fetch('/api/reading-assignments/mark-read', {
 						method: 'POST',
@@ -460,10 +527,21 @@
 				console.log(`📖 Marked message as read. Updated counts - Total: ${totalUnreadCount}, Channels: ${channelUnreadCount}, DMs: ${dmUnreadCount}`);
 			}
 			
-			// Refresh the channel messages and channel list
+			// Refresh the content to reflect read status changes
 			if (selectedChannel) {
 				await loadChannelMessages(selectedChannel);
 				await loadChannels();
+			}
+			
+			// If we're in DM view, refresh DM data
+			if (selectedDMAgent) {
+				await loadDMMessages(selectedDMAgent.id);
+				await loadDMAgents();
+			}
+			
+			// Trigger a content polling refresh to update unread badges immediately
+			if (typeof window !== 'undefined' && window.dispatchEvent) {
+				window.dispatchEvent(new CustomEvent('refreshPolling'));
 			}
 		} catch (error) {
 			console.error('Failed to mark message as read:', error);
@@ -489,27 +567,12 @@
 				const channelsWithCounts = await Promise.all(
 					channelsData.map(async (channel) => {
 						try {
-							const msgResponse = await fetch(`/api/channels/${channel.id}/messages?projectId=${selectedProject.id}`);
+							const msgResponse = await fetch(`/api/messages?projectId=${selectedProject.id}&channelId=${channel.id}`);
 							if (msgResponse.ok) {
 								const messages = await msgResponse.json();
 								
-								// Calculate unread messages for human-director
-								let unreadCount = 0;
-								messages.forEach(message => {
-									if (message.readingAssignments) {
-										message.readingAssignments.forEach(assignment => {
-											// Check if this assignment is for human-director and unread
-											if ((assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
-											    (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director')) {
-												// Check if human-director has read this assignment
-												const hasRead = assignment.readBy.some(read => read.agentId === 'human-director');
-												if (!hasRead) {
-													unreadCount++;
-												}
-											}
-										});
-									}
-								});
+								// Calculate unread messages for human-director only
+								const unreadCount = messages.filter(message => isUnreadByHumanDirector(message)).length;
 								
 								return {
 									...channel,
@@ -598,51 +661,78 @@
 		}
 
 		try {
-			// Use the polling data to get direct messages (much more reliable)
 			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
 			if (response.ok) {
 				const data = await response.json();
 				const directMessages = data.updates.directMessages || [];
 				
-				// Get unique agents from DMs (either as author or recipient to human-director)
-				const agentIds = new Set();
+				// Find all agents that have DM conversations with human-director
+				const conversationAgents = new Set();
+				
 				directMessages.forEach(dm => {
-					// Add the author if it's not human-director
+					// Case 1: Message FROM another agent TO human-director
 					if (dm.authorAgentId && dm.authorAgentId !== 'human-director') {
-						agentIds.add(dm.authorAgentId);
+						// Check if this message has reading assignment for human-director
+						const hasAssignmentToHuman = dm.readingAssignments?.some(a => 
+							(a.assignedToType === 'agent' && a.assignedTo === 'human-director') ||
+							(a.assignedToType === 'role' && a.assignedTo === 'Human Director')
+						);
+						if (hasAssignmentToHuman) {
+							conversationAgents.add(dm.authorAgentId);
+						}
 					}
-					// Add agents who have reading assignments from human-director messages
+					
+					// Case 2: Message FROM human-director TO other agents
 					if (dm.authorAgentId === 'human-director' && dm.readingAssignments) {
 						dm.readingAssignments.forEach(assignment => {
-							if (assignment.assignedToType === 'agent' && 
-							    assignment.assignedTo !== 'human-director') {
-								agentIds.add(assignment.assignedTo);
+							// Direct agent assignment
+							if (assignment.assignedToType === 'agent' && assignment.assignedTo !== 'human-director') {
+								conversationAgents.add(assignment.assignedTo);
+							}
+							// Role assignment - use targetAgents to find actual agents
+							else if (assignment.assignedToType === 'role' && assignment.targetAgents) {
+								assignment.targetAgents.forEach(agentId => {
+									if (agentId !== 'human-director') {
+										conversationAgents.add(agentId);
+									}
+								});
+							}
+							// Squad assignment - use targetAgents to find actual agents
+							else if (assignment.assignedToType === 'squad' && assignment.targetAgents) {
+								assignment.targetAgents.forEach(agentId => {
+									if (agentId !== 'human-director') {
+										conversationAgents.add(agentId);
+									}
+								});
 							}
 						});
 					}
 				});
 
-				// Create agent objects for the UI
-				dmAgents = Array.from(agentIds).map(agentId => {
-					// Find the most recent message with this agent
-					const recentMessage = directMessages
-						.filter(dm => 
-							dm.authorAgentId === agentId || 
-							(dm.authorAgentId === 'human-director' && 
-							 dm.readingAssignments?.some(a => a.assignedToType === 'agent' && a.assignedTo === agentId))
-						)
+				// Create agent objects for UI
+				dmAgents = Array.from(conversationAgents).map(agentId => {
+					// Find most recent message in this conversation
+					const conversationMessages = directMessages.filter(dm => 
+						dm.authorAgentId === agentId || 
+						(dm.authorAgentId === 'human-director' && 
+						 dm.readingAssignments?.some(a => 
+							(a.assignedToType === 'agent' && a.assignedTo === agentId) ||
+							(a.assignedToType === 'role' && a.targetAgents?.includes(agentId)) ||
+							(a.assignedToType === 'squad' && a.targetAgents?.includes(agentId))
+						))
+					);
+					
+					const recentMessage = conversationMessages
 						.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
-					// Count unread messages from this agent to human-director (using same logic as badge)
+					// Count unread messages from this agent to human-director
 					const unreadCount = directMessages.filter(dm => 
-						dm.authorAgentId === agentId && 
-						(dm.type === 'message' || dm.type === 'reply') &&
-						isUnreadByHumanDirector(dm)
+						dm.authorAgentId === agentId && isUnreadByHumanDirector(dm)
 					).length;
 
-					// Get display name for the agent
+					// Determine role type from agent ID
 					let roleType = 'Unknown';
-					if (agentId === 'pm_001') roleType = 'Product Manager';
+					if (agentId.startsWith('pm_')) roleType = 'Product Manager';
 					else if (agentId.startsWith('be_')) roleType = 'Backend Developer';
 					else if (agentId.startsWith('fe_')) roleType = 'Frontend Developer';
 					else if (agentId.startsWith('ai_')) roleType = 'AI Developer';
@@ -660,7 +750,7 @@
 					};
 				});
 				
-				// Sort by most recent message date (desc)
+				// Sort by most recent message
 				dmAgents.sort((a, b) => {
 					if (!a.lastMessageAt && !b.lastMessageAt) return 0;
 					if (!a.lastMessageAt) return 1;
@@ -668,12 +758,12 @@
 					return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
 				});
 
-				console.log(`📱 DM Agents Debug:`, {
+				console.log('📱 DM Agents Loaded:', {
 					totalDMs: directMessages.length,
-					agentIds: Array.from(agentIds),
-					loadedAgents: dmAgents.length,
-					agentDetails: dmAgents.map(a => `${a.id} (unread: ${a.unreadCount}, last: ${a.lastMessageAt})`)
+					conversationAgents: Array.from(conversationAgents),
+					loadedAgents: dmAgents.length
 				});
+				
 			} else {
 				console.error('Failed to load DM content:', response.status);
 			}
@@ -689,10 +779,36 @@
 		}
 
 		try {
-			const response = await fetch(`/api/messages/conversation?projectId=${selectedProject.id}&agent1=human-director&agent2=${agentId}`);
+			// Use polling data for consistency
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				dmMessages = await response.json();
-				console.log(`📬 Loaded ${dmMessages.length} DM messages with ${agentId}`);
+				const data = await response.json();
+				const allDMs = data.updates.directMessages || [];
+				
+				// Filter to show only conversation between human-director and the selected agent
+				dmMessages = allDMs.filter(msg => {
+					// Include if the message is from the selected agent
+					if (msg.authorAgentId === agentId) return true;
+					
+					// Include if the message is from human-director AND has a reading assignment for the selected agent
+					if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
+						return msg.readingAssignments.some(assignment => 
+							(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
+							(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
+							(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
+						);
+					}
+					
+					return false;
+				});
+				console.log(`📬 Loaded ${dmMessages.length} DM messages with ${agentId} (filtered from ${allDMs.length} total DMs)`);
+				
+				// Automatically mark all messages as read
+				for (const message of dmMessages) {
+					if (hasUnreadAssignmentForHumanDirector(message)) {
+						await markMessageAsRead(message);
+					}
+				}
 			} else {
 				console.error('Failed to load DM messages:', response.status);
 				dmMessages = [];
@@ -712,7 +828,7 @@
 		if (!newDMContent.trim() || !selectedDMAgent || !selectedProject) return;
 
 		try {
-			const response = await fetch('/api/send-message', {
+			const response = await fetch('/api/messages', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -720,7 +836,6 @@
 					authorAgentId: 'human-director',
 					body: newDMContent,
 					channelId: null, // This makes it a DM
-					type: 'message',
 					assignTo: [
 						{
 							type: 'agent',
@@ -732,8 +847,12 @@
 
 			if (response.ok) {
 				newDMContent = '';
-				await loadDMMessages(selectedDMAgent.id);
-				await loadDMAgents(); // Refresh agent list to update timestamps
+				// Add a small delay to ensure the message is saved before reloading
+				setTimeout(async () => {
+					await loadDMMessages(selectedDMAgent.id);
+					await loadDMAgents(); // Refresh agent list to update timestamps
+					// Polling service will automatically pick up new data
+				}, 100);
 			} else {
 				console.error('Failed to send DM:', response.status);
 			}
@@ -765,23 +884,20 @@
 		if (!replyContent.trim() || !messageId || !selectedProject) return;
 
 		try {
-			const response = await fetch('/api/send-message', {
+			const response = await fetch('/api/replies', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					projectId: selectedProject.id,
-					authorAgentId: 'human-director', // Human director
-					title: null,
+					authorAgentId: 'human-director',
 					body: replyContent,
-					channelId: message?.channelId || selectedChannel?.id || null,
 					parentContentId: messageId,
-					type: 'reply',
-					assignTo: [
+					assignTo: message?.authorAgentId && message.authorAgentId !== 'human-director' ? [
 						{
 							type: 'agent',
-							target: message?.authorAgentId || 'unknown'
+							target: message.authorAgentId
 						}
-					]
+					] : []
 				})
 			});
 
@@ -841,17 +957,30 @@
 		if (!messageBody.trim() || !selectedProject) return;
 
 		try {
-			// Create the message
-			const response = await fetch(`/api/channels/${channelId || 0}/messages`, {
+			// Use unified /api/messages endpoint for both channel messages and DMs
+			const apiEndpoint = '/api/messages';
+			
+			// Convert messageReadingAssignments to assignTo format
+			const assignTo = messageReadingAssignments
+				.filter(assignment => assignment.assignedTo.trim())
+				.map(assignment => ({
+					type: assignment.assignedToType,
+					target: assignment.assignedTo
+				}));
+			
+			const requestBody = {
+				projectId: selectedProject.id,
+				authorAgentId: 'human-director',
+				title: newMessage.title || null,
+				body: messageBody,
+				channelId: channelId || null, // null for DMs
+				assignTo: assignTo.length > 0 ? assignTo : undefined
+			};
+
+			const response = await fetch(apiEndpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					type: newMessage.type || 'message',
-					title: newMessage.title || null,
-					body: messageBody,
-					authorAgentId: 'human-director', // Human director
-					projectId: selectedProject.id
-				})
+				body: JSON.stringify(requestBody)
 			});
 
 			if (!response.ok) {
@@ -861,26 +990,7 @@
 
 			const createdMessage = await response.json();
 
-			// Create reading assignments if any
-			if (messageReadingAssignments.length > 0) {
-				for (const assignment of messageReadingAssignments) {
-					if (assignment.assignedTo.trim()) {
-						try {
-							await fetch('/api/reading-assignments', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({
-									contentId: createdMessage.id,
-									assignedToType: assignment.assignedToType,
-									assignedTo: assignment.assignedTo
-								})
-							});
-						} catch (error) {
-							console.error('Failed to create reading assignment:', error);
-						}
-					}
-				}
-			}
+			// Reading assignments are now handled automatically by the /api/messages endpoint
 
 			// Clear the appropriate input field
 			if (newMessageContent) {
@@ -890,8 +1000,26 @@
 					await loadChannelMessages(selectedChannel);
 				}
 			} else {
-				// Dialog messaging - reset dialog
+				// Dialog messaging - reset dialog and refresh DM data
 				resetSendMessageDialog();
+				
+				// Add a small delay to ensure the message is saved before reloading
+				setTimeout(async () => {
+					await loadDMAgents(); // Refresh agent list to show the new recipient
+					
+					// If a DM agent was selected from the assignTo, refresh their conversation
+					const firstAssignment = assignTo[0];
+					if (firstAssignment && firstAssignment.type === 'agent') {
+						// Find the agent in the list and select them
+						const targetAgent = dmAgents.find(agent => agent.id === firstAssignment.target);
+						if (targetAgent) {
+							selectedDMAgent = targetAgent;
+							await loadDMMessages(targetAgent.id);
+						}
+					}
+					
+					// Polling service will automatically pick up new data
+				}, 100);
 			}
 		} catch (error) {
 			console.error('Failed to send message:', error);
@@ -918,14 +1046,12 @@
 		}
 
 		try {
-			// Use content updates API to get replies with full reading assignment data
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
+			// Use dedicated thread endpoint to get ALL replies for this message
+			const response = await fetch(`/api/content/${message.id}/thread`);
 			if (response.ok) {
 				const data = await response.json();
-				// Filter replies for this specific message
-				threadReplies = data.updates.replies?.filter((reply: any) => 
-					reply.parentContentId === message.id
-				) || [];
+				// The thread API returns replies directly
+				threadReplies = data.replies || [];
 			}
 		} catch (err) {
 			console.error('Failed to load thread replies:', err);
@@ -1145,14 +1271,6 @@
 																	{/if}
 																</span>
 															</div>
-														{/if}
-														{#if hasUnreadAssignmentForHumanDirector(message)}
-															<button 
-																class="reply-btn mark-read-btn" 
-																on:click={() => markMessageAsRead(message)}
-															>
-																Mark Read
-															</button>
 														{/if}
 														<button 
 															class="reply-btn" 
@@ -1388,14 +1506,6 @@
 																{/if}
 															</span>
 														</div>
-													{/if}
-													{#if hasUnreadAssignmentForHumanDirector(message)}
-														<button 
-															class="reply-btn mark-read-btn" 
-															on:click={() => markMessageAsRead(message)}
-														>
-															Mark Read
-														</button>
 													{/if}
 													<button 
 														class="reply-btn" 
@@ -2595,16 +2705,6 @@
 		opacity: 1;
 	}
 
-	.mark-read-btn {
-		color: #059669 !important;
-		opacity: 0.8;
-	}
-
-	.mark-read-btn:hover {
-		background: #dcfce7 !important;
-		color: #047857 !important;
-		opacity: 1;
-	}
 
 	.no-messages {
 		text-align: center;
@@ -4039,6 +4139,45 @@
 	}
 	
 	:global(.read-status-tooltip .agent-unread) {
+		color: #f59e0b;
+	}
+
+	/* Assignment status styles */
+	:global(.read-status-tooltip .assignments-list) {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	
+	:global(.read-status-tooltip .assignment-status) {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 3px 0;
+		font-size: 12px;
+	}
+	
+	:global(.read-status-tooltip .assignment-icon) {
+		width: 16px;
+		font-size: 12px;
+	}
+	
+	:global(.read-status-tooltip .assignment-target) {
+		font-weight: 500;
+		color: #f3f4f6;
+		min-width: 120px;
+	}
+	
+	:global(.read-status-tooltip .assignment-status-text) {
+		font-size: 11px;
+		color: #9ca3af;
+	}
+	
+	:global(.read-status-tooltip .assignment-read) {
+		color: #10b981;
+	}
+	
+	:global(.read-status-tooltip .assignment-unread) {
 		color: #f59e0b;
 	}
 </style>

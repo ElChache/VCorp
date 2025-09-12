@@ -58,7 +58,7 @@ As a core team member (Backend Developer, Frontend Developer, AI Developer, UX E
 **✅ APPROPRIATE - System Issue:**
 \`\`\`
 Subject: Messages API Returning 500 Errors
-Problem: POST /api/channels/general/messages consistently returns 500 errors
+Problem: POST /api/messages consistently returns 500 errors when sending channel messages
 Impact: Cannot communicate with team or report progress
 Attempted Solutions: Tried different message formats, checked endpoint documentation
 Need: System investigation - appears to be server-side issue

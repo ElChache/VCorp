@@ -201,15 +201,13 @@
 		}
 
 		try {
-			const response = await fetch('/api/send-message', {
+			const response = await fetch('/api/replies', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({
 					projectId: selectedProject.id,
-					type: 'reply',
-					title: `Reply to: ${selectedDocument.title}`,
 					body: documentReplyContent,
 					parentContentId: replyToContentId,
 					authorAgentId: 'human-director'
@@ -378,9 +376,13 @@
 
 	function isMessagePartiallyRead(message) {
 		if (!message.readingAssignments) return false;
-		// Only consider assignments that have actual target agents
-		const assignmentsWithTargets = message.readingAssignments.filter((assignment) => assignment.totalTargets > 0);
-		return assignmentsWithTargets.some((assignment) => assignment.readCount > 0 && !assignment.isFullyRead);
+		
+		const assignments = message.readingAssignments;
+		const hasFullyReadAssignments = assignments.some((assignment) => assignment.isFullyRead);
+		const hasUnreadAssignments = assignments.some((assignment) => !assignment.isFullyRead);
+		
+		// Partially read = some assignments are fully read AND some are not fully read
+		return hasFullyReadAssignments && hasUnreadAssignments;
 	}
 
 	// Tooltip variables

@@ -60,6 +60,10 @@ class ContentPollingService {
 	private projectId: number | null = null;
 	private lastTimestamp: string | null = null;
 	private readonly POLL_INTERVAL = 5000; // 5 seconds
+	private handleRefreshPolling = async () => {
+		console.log('🔄 Manual polling refresh triggered');
+		await this.fetchUpdates();
+	};
 
 	/**
 	 * Start polling for content updates
@@ -81,6 +85,11 @@ class ContentPollingService {
 			error: null
 		}));
 
+		// Set up listener for manual refresh requests
+		if (typeof window !== 'undefined') {
+			window.addEventListener('refreshPolling', this.handleRefreshPolling);
+		}
+
 		// Initial fetch
 		await this.fetchUpdates();
 
@@ -97,6 +106,11 @@ class ContentPollingService {
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
 			this.intervalId = null;
+		}
+
+		// Clean up event listeners
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('refreshPolling', this.handleRefreshPolling);
 		}
 
 		console.log('⏹️ Stopped content polling');
@@ -230,11 +244,11 @@ export function getUnreadCountForHumanDirector(content: ContentUpdate): number {
 	
 	let unreadCount = 0;
 	content.readingAssignments.forEach(assignment => {
-		// Check if this assignment is for human-director and unread
-		if ((assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+		// Check if this assignment is for human-director and unread (including old 'director' assignments)
+		if ((assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 		    (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director')) {
-			// Check if human-director has read this assignment
-			const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+			// Check if human-director has read this assignment (including old 'director' reads)
+			const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
 			if (!hasRead) {
 				unreadCount++;
 			}

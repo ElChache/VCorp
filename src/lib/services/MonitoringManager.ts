@@ -85,9 +85,6 @@ curl -X GET "http://localhost:5173/api/inbox?agentId={agentId}"
 Recent messages:
 {preview}
 
-To mark as read:
-curl -X POST http://localhost:5173/api/mark-read -H "Content-Type: application/json" -d '{\"messageId\": MESSAGE_ID, \"agentId\": \"{agentId}\"}'
-
 Please check your inbox.
 
 ðŸ“š Need help? Your complete guide: http://localhost:5173/api/agents/{agentId}/help
@@ -445,6 +442,10 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 			);
 		}
 
+		const now = new Date();
+		const oneMinuteAgo = new Date(now.getTime() - 60000); // 1 minute ago
+
+		// Get all unread messages first, then filter by notification timing
 		const unreadMessages = await db
 			.select({
 				id: content.id,
@@ -453,7 +454,9 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 				type: content.type,
 				parentContentId: content.parentContentId,
 				authorAgentId: content.authorAgentId,
-				createdAt: content.createdAt
+				createdAt: content.createdAt,
+				assignmentId: readingAssignments.id,
+				lastNotifiedAt: readingAssignments.lastNotifiedAt
 			})
 			.from(readingAssignments)
 			.innerJoin(content, eq(readingAssignments.contentId, content.id))
@@ -468,11 +471,21 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 						))
 				)
 			))
-			.limit(5); // Limit for notification
+			.limit(20); // Get more to filter from
+
+		// Filter messages that need notification (never notified OR > 1 minute since last notification)
+		const messagesToNotify = unreadMessages.filter(message => {
+			if (!message.lastNotifiedAt) {
+				return true; // Never been notified
+			}
+			
+			const lastNotified = new Date(message.lastNotifiedAt);
+			return lastNotified < oneMinuteAgo; // More than 1 minute ago
+		}).slice(0, 5); // Limit to 5 for notification
 
 		// For each message, if it's a reply, get the full thread context
 		const messagesWithContext = await Promise.all(
-			unreadMessages.map(async (message) => {
+			messagesToNotify.map(async (message) => {
 				if (message.parentContentId) {
 					// This is a reply - get the full thread
 					const thread = await this.getMessageThread(message.parentContentId);
@@ -576,7 +589,30 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 			.replace(/\{agentId\}/g, agent.id)
 			.replace('{preview}', preview || 'No preview available');
 
-		return await this.sendTmuxMessage(agent.tmuxSession, notification);
+		const success = await this.sendTmuxMessage(agent.tmuxSession, notification);
+		
+		if (success) {
+			// Update lastNotifiedAt timestamp for all notified messages
+			const now = new Date();
+			const assignmentIds = messages.map(msg => msg.assignmentId).filter(id => id);
+			
+			if (assignmentIds.length > 0) {
+				try {
+					await Promise.all(
+						assignmentIds.map(assignmentId =>
+							db.update(readingAssignments)
+								.set({ lastNotifiedAt: now })
+								.where(eq(readingAssignments.id, assignmentId))
+						)
+					);
+				} catch (error) {
+					console.error('Failed to update notification timestamps:', error);
+					// Don't fail the whole notification just because we couldn't update timestamps
+				}
+			}
+		}
+		
+		return success;
 	}
 
 	private async sendTmuxMessage(tmuxSession: string, message: string): Promise<boolean> {

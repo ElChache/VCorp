@@ -1,4 +1,6 @@
 <script>
+	import { onMount, onDestroy } from 'svelte';
+
 	// Props for integration with main file
 	export let selectedProject = null;
 	export let channels = [];
@@ -34,14 +36,17 @@
 				const channelsWithCounts = await Promise.all(
 					channelsData.map(async (channel) => {
 						try {
-							const msgResponse = await fetch(`/api/channels/${channel.id}/messages?projectId=${selectedProject.id}`);
+							const msgResponse = await fetch(`/api/channels/${channel.id}/messages`);
 							if (msgResponse.ok) {
 								const messages = await msgResponse.json();
+								console.log(`Channel ${channel.name} has ${messages.length} messages`);
 								return {
 									...channel,
 									messageCount: messages.length,
 									unreadCount: 0 // TODO: Calculate unread for human-director
 								};
+							} else {
+								console.error(`Failed to load messages for channel ${channel.name}:`, msgResponse.status);
 							}
 						} catch (error) {
 							console.error(`Failed to load messages for channel ${channel.id}:`, error);
@@ -206,6 +211,7 @@
 	function onChannelSelect(channel) {
 		selectedChannel = channel;
 		loadChannelRoles();
+		loadChannelMessages();
 	}
 
 	async function loadChannelMessages() {
@@ -354,6 +360,24 @@
 		}
 	}
 
+
+	// Auto-refresh functionality
+	let refreshInterval;
+
+	onMount(() => {
+		// Set up auto-refresh every 5 seconds for channel messages
+		refreshInterval = setInterval(() => {
+			if (selectedChannel && selectedProject) {
+				loadChannelMessages();
+			}
+		}, 5000);
+	});
+
+	onDestroy(() => {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+		}
+	});
 
 	// Load channels when the selected project changes
 	$: if (selectedProject) {

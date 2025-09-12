@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { content, readingAssignments, readingAssignmentReads, agents, roles, channels } from '$lib/db/schema';
+import { content, readingAssignments, readingAssignmentReads, agents, roles, channels, squadRoleAssignments } from '$lib/db/schema';
 import { eq, sql, or, and, gte } from 'drizzle-orm';
 
 // GET /api/content/updates - Get incremental content updates since a timestamp
@@ -97,7 +97,7 @@ export async function GET({ url }) {
 				// For each assignment, determine which agents should read it and who has read it
 				const assignmentsWithStatus = await Promise.all(
 					assignments.map(async (assignment) => {
-						let targetAgents = [];
+						let targetAgents: string[] = [];
 						
 						// Get agents that should read this assignment based on type
 						if (assignment.assignedToType === 'agent') {
@@ -120,8 +120,17 @@ export async function GET({ url }) {
 									eq(agents.projectId, parsedProjectId)
 								));
 							targetAgents = roleAgents.map(a => a.id);
+						} else if (assignment.assignedToType === 'squad') {
+							// Squad assignment - get all agents in this squad
+							const squadAgents = await db
+								.select({ id: agents.id })
+								.from(agents)
+								.where(and(
+									eq(agents.squadId, assignment.assignedTo),
+									eq(agents.projectId, parsedProjectId)
+								));
+							targetAgents = squadAgents.map(a => a.id);
 						}
-						// TODO: Add squad support later
 
 						// Get which of these agents have actually read it
 						const reads = await db
@@ -156,7 +165,7 @@ export async function GET({ url }) {
 		);
 
 		// Helper function to check if content is document-related
-		const isDocumentRelated = async (content) => {
+		const isDocumentRelated = async (content: any) => {
 			// Direct document
 			if (content.type === 'document') return true;
 			
@@ -213,7 +222,7 @@ export async function GET({ url }) {
 			since: since || null
 		});
 
-	} catch (error) {
+	} catch (error: any) {
 		console.error('Failed to get content updates:', error);
 		
 		// Provide more specific error messages based on the error type

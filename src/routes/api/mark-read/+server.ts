@@ -42,8 +42,20 @@ export async function POST({ request }) {
 			} else if (assignment.assignedToType === 'role' && assignment.assignedTo === agent.roleType) {
 				targetAssignmentId = assignment.id;
 				break;
+			} else if (assignment.assignedToType === 'squad') {
+				// For squad assignments, we need to check if this agent is in the assigned squad
+				// Since we have the agent record, we can check if their squadId matches
+				const [agentWithSquad] = await db
+					.select({ squadId: agents.squadId })
+					.from(agents)
+					.where(eq(agents.id, agentId))
+					.limit(1);
+				
+				if (agentWithSquad && agentWithSquad.squadId === assignment.assignedTo) {
+					targetAssignmentId = assignment.id;
+					break;
+				}
 			}
-			// TODO: Add squad logic when squads are implemented
 		}
 
 		if (!targetAssignmentId) {

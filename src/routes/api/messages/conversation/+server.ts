@@ -14,7 +14,7 @@ export async function GET({ url }) {
 			return json({ error: 'projectId, agent1, and agent2 are required' }, { status: 400 });
 		}
 
-		// Get all DM messages (channelId = null) between the two agents
+		// Get all DM messages (channelId = null) authored by either agent
 		const messages = await db
 			.select({
 				id: content.id,
@@ -31,13 +31,13 @@ export async function GET({ url }) {
 				eq(content.projectId, parseInt(projectId)),
 				isNull(content.channelId),
 				or(
-					and(eq(content.authorAgentId, agent1)),
-					and(eq(content.authorAgentId, agent2))
+					eq(content.authorAgentId, agent1),
+					eq(content.authorAgentId, agent2)
 				)
 			))
 			.orderBy(content.createdAt);
 
-		// Filter messages that are actually between these two agents
+		// Filter messages that are actually between these two agents (check reading assignments)
 		const conversationMessages = [];
 		
 		for (const message of messages) {

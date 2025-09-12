@@ -12,11 +12,11 @@ export async function GET({ url }) {
 			return json({ error: 'Agent ID is required' }, { status: 400 });
 		}
 
-		// Handle special "director" agent ID for human director
+		// Handle special "director" agent ID for human director (map to human-director)
 		let agent;
-		if (agentId === 'director') {
+		if (agentId === 'director' || agentId === 'human-director') {
 			agent = {
-				id: 'director',
+				id: 'human-director',
 				roleType: 'Human Director',
 				squadId: null,
 				projectId: null // Director handles all projects

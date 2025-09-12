@@ -81,6 +81,18 @@ export async function POST({ request }) {
 			}
 		}
 
+		// Map common agent ID aliases to correct values
+		if (assignTo && assignTo.length > 0) {
+			assignTo.forEach(assignment => {
+				if (assignment.type === 'agent') {
+					// Map director aliases to human-director
+					if (['director', 'human', 'human_director'].includes(assignment.target)) {
+						assignment.target = 'human-director';
+					}
+				}
+			});
+		}
+
 		// Validate author agent exists (if provided)
 		if (authorAgentId && !['director', 'human-director'].includes(authorAgentId)) {
 			if (typeof authorAgentId !== 'string' || authorAgentId.trim() === '') {
@@ -108,15 +120,15 @@ export async function POST({ request }) {
 			}
 		}
 
-		// Check if any assignments target the reserved "director" agent ID (if assignTo provided)
+		// Check if any assignments target the human director (after mapping)
 		const hasDirectorAssignment = assignTo && assignTo.some(assignment => 
-			assignment.type === 'agent' && assignment.target === 'director'
+			assignment.type === 'agent' && assignment.target === 'human-director'
 		);
 
-		// If targeting director, ensure this is a DM (no channelId)
+		// If targeting human director, ensure this is a DM (no channelId)
 		if (hasDirectorAssignment && channelId) {
 			return json({ 
-				error: 'Messages assigned to director must be sent as direct messages (DMs). Remove the channelId or change the assignment target.'
+				error: 'Messages assigned to human director must be sent as direct messages (DMs). Remove the channelId or change the assignment target.'
 			}, { status: 400 });
 		}
 

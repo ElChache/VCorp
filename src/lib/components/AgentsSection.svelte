@@ -206,7 +206,9 @@
 		try {
 			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				agents = await response.json();
+				const allAgents = await response.json();
+				// Filter out human-director - they don't need to be "sent home"! 😄
+				agents = allAgents.filter(agent => agent.id !== 'human-director');
 				// Update selectedAgent if it no longer exists
 				if (selectedAgent && !agents.find(a => a.id === selectedAgent.id)) {
 					selectedAgent = null;

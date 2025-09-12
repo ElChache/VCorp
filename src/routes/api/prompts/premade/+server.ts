@@ -110,8 +110,8 @@ ${channel.description || `The ${channel.name} channel for team coordination.`}
 ${channel.promptForAgents || `Use this channel for discussions related to ${channel.name.toLowerCase()}.`}
 
 **Quick Actions:**
-- Post messages: \`POST /api/channels/${channel.id}/messages\`
-- Read messages: \`GET /api/channels/${channel.id}/messages\`
+- Post messages: \`POST /api/messages\` with channelId: ${channel.id}
+- Read messages: \`GET /api/messages?channelId=${channel.id}&projectId=YOUR_PROJECT_ID\`
 
 ---
 

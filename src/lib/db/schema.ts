@@ -156,6 +156,7 @@ export const readingAssignments = pgTable('reading_assignments', {
 	assignedToType: text('assigned_to_type').notNull(), // 'role', 'agent', 'squad'
 	assignedTo: text('assigned_to').notNull(), // 'backend_developer', 'be_primary_001_a7b9', or 'leadership'
 	assignedAt: timestamp('assigned_at').notNull().defaultNow(),
+	lastNotifiedAt: timestamp('last_notified_at'), // Track when agents were last notified about this assignment (resets after 1 min for re-notification)
 });
 
 export const readingAssignmentReads = pgTable('reading_assignment_reads', {

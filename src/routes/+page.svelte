@@ -60,14 +60,14 @@
 			if (!message.readingAssignments) return false;
 			
 			return message.readingAssignments.some((assignment: any) => {
-				// Check if this assignment is for human-director
-				const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				// Check if this assignment is for human-director (including old 'director' assignments)
+				const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
 				
 				if (!isForHumanDirector) return false;
 				
-				// Check if human-director has read this assignment
-				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+				// Check if human-director has read this assignment (including old 'director' reads)
+				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
 				return !hasRead;
 			});
 		}
@@ -97,14 +97,14 @@
 			if (!document.readingAssignments) return false;
 			
 			return document.readingAssignments.some((assignment: any) => {
-				// Check if this assignment is for human-director
-				const isForHumanDirector = (assignment.assignedToType === 'agent' && assignment.assignedTo === 'human-director') ||
+				// Check if this assignment is for human-director (including old 'director' assignments)
+				const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
 				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
 				
 				if (!isForHumanDirector) return false;
 				
-				// Check if human-director has read this assignment
-				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director');
+				// Check if human-director has read this assignment (including old 'director' reads)
+				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
 				return !hasRead;
 			});
 		}

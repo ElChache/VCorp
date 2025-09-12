@@ -70,12 +70,12 @@ export async function GET({ url }) {
 			.innerJoin(content, eq(readingAssignments.contentId, content.id))
 			.leftJoin(
 				sql`reading_assignment_reads`,
-				sql`reading_assignment_reads.reading_assignment_id = ${readingAssignments.id} AND reading_assignment_reads.agent_id = 'director'`
+				sql`reading_assignment_reads.reading_assignment_id = ${readingAssignments.id} AND reading_assignment_reads.agent_id = 'human-director'`
 			)
 			.where(and(
 				eq(content.projectId, parseInt(projectId)),
 				eq(readingAssignments.assignedToType, 'agent'),
-				eq(readingAssignments.assignedTo, 'director'),
+				eq(readingAssignments.assignedTo, 'human-director'),
 				sql`reading_assignment_reads.id IS NULL` // Not read yet
 			));
 

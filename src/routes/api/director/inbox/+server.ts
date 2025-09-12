@@ -45,7 +45,10 @@ export async function GET({ url }) {
 					or(
 						and(
 							eq(readingAssignments.assignedToType, 'agent'),
-							eq(readingAssignments.assignedTo, 'director')
+							or(
+								eq(readingAssignments.assignedTo, 'director'),
+								eq(readingAssignments.assignedTo, 'human-director')
+							)
 						),
 						and(
 							eq(readingAssignments.assignedToType, 'role'),
@@ -162,8 +165,8 @@ export async function GET({ url }) {
 					createdAt: message.createdAt,
 					assignedAt: message.assignedAt,
 					// For assignment-based messages, check read record
-					// For director channel messages without assignments, consider them unread by default
-					isRead: message.assignmentId ? !!readRecord : false,
+					// For director channel messages without assignments, mark as read if authored by director
+					isRead: message.assignmentId ? !!readRecord : (message.authorAgentId === 'human-director'),
 					readAt: readRecord?.readAt || null,
 					acknowledged: readRecord?.acknowledged || false,
 					isDM: !message.channelId,

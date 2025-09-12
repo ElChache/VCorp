@@ -100,7 +100,7 @@ You currently have no channel assignments.`;
 			instructions += `${channel.promptForAgents}\n\n`;
 		}
 
-		instructions += `**How to send messages**: Use the API endpoint \`POST /api/channels/name/${channel.name}/messages\` with your message content.\n\n`;
+		instructions += `**How to send messages**: Use the API endpoint \`POST /api/messages\` with channelId: ${channel.id} in your message content.\n\n`;
 		
 		instructions += `---\n\n`;
 	}
@@ -232,8 +232,8 @@ ${channel.isMainChannel
 ${channel.promptForAgents || `Use this channel for discussions related to ${channel.name.toLowerCase()}.`}
 
 ## Quick Actions
-- Post messages: \`POST /api/channels/${channel.id}/messages\`
-- Read messages: \`GET /api/channels/${channel.id}/messages\`
+- Post messages: \`POST /api/messages\` with channelId: ${channel.id}
+- Read messages: \`GET /api/messages?channelId=${channel.id}&projectId=YOUR_PROJECT_ID\`
 - Create tickets: Use \`type: "ticket"\` in message body for trackable tasks
 
 ## Communication Tips

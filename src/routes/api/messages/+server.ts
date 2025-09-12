@@ -1,7 +1,124 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { content, readingAssignments, agents, channels, channelRoleAssignments, roles } from '$lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { content, readingAssignments, readingAssignmentReads, agents, channels, channelRoleAssignments, roles } from '$lib/db/schema';
+import { eq, and, isNull } from 'drizzle-orm';
+
+// GET /api/messages - Get messages for a channel or DMs
+export async function GET({ url }) {
+	try {
+		const projectId = url.searchParams.get('projectId');
+		const channelId = url.searchParams.get('channelId');
+		const isDM = url.searchParams.get('isDM') === 'true';
+		
+		if (!projectId) {
+			return json({ 
+				error: 'Missing required field: projectId must be provided'
+			}, { status: 400 });
+		}
+
+		const parsedProjectId = parseInt(projectId);
+		if (isNaN(parsedProjectId) || parsedProjectId <= 0) {
+			return json({ 
+				error: 'Invalid projectId: must be a positive integer'
+			}, { status: 400 });
+		}
+
+		let whereCondition;
+		
+		if (isDM) {
+			// Get DM messages (channelId = null)
+			whereCondition = and(
+				eq(content.projectId, parsedProjectId),
+				isNull(content.channelId)
+			);
+		} else if (channelId) {
+			// Get channel messages
+			const parsedChannelId = parseInt(channelId);
+			if (isNaN(parsedChannelId) || parsedChannelId <= 0) {
+				return json({ 
+					error: 'Invalid channelId: must be a positive integer'
+				}, { status: 400 });
+			}
+			
+			whereCondition = and(
+				eq(content.projectId, parsedProjectId),
+				eq(content.channelId, parsedChannelId)
+			);
+		} else {
+			return json({ 
+				error: 'Must specify either channelId or isDM=true'
+			}, { status: 400 });
+		}
+
+		// Get messages
+		const messages = await db
+			.select({
+				id: content.id,
+				type: content.type,
+				title: content.title,
+				body: content.body,
+				authorAgentId: content.authorAgentId,
+				parentContentId: content.parentContentId,
+				channelId: content.channelId,
+				createdAt: content.createdAt,
+				updatedAt: content.updatedAt,
+				// Ticket-specific fields
+				status: content.status,
+				priority: content.priority,
+				assignedToRoleType: content.assignedToRoleType,
+				claimedByAgent: content.claimedByAgent,
+			})
+			.from(content)
+			.where(whereCondition)
+			.orderBy(content.createdAt);
+
+		// For each message, get the reading assignments
+		const messagesWithAssignments = await Promise.all(
+			messages.map(async (message) => {
+				const assignments = await db
+					.select({
+						id: readingAssignments.id,
+						assignedToType: readingAssignments.assignedToType,
+						assignedTo: readingAssignments.assignedTo,
+						assignedAt: readingAssignments.assignedAt,
+					})
+					.from(readingAssignments)
+					.where(eq(readingAssignments.contentId, message.id));
+
+				// Get read status for each assignment
+				const assignmentsWithReads = await Promise.all(
+					assignments.map(async (assignment) => {
+						const reads = await db
+							.select({
+								agentId: readingAssignmentReads.agentId,
+								readAt: readingAssignmentReads.readAt,
+								acknowledged: readingAssignmentReads.acknowledged,
+							})
+							.from(readingAssignmentReads)
+							.where(eq(readingAssignmentReads.readingAssignmentId, assignment.id));
+
+						return {
+							...assignment,
+							reads
+						};
+					})
+				);
+
+				return {
+					...message,
+					readingAssignments: assignmentsWithReads
+				};
+			})
+		);
+
+		return json(messagesWithAssignments);
+	} catch (error) {
+		console.error('Failed to fetch messages:', error);
+		return json({ 
+			error: 'Internal server error occurred while fetching messages'
+		}, { status: 500 });
+	}
+}
 
 // POST /api/messages - Create a new message (channel or DM)
 export async function POST({ request }) {

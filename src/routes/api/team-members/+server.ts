@@ -73,9 +73,9 @@ export async function GET({ url }) {
 			status: agent.status
 		}));
 
-		// Add the special "director" agent as always available
+		// Add the special "human-director" agent as always available
 		agentsList.unshift({
-			id: 'director',
+			id: 'human-director',
 			roleType: 'Human Director',
 			squadId: null,
 			status: 'active'
@@ -87,11 +87,11 @@ export async function GET({ url }) {
 			squads: Object.keys(agentsBySquad),
 			agentsByRole,
 			agentsBySquad,
-			totalAgents: allAgents.length + 1, // Include director
-			activeAgents: allAgents.filter(a => a.status === 'active').length + 1, // Director is always active
+			totalAgents: allAgents.length + 1, // Include human-director
+			activeAgents: allAgents.filter(a => a.status === 'active').length + 1, // Human-director is always active
 			specialAgents: {
-				director: {
-					id: 'director',
+				'human-director': {
+					id: 'human-director',
 					roleType: 'Human Director',
 					description: 'Send messages to the human project director for guidance, decisions, or reporting'
 				}

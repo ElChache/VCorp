@@ -108,7 +108,8 @@ export async function POST({ request }) {
 				id: content.id, 
 				projectId: content.projectId, 
 				type: content.type,
-				parentContentId: content.parentContentId
+				parentContentId: content.parentContentId,
+				channelId: content.channelId
 			})
 			.from(content)
 			.where(eq(content.id, parsedParentId))
@@ -129,6 +130,7 @@ export async function POST({ request }) {
 
 		// ENFORCE FLAT THREADING: If replying to a reply, use the original parent instead
 		let actualParentContentId;
+		let actualParentChannelId;
 		let flatThreadingApplied = false;
 		
 		if (requestedParent.parentContentId !== null) {
@@ -136,9 +138,18 @@ export async function POST({ request }) {
 			actualParentContentId = requestedParent.parentContentId;
 			flatThreadingApplied = true;
 			console.log(`Enforcing flat threading: Reply to ${parsedParentId} redirected to original content ${actualParentContentId}`);
+			
+			// Get the original parent's channelId
+			const [originalParent] = await db
+				.select({ channelId: content.channelId })
+				.from(content)
+				.where(eq(content.id, actualParentContentId))
+				.limit(1);
+			actualParentChannelId = originalParent?.channelId || null;
 		} else {
 			// This is a reply to original content - use as-is
 			actualParentContentId = parsedParentId;
+			actualParentChannelId = requestedParent.channelId;
 		}
 
 		// Create the reply
@@ -146,7 +157,7 @@ export async function POST({ request }) {
 			.insert(content)
 			.values({
 				projectId: parsedProjectId,
-				channelId: null, // Replies are not posted to channels directly
+				channelId: actualParentChannelId, // Inherit channelId from parent (null for DM threads, channelId for channel threads)
 				parentContentId: actualParentContentId,
 				type: 'reply',
 				title: title || null,
