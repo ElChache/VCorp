@@ -85,10 +85,10 @@ export async function POST({ request }) {
 				.filter(template => template.roleTemplateId === roleTemplate.id)
 				.sort((a, b) => a.orderIndex - b.orderIndex);
 
-			// Special handling for Human Director (which may not have prompt compositions)
-			if (roleTemplate.name === 'Human Director') {
-				// Find the Human Director role prompt template directly
-				const humanDirectorPromptTemplate = allPromptTemplates.find(p => p.name === 'Human Director Role');
+			// Special handling for human-director (which may not have prompt compositions)
+			if (roleTemplate.name === 'human-director') {
+				// Find the human-director role prompt template directly
+				const humanDirectorPromptTemplate = allPromptTemplates.find(p => p.name === 'human-director');
 				
 				const [newRole] = await db
 					.insert(roles)
@@ -96,7 +96,7 @@ export async function POST({ request }) {
 						projectId: newProject.id,
 						templateId: roleTemplate.id,
 						name: roleTemplate.name,
-						content: humanDirectorPromptTemplate ? humanDirectorPromptTemplate.content : 'Human Director role content',
+						content: humanDirectorPromptTemplate ? humanDirectorPromptTemplate.content : 'human-director role content',
 					})
 					.returning();
 
@@ -341,12 +341,64 @@ export async function POST({ request }) {
 			}
 		}
 
+		// Automatically create a human-director agent for the project
+		let createdHumanDirector = null;
+		try {
+			// Find the human-director role in the project
+			const [humanDirectorRole] = await db
+				.select()
+				.from(roles)
+				.where(and(
+					eq(roles.projectId, newProject.id),
+					eq(roles.name, 'human-director')
+				))
+				.limit(1);
+
+			if (humanDirectorRole) {
+				// Generate a unique human-director agent ID
+				const humanNames = ['alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry', 'ivy', 'jack', 'kate', 'leo', 'maya', 'noah', 'olivia', 'peter', 'quinn', 'ruby', 'sam', 'tina', 'uma', 'victor', 'wendy', 'xavier', 'yara', 'zoe'];
+				const humanName = humanNames[Math.floor(Math.random() * humanNames.length)];
+				const agentId = `hd_${humanName}`;
+
+				// Check if this agent ID already exists
+				const [existingAgent] = await db
+					.select()
+					.from(agents)
+					.where(eq(agents.id, agentId))
+					.limit(1);
+
+				if (!existingAgent) {
+					// Create the human-director agent
+					[createdHumanDirector] = await db
+						.insert(agents)
+						.values({
+							id: agentId,
+							projectId: newProject.id,
+							roleId: humanDirectorRole.id,
+							roleType: 'human-director',
+							model: 'human',
+							status: 'active', // Human director starts as active
+							tmuxSession: `vcorp-${agentId}`,
+							worktreePath: `${path?.trim() || process.cwd()}/agent_workspaces/${agentId}/`,
+							lastHeartbeat: new Date(),
+						})
+						.returning();
+
+					console.log(`✅ Created human-director agent: ${agentId}`);
+				}
+			}
+		} catch (agentError) {
+			console.error('Failed to create human-director agent:', agentError);
+			// Don't fail the entire project creation if agent creation fails
+		}
+
 		return json({ 
 			...newProject, 
 			rolesCreated: createdRoles.length,
 			channelsCreated: createdChannels.length,
 			squadsCreated: createdSquads.length,
-			phasesCreated: createdPhases.length
+			phasesCreated: createdPhases.length,
+			humanDirectorCreated: !!createdHumanDirector
 		}, { status: 201 });
 	} catch (error) {
 		console.error('Failed to create project:', error);

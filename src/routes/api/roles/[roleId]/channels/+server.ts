@@ -6,18 +6,26 @@ import { eq, and } from 'drizzle-orm';
 // GET /api/roles/[roleId]/channels - Get channels accessible to a role
 export async function GET({ params }) {
 	try {
-		const roleId = parseInt(params.roleId);
+		let role;
+		const roleParam = decodeURIComponent(params.roleId);
+		const roleId = parseInt(roleParam);
 
-		if (isNaN(roleId)) {
-			return json({ error: 'Invalid role ID' }, { status: 400 });
+		// Try to find role by ID first (numeric)
+		if (!isNaN(roleId)) {
+			[role] = await db
+				.select()
+				.from(roles)
+				.where(eq(roles.id, roleId))
+				.limit(1);
+		} 
+		// If not a number or not found by ID, try to find by role type name
+		if (!role) {
+			[role] = await db
+				.select()
+				.from(roles)
+				.where(eq(roles.name, roleParam))
+				.limit(1);
 		}
-
-		// Get the role to verify it exists and get project context
-		const [role] = await db
-			.select()
-			.from(roles)
-			.where(eq(roles.id, roleId))
-			.limit(1);
 
 		if (!role) {
 			return json({ error: 'Role not found' }, { status: 404 });
@@ -34,7 +42,7 @@ export async function GET({ params }) {
 			})
 			.from(channelRoleAssignments)
 			.innerJoin(channels, eq(channelRoleAssignments.channelId, channels.id))
-			.where(eq(channelRoleAssignments.roleId, roleId));
+			.where(eq(channelRoleAssignments.roleId, role.id));
 
 		// Get all main channels (public channels accessible to all roles)
 		const mainChannelsQuery = await db

@@ -113,7 +113,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 🤖 VCorp Monitoring System - Automated Idle Check
 ═══════════════════════════════════════════════════════════════════════`;
 
-	private readonly IDLE_THRESHOLD_MS = 30000; // 30 seconds
+	private readonly IDLE_THRESHOLD_MS = 300000; // 5 minutes
 
 	private constructor() {}
 
@@ -369,7 +369,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 	}
 
 	private async sendUnreadNotifications(projectId: number): Promise<NotificationResult[]> {
-		// Get active agents with tmux sessions
+		// Get active and idle agents with tmux sessions (exclude only offline agents)
 		const activeAgents = await db
 			.select({
 				id: agents.id,
@@ -380,7 +380,10 @@ This is just a gentle reminder - no action needed if you're already working! �
 			.from(agents)
 			.where(and(
 				eq(agents.projectId, projectId),
-				eq(agents.status, 'active')
+				or(
+					eq(agents.status, 'active'),
+					eq(agents.status, 'idle')
+				)
 			));
 
 		const results: NotificationResult[] = [];

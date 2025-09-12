@@ -183,26 +183,26 @@ export async function POST() {
 		// Define the composition mappings - now only role-specific prompts
 		// Global prompts are handled via squad assignments
 		const rolePromptMappings = [
-			// Product Manager - Only role description
-			{ role: 'Product Manager', prompts: ['product_manager_role'] },
-			// Backend Developer - Only role description
-			{ role: 'Backend Developer', prompts: ['backend_role'] },
-			// Frontend Developer - Only role description
-			{ role: 'Frontend Developer', prompts: ['frontend_role'] },
-			// Lead Developer - Role description + Lead workflow
-			{ role: 'Lead Developer', prompts: ['lead_developer_role', 'leads_worktree_workflow'] },
-			// AI Developer - Only role description
-			{ role: 'AI Developer', prompts: ['ai_developer_role'] },
-			// UX Expert - Only role description
-			{ role: 'UX Expert', prompts: ['ux_expert_role'] },
-			// Graphic Designer - Only role description
-			{ role: 'Graphic Designer', prompts: ['graphic_designer_role'] },
-			// Technical QA - Only role description
-			{ role: 'Technical QA', prompts: ['technical_qa_role'] },
-			// Director Assistant - Role description + communication prompts + workflow prompts
-			{ role: 'Director Assistant', prompts: ['director_assistant_role', 'core_team_to_human_comms', 'executive_to_human_comms', 'phase_workflow', 'ticketing_system'] },
-			// System Architect - Role description + Lead workflow
-			{ role: 'System Architect', prompts: ['system_architect_role', 'leads_worktree_workflow'] }
+			// product-manager - Only role description
+			{ role: 'product-manager', prompts: ['product-manager'] },
+			// backend-developer - Only role description
+			{ role: 'backend-developer', prompts: ['backend-developer'] },
+			// frontend-developer - Only role description
+			{ role: 'frontend-developer', prompts: ['frontend-developer'] },
+			// lead-developer - Role description + Lead workflow
+			{ role: 'lead-developer', prompts: ['lead-developer', 'leads_worktree_workflow'] },
+			// ai-developer - Only role description
+			{ role: 'ai-developer', prompts: ['ai-developer'] },
+			// ux-expert - Only role description
+			{ role: 'ux-expert', prompts: ['ux-expert'] },
+			// graphic-designer - Only role description
+			{ role: 'graphic-designer', prompts: ['graphic-designer'] },
+			// technical-qa - Only role description
+			{ role: 'technical-qa', prompts: ['technical-qa'] },
+			// director-assistant - Role description + communication prompts + workflow prompts
+			{ role: 'director-assistant', prompts: ['director-assistant', 'core_team_to_human_comms', 'executive_to_human_comms', 'phase_workflow', 'ticketing_system'] },
+			// system-architect - Role description + Lead workflow
+			{ role: 'system-architect', prompts: ['system-architect', 'leads_worktree_workflow'] }
 		];
 
 		for (const mapping of rolePromptMappings) {

@@ -101,7 +101,7 @@ export const agents = pgTable('agents', {
 	id: text('id').primaryKey(), // 'be_17b9' - the actual agent ID
 	projectId: integer('project_id').notNull().references(() => projects.id),
 	roleId: integer('role_id').references(() => roles.id), // FK to specific role instance (nullable)
-	roleType: text('role_type').notNull(), // Generic role type: 'backend_developer', 'product_manager'
+	roleType: text('role_type').notNull(), // Role type: 'backend-developer', 'product-manager', 'human-director'
 	squadId: text('squad_id').references(() => squads.id),
 	model: text('model').notNull().default('sonnet'), // 'sonnet', 'opus', 'haiku'
 	status: text('status').notNull().default('launching'), // launching, active, offline
@@ -132,7 +132,7 @@ export const content = pgTable('content', {
 	title: text('title'),
 	body: text('body').notNull(),
 	documentSlug: text('document_slug'), // Unique slug per project for referencing (e.g., 'pm-specification-document')
-	authorAgentId: text('author_agent_id').references(() => agents.id),
+	authorAgentId: text('author_agent_id'), // Can be agent ID or 'human-director'
 	squadId: text('squad_id').references(() => squads.id), // Squad context for content
 	
 	// Ticket-specific fields (optional)
@@ -171,7 +171,7 @@ export const readingAssignmentReads = pgTable('reading_assignment_reads', {
 export const roleAssignments = pgTable('role_assignments', {
 	id: text('id').primaryKey(), // 'pm', 'architect', 'lead', 'be_1', 'fe_1', 'ai_1'
 	projectId: integer('project_id').notNull().references(() => projects.id),
-	roleType: text('role_type').notNull(), // Generic role type: 'backend_developer', 'product_manager'  
+	roleType: text('role_type').notNull(), // Role type: 'backend-developer', 'product-manager', 'human-director'  
 	priority: integer('priority').notNull(), // 1=highest, 2, 3, etc. (pm=1, architect=2, lead=3)
 	assignedAgent: text('assigned_agent').references(() => agents.id), // NULL = available
 	status: text('status').notNull().default('available'), // 'available', 'claimed', 'active'

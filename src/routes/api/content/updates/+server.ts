@@ -102,13 +102,18 @@ export async function GET({ url }) {
 						// Get agents that should read this assignment based on type
 						if (assignment.assignedToType === 'agent') {
 							// Direct agent assignment
-							const agent = await db
-								.select({ id: agents.id })
-								.from(agents)
-								.where(eq(agents.id, assignment.assignedTo))
-								.limit(1);
-							if (agent.length > 0) {
-								targetAgents = [agent[0].id];
+							if (assignment.assignedTo === 'human-director') {
+								// Special case: human-director is not in agents table
+								targetAgents = ['human-director'];
+							} else {
+								const agent = await db
+									.select({ id: agents.id })
+									.from(agents)
+									.where(eq(agents.id, assignment.assignedTo))
+									.limit(1);
+								if (agent.length > 0) {
+									targetAgents = [agent[0].id];
+								}
 							}
 						} else if (assignment.assignedToType === 'role') {
 							// Role assignment - get all agents with this role type

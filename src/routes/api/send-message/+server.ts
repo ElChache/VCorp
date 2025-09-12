@@ -227,6 +227,11 @@ export async function POST({ request }) {
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
 			const assignmentPromises = assignTo.map(async (assignment) => {
+				// Skip creating assignment if the author is assigning to themselves
+				if (assignment.type === 'agent' && assignment.target === authorAgentId) {
+					return null; // Skip this assignment
+				}
+				
 				return await db
 					.insert(readingAssignments)
 					.values({
@@ -237,14 +242,20 @@ export async function POST({ request }) {
 					.returning();
 			});
 
-			createdAssignments = await Promise.all(assignmentPromises);
+			const results = await Promise.all(assignmentPromises);
+			createdAssignments = results.filter(result => result !== null);
 
-			// Get summary of who was assigned
-			assignmentSummary = assignTo.map((assignment, index) => ({
-				type: assignment.type,
-				target: assignment.target,
-				assignmentId: createdAssignments[index][0].id
-			}));
+			// Get summary of who was assigned (excluding skipped assignments)
+			assignmentSummary = assignTo
+				.filter((assignment, index) => results[index] !== null)
+				.map((assignment, originalIndex) => {
+					const resultIndex = results.slice(0, originalIndex + 1).filter(r => r !== null).length - 1;
+					return {
+						type: assignment.type,
+						target: assignment.target,
+						assignmentId: createdAssignments[resultIndex][0].id
+					};
+				});
 		}
 		
 		// 2. Automatic thread assignments - notify thread participants when someone replies

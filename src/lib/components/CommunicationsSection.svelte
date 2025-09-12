@@ -316,7 +316,7 @@
 	}
 
 	// Handle real-time content updates
-	function handleContentUpdates(event: CustomEvent) {
+	async function handleContentUpdates(event: CustomEvent) {
 		const { updates } = event.detail;
 		
 		console.log('📬 Processing real-time content updates:', updates);
@@ -324,16 +324,23 @@
 		// Update unread counts with new messages
 		updateUnreadCountsFromNewData(updates);
 
-		// Refresh channel messages if we have a selected channel and there are updates
-		if (selectedChannel && updates.channelMessages?.length > 0) {
-			const relevantMessages = updates.channelMessages.filter(
-				(msg: any) => msg.channelId === selectedChannel.id
-			);
+		// Refresh channel data when new channel messages arrive
+		if (updates.channelMessages?.length > 0) {
+			console.log(`🔄 Refreshing channels due to ${updates.channelMessages.length} new channel messages`);
+			// Reload channel list to update unread counts for all channels
+			await loadChannels();
 			
-			if (relevantMessages.length > 0) {
-				console.log(`🔄 Refreshing ${selectedChannel.name} channel messages (${relevantMessages.length} updates detected)`);
-				// Reload all messages to get updated read statuses
-				loadChannelMessages(selectedChannel);
+			// Also refresh the currently selected channel messages if needed
+			if (selectedChannel) {
+				const relevantMessages = updates.channelMessages.filter(
+					(msg: any) => msg.channelId === selectedChannel.id
+				);
+				
+				if (relevantMessages.length > 0) {
+					console.log(`🔄 Refreshing ${selectedChannel.name} channel messages (${relevantMessages.length} updates detected)`);
+					// Reload all messages to get updated read statuses
+					loadChannelMessages(selectedChannel);
+				}
 			}
 		}
 
@@ -420,11 +427,19 @@
 				channelMessages = await response.json();
 				console.log(`✅ Loaded ${channelMessages.length} messages for channel ${channel.name}`);
 				
-				// Automatically mark all messages as read
-				for (const message of channelMessages) {
-					if (hasUnreadAssignmentForHumanDirector(message)) {
-						await markMessageAsRead(message);
+				// Automatically mark all messages as read (batch operation to avoid multiple refreshes)
+				const unreadMessages = channelMessages.filter(message => hasUnreadAssignmentForHumanDirector(message));
+				if (unreadMessages.length > 0) {
+					console.log(`📖 Auto-marking ${unreadMessages.length} unread messages as read for channel ${channel.name}`);
+					
+					// Mark all unread messages as read without UI refreshes
+					for (const message of unreadMessages) {
+						await markMessageAsReadWithoutRefresh(message);
 					}
+					
+					// Refresh channel list once after all messages are marked as read
+					await loadChannels();
+					console.log(`✅ Refreshed channel list after auto-reading ${unreadMessages.length} messages`);
 				}
 			} else {
 				console.error('Failed to load channel messages:', response.status);
@@ -470,11 +485,42 @@
 			
 			if (!isForHumanDirector) return false;
 			
-			// Check if human-director has read this assignment
-			const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director') : 
-			                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director') : false;
+			// Check if human-director has read this assignment (including old 'director' reads)
+			const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
+			                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
 			return !hasRead;
 		});
+	}
+
+	async function markMessageAsReadWithoutRefresh(message) {
+		if (!message.readingAssignments) return;
+		
+		try {
+			// Find the assignment(s) for human-director (including old 'director' assignments)
+			const humanDirectorAssignments = message.readingAssignments.filter(assignment => {
+				return (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
+				       (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
+			});
+			
+			// Mark each assignment as read
+			for (const assignment of humanDirectorAssignments) {
+				// Check if already read to avoid duplicate marking (handle both data formats, including old 'director' reads)
+				const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
+				                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
+				if (!hasRead) {
+					await fetch('/api/reading-assignments/mark-read', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							assignmentId: assignment.id,
+							agentId: 'human-director'
+						})
+					});
+				}
+			}
+		} catch (error) {
+			console.error('Failed to mark message as read:', error);
+		}
 	}
 
 	function startReply(message) {
@@ -661,7 +707,8 @@
 		}
 
 		try {
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
+			// Get ALL messages from the beginning of time for agent discovery
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
 			if (response.ok) {
 				const data = await response.json();
 				const directMessages = data.updates.directMessages || [];
@@ -779,8 +826,8 @@
 		}
 
 		try {
-			// Use polling data for consistency
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
+			// Get ALL messages from the beginning of time
+			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
 			if (response.ok) {
 				const data = await response.json();
 				const allDMs = data.updates.directMessages || [];
@@ -804,9 +851,35 @@
 				console.log(`📬 Loaded ${dmMessages.length} DM messages with ${agentId} (filtered from ${allDMs.length} total DMs)`);
 				
 				// Automatically mark all messages as read
+				let markedAnyAsRead = false;
 				for (const message of dmMessages) {
 					if (hasUnreadAssignmentForHumanDirector(message)) {
 						await markMessageAsRead(message);
+						markedAnyAsRead = true;
+					}
+				}
+				
+				// Reload messages if any were marked as read to get updated read status
+				if (markedAnyAsRead) {
+					const refreshResponse = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
+					if (refreshResponse.ok) {
+						const refreshData = await refreshResponse.json();
+						const allRefreshDMs = refreshData.updates.directMessages || [];
+						
+						// Re-filter to get updated message data
+						dmMessages = allRefreshDMs.filter(msg => {
+							if (msg.authorAgentId === agentId) return true;
+							
+							if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
+								return msg.readingAssignments.some(assignment => 
+									(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
+									(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
+									(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
+								);
+							}
+							
+							return false;
+						});
 					}
 				}
 			} else {
