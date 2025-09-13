@@ -3,13 +3,7 @@
 	import { marked } from 'marked';
 	import { contentPollingService, contentPollingStore } from '$lib/services/ContentPollingService';
 	import CommunicationsNavigation from './CommunicationsNavigation.svelte';
-	import ChannelItem from './ChannelItem.svelte';
-	import DMAgentItem from './DMAgentItem.svelte';
-	import DMMessage from './DMMessage.svelte';
-	import ChannelList from './ChannelList.svelte';
-	import DMAgentList from './DMAgentList.svelte';
-	import DMMessageList from './DMMessageList.svelte';
-	import ChannelMessageList from './ChannelMessageList.svelte';
+	import CommunicationsView from './CommunicationsView.svelte';
 
 	// Props
 	export let selectedProject: any = null;
@@ -82,32 +76,33 @@
 		commsViewMode = event.detail;
 	}
 
-	// Handler for channel item selection
+	// Handlers for CommunicationsView events
 	function handleChannelSelect(event: CustomEvent) {
 		onChannelSelect(event.detail);
 	}
 
-	// Handler for DM agent item selection
-	function handleDMAgentSelect(event: CustomEvent) {
-		onDMAgentSelect(event.detail);
+	function handleMessageSelect(event: CustomEvent) {
+		onMessageSelect(event.detail);
 	}
 
-	// Handler for DM agent list send message
-	function handleDMSendMessage() {
-		showSendMessageDialog = true;
-	}
-
-	// Handlers for DMMessageList events
-	function handleSendReply() {
-		sendReply();
+	function handleStartReply(event: CustomEvent) {
+		startReply(event.detail);
 	}
 
 	function handleCancelReply() {
 		cancelReply();
 	}
 
-	function handleSendDM() {
-		sendDMMessage();
+	function handleSendMessage(event: CustomEvent) {
+		// Use existing sendMessage function, but set the content first
+		if (event.detail.content) {
+			newMessageContent = event.detail.content;
+			sendMessage();
+		}
+	}
+
+	function handleCloseThreadsColumn() {
+		closeThreadsColumn();
 	}
 
 	// Helper function to check if a message is unread by human director
@@ -1182,6 +1177,23 @@
 
 	$: threadTree = buildThreadTree(threadReplies);
 
+	function formatTimeAgo(timestamp: string): string {
+		const now = new Date();
+		const messageTime = new Date(timestamp);
+		const diffMs = now.getTime() - messageTime.getTime();
+		const diffMins = Math.floor(diffMs / 60000);
+		
+		if (diffMins < 1) return 'Just now';
+		if (diffMins < 60) return `${diffMins}m ago`;
+		
+		const diffHours = Math.floor(diffMins / 60);
+		if (diffHours < 24) return `${diffHours}h ago`;
+		
+		const diffDays = Math.floor(diffHours / 24);
+		if (diffDays < 7) return `${diffDays}d ago`;
+		
+		return messageTime.toLocaleDateString();
+	}
 
 	function getMessageIcon(message: any): string {
 		if (message.isReply) return '↩️';
@@ -1237,167 +1249,181 @@
 
 	<div class="comms-content">
 		{#if commsViewMode === 'communications'}
-			<!-- Flexible Layout with Sliding Threads Column -->
-			<div class="communications-layout">
-				<!-- Column 1: Channels List (Fixed width) -->
-				<ChannelList 
-					{channels}
-					{selectedChannel}
-					on:channelSelect={handleChannelSelect}
-				/>
-				
-				<!-- Column 2: Messages View -->
-				<div class="messages-viewer">
-					<ChannelMessageList 
-						{selectedChannel}
-						{channelMessages}
-						{selectedThreadMessage}
-						bind:newMessageContent
-						{formatMessageTime}
-						{isMessageFullyRead}
-						{isMessagePartiallyRead}
-						{toggleReadStatusTooltip}
-						{startReply}
-						on:messageSelect={(e) => onMessageSelect(e.detail)}
-						on:sendMessage={sendMessage}
-					/>
-				</div>
-				
-				<!-- Column 3: Sliding Threads/Replies -->
-				<div class="threads-column" class:open={isThreadsColumnOpen}>
-					{#if selectedThreadMessage}
-						<div class="threads-header">
-							<h3>💬 Thread ({threadReplies.length})</h3>
-							<button class="close-threads-btn" on:click={closeThreadsColumn} title="Close thread">
-								×
+			<CommunicationsView 
+				{selectedProject}
+				{channels}
+				{selectedChannel}
+				{channelMessages}
+				{selectedThreadMessage}
+				{threadReplies}
+				{isThreadsColumnOpen}
+				bind:newMessageContent
+				{replyingToMessage}
+				on:channelSelect={handleChannelSelect}
+				on:messageSelect={handleMessageSelect}
+				on:startReply={handleStartReply}
+				on:cancelReply={handleCancelReply}
+				on:sendMessage={handleSendMessage}
+				on:closeThreadsColumn={handleCloseThreadsColumn}
+			/>
+		{:else if commsViewMode === 'direct-messages'}
+			<div class="direct-messages-view">
+				<div class="dm-left">
+					<div class="dm-agents-panel">
+						<div class="dm-agents-header">
+							<h3>Agents ({dmAgents.length})</h3>
+							<button 
+								class="btn-primary btn-sm"
+								on:click={() => showSendMessageDialog = true}
+								title="Send Message"
+							>
+								✉️ Send Message
 							</button>
 						</div>
 						
-						<div class="threads-container">
-							<div class="original-message">
-								<div class="message-header">
-									<span class="message-author">
-										{selectedThreadMessage.authorAgentId || 'System'}
-									</span>
-									<span class="message-time">{formatMessageTime(selectedThreadMessage.createdAt)}</span>
-									{#if selectedThreadMessage.readingAssignments && selectedThreadMessage.readingAssignments.length > 0}
-										<div class="read-status-icon-container" 
-											 on:click={(e) => toggleReadStatusTooltip(e, selectedThreadMessage)}>
-											<span class="read-status-icon" class:fully-read={isMessageFullyRead(selectedThreadMessage)} class:partially-read={isMessagePartiallyRead(selectedThreadMessage)}>
-												{#if isMessageFullyRead(selectedThreadMessage)}
-													✅
-												{:else if isMessagePartiallyRead(selectedThreadMessage)}
-													👀
-												{:else}
-													📩
-												{/if}
-											</span>
-										</div>
-									{/if}
-								</div>
-								<div class="message-content markdown-content">
-									{#if selectedThreadMessage.title && selectedThreadMessage.title !== selectedThreadMessage.body}
-										<strong>{selectedThreadMessage.title}</strong><br>
-									{/if}
-									{@html marked((selectedThreadMessage.body || '').replace(/\\n/g, '\n'))}
-								</div>
-							</div>
-							
-							{#if threadTree.length > 0}
-								{#each threadTree as reply}
-									<div class="thread-reply">
-										<div class="message-header">
-											<span class="message-author">
-												{reply.authorAgentId === 'human-director' ? 'Human Director' : reply.authorAgentId || 'System'}
-											</span>
-											<span class="message-time">{formatMessageTime(reply.createdAt)}</span>
-											{#if reply.readingAssignments && reply.readingAssignments.length > 0}
-												<div class="read-status-icon-container" 
-													 on:click={(e) => toggleReadStatusTooltip(e, reply)}>
-													<span class="read-status-icon" class:fully-read={isMessageFullyRead(reply)} class:partially-read={isMessagePartiallyRead(reply)}>
-														{#if isMessageFullyRead(reply)}
-															✅
-														{:else if isMessagePartiallyRead(reply)}
-															👀
-														{:else}
-															📩
-														{/if}
-													</span>
-												</div>
-											{/if}
-										</div>
-										<div class="message-content markdown-content">
-											{@html marked((reply.body || '').replace(/\\n/g, '\n'))}
-										</div>
+						<div class="dm-agent-list">
+							{#each dmAgents as agent}
+								<div 
+									class="dm-agent-item"
+									class:active={selectedDMAgent?.id === agent.id}
+									on:click={() => onDMAgentSelect(agent)}
+								>
+									<div class="dm-agent-header">
+										<span class="dm-agent-name">{agent.id}</span>
+										<span class="dm-agent-role">{agent.roleType}</span>
 									</div>
-								{/each}
-							{:else}
-								<div class="no-replies">
-									<p>No replies yet. Start the discussion!</p>
+									{#if agent.lastMessageAt}
+										<div class="dm-agent-details">
+											<span class="dm-last-message">{formatMessageTime(agent.lastMessageAt)}</span>
+										</div>
+									{/if}
+								</div>
+							{/each}
+							{#if dmAgents.length === 0}
+								<div class="no-dm-agents">
+									<p>No direct message conversations yet.</p>
+									<p>Send a message to an agent to start!</p>
 								</div>
 							{/if}
 						</div>
-
-						<!-- Add Reply Form -->
-						<div class="add-reply-form">
-							<textarea 
-								bind:value={replyContent} 
-								placeholder="Add a reply..."
-								rows="3"
-								class="reply-input"
-								on:keydown={(e) => {
-									if (e.key === 'Enter' && !e.shiftKey) {
-										e.preventDefault();
-										if (replyContent.trim()) {
-											sendReply();
-										}
-									}
-								}}
-							></textarea>
-							<button 
-								class="btn-primary btn-sm" 
-								on:click={sendReply}
-								disabled={!replyContent.trim()}
-							>
-								💬 Reply
-							</button>
+					</div>
+				</div>
+				
+				<div class="dm-right">
+					{#if selectedDMAgent}
+						<div class="dm-messages-view">
+							<div class="dm-messages-container">
+								<div class="dm-messages-list">
+									{#if dmMessages.length > 0}
+										{#each dmMessages as message}
+											<div class="message" class:reply={message.parentContentId}>
+												<div class="message-header">
+													<span class="message-author">{message.authorAgentId || 'System'}</span>
+													<span class="message-time">{formatMessageTime(message.createdAt)}</span>
+												</div>
+												
+												<div class="message-content markdown-content">
+													{#if message.title && message.title !== message.body}
+														<strong>{message.title}</strong><br>
+													{/if}
+													{@html marked((message.body || '').replace(/\\n/g, '\n'))}
+												</div>
+												<div class="message-actions">
+													{#if message.readingAssignments && message.readingAssignments.length > 0}
+														<div class="read-status-icon-container" 
+															 on:click={(e) => toggleReadStatusTooltip(e, message)}>
+															<span class="read-status-icon" class:fully-read={isMessageFullyRead(message)} class:partially-read={isMessagePartiallyRead(message)}>
+																{#if isMessageFullyRead(message)}
+																	✅
+																{:else if isMessagePartiallyRead(message)}
+																	👀
+																{:else}
+																	📩
+																{/if}
+															</span>
+														</div>
+													{/if}
+													<button 
+														class="reply-btn" 
+														on:click={() => startReply(message)}
+													>
+														Reply
+													</button>
+												</div>
+												
+												<!-- Reply input interface -->
+												{#if replyingToMessage && replyingToMessage.id === message.id}
+													<div class="reply-input-container">
+														<div class="reply-input-wrapper">
+															<input 
+																type="text" 
+																class="reply-input" 
+																placeholder="Type your reply..." 
+																bind:value={replyContent}
+																on:keydown={(e) => {
+																	if (e.key === 'Enter' && !e.shiftKey) {
+																		e.preventDefault();
+																		sendReply();
+																	} else if (e.key === 'Escape') {
+																		cancelReply();
+																	}
+																}}
+																autofocus
+															/>
+															<button 
+																class="send-btn" 
+																on:click={sendReply}
+																disabled={!replyContent.trim()}
+															>
+																Reply
+															</button>
+															<button class="cancel-reply-btn" on:click={cancelReply}>×</button>
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									{:else}
+										<div class="no-messages">
+											<p>No messages with {selectedDMAgent.id} yet.</p>
+											<p>Start the conversation!</p>
+										</div>
+									{/if}
+								</div>
+							</div>
+							<div class="dm-input-container">
+								<div class="dm-input-wrapper">
+									<input 
+										type="text" 
+										class="message-input" 
+										placeholder="Type a direct message..." 
+										bind:value={newDMContent}
+										on:keydown={(e) => {
+											if (e.key === 'Enter' && !e.shiftKey) {
+												e.preventDefault();
+												sendDMMessage();
+											}
+										}}
+									/>
+									<button 
+										class="send-btn" 
+										on:click={sendDMMessage}
+										disabled={!newDMContent.trim()}
+									>
+										Send
+									</button>
+								</div>
+								<p class="input-note">Press Enter to send DM to {selectedDMAgent.id}</p>
+							</div>
 						</div>
 					{:else}
-						<div class="no-thread-selected">
-							<p>Select a message to view thread</p>
+						<div class="dm-placeholder">
+							<h3>📩 Direct Messages</h3>
+							<p>Select an agent from the left to view your conversation.</p>
 						</div>
 					{/if}
 				</div>
 			</div>
-		{:else if commsViewMode === 'direct-messages'}
-			<div class="direct-messages-view">
-				<div class="dm-left">
-					<DMAgentList 
-						{dmAgents}
-						{selectedDMAgent}
-						{formatMessageTime}
-						on:agentSelect={handleDMAgentSelect}
-						on:sendMessage={handleDMSendMessage}
-					/>
-				</div>
-				
-				<div class="dm-right">
-					<DMMessageList 
-						{selectedDMAgent}
-						{dmMessages}
-						{replyingToMessage}
-						bind:replyContent
-						bind:newDMContent
-						{formatMessageTime}
-						{isMessageFullyRead}
-						{isMessagePartiallyRead}
-						{toggleReadStatusTooltip}
-						{startReply}
-						on:sendReply={handleSendReply}
-						on:cancelReply={handleCancelReply}
-						on:sendDM={handleSendDM}
-					/>
-				</div>			</div>
 		{/if}
 	</div>
 </div>
@@ -1418,7 +1444,7 @@
 							<span class="message-author">
 								{selectedMessage.authorAgentId || 'System'}
 							</span>
-							<span class="message-time">{formatMessageTime(selectedMessage.createdAt)}</span>
+							<span class="message-time">{formatTimeAgo(selectedMessage.createdAt)}</span>
 						</div>
 						<div class="message-preview">
 							{selectedMessage.body.substring(0, 100)}...
