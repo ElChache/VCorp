@@ -1,1 +1,0 @@
-ALTER TABLE "agents" ALTER COLUMN "squad_id" DROP NOT NULL;

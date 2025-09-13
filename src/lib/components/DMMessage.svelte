@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { marked } from 'marked';
 	import { createEventDispatcher } from 'svelte';
+	import { markMessageAsRead, isUnreadByHumanDirector, hasUnreadAssignmentForHumanDirector } from '$lib/utils/messageOperations';
+	import { isMessageFromHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 
 	// Props
 	export let message: any;
@@ -8,24 +10,59 @@
 	export let isMessageFullyRead: (message: any) => boolean;
 	export let isMessagePartiallyRead: (message: any) => boolean;
 	export let toggleReadStatusTooltip: (event: MouseEvent, message: any) => void;
-	export let startReply: (message: any) => void;
-
+	
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
 
-	function handleReply() {
-		startReply(message);
+	// Check if this is an outgoing message (from human-director)
+	$: isOutgoingMessage = isMessageFromHumanDirector(message);
+	$: isUnread = isUnreadByHumanDirector(message);
+	
+	// Debug logging for message 8
+	$: if (message.id === 8) {
+		console.log('Message 8 debug:', {
+			id: message.id,
+			authorAgentId: message.authorAgentId,
+			isOutgoingMessage,
+			isUnread,
+			readingAssignments: message.readingAssignments,
+			shouldShowButton: !isOutgoingMessage && isUnread,
+			assignment0: message.readingAssignments?.[0],
+			lastUpdated: new Date().toISOString()
+		});
 	}
+	
 
 	function handleReadStatusClick(event: MouseEvent) {
 		toggleReadStatusTooltip(event, message);
+	}
+
+	async function handleMarkAsRead() {
+		await markMessageAsRead(message);
+		// The markMessageAsRead function handles updating the backend
+		// The ContentPollingService will automatically pick up the changes
 	}
 </script>
 
 <div class="message" class:reply={message.parentContentId}>
 	<div class="message-header">
 		<span class="message-author">{message.authorAgentId || 'System'}</span>
-		<span class="message-time">{formatMessageTime(message.createdAt)}</span>
+		<div class="message-header-right">
+			<span class="message-time">{formatMessageTime(message.createdAt)}</span>
+			{#if message.readingAssignments && message.readingAssignments.length > 0 && isOutgoingMessage}
+				<div class="read-status-icon-container" on:click={handleReadStatusClick}>
+					<span class="read-status-icon" class:fully-read={isMessageFullyRead(message)} class:partially-read={isMessagePartiallyRead(message)}>
+						{#if isMessageFullyRead(message)}
+							✅
+						{:else if isMessagePartiallyRead(message)}
+							👀
+						{:else}
+							📩
+						{/if}
+					</span>
+				</div>
+			{/if}
+		</div>
 	</div>
 	
 	<div class="message-content markdown-content">
@@ -36,20 +73,11 @@
 	</div>
 	
 	<div class="message-actions">
-		{#if message.readingAssignments && message.readingAssignments.length > 0}
-			<div class="read-status-icon-container" on:click={handleReadStatusClick}>
-				<span class="read-status-icon" class:fully-read={isMessageFullyRead(message)} class:partially-read={isMessagePartiallyRead(message)}>
-					{#if isMessageFullyRead(message)}
-						✅
-					{:else if isMessagePartiallyRead(message)}
-						👀
-					{:else}
-						📩
-					{/if}
-				</span>
-			</div>
+		{#if !isOutgoingMessage && isUnread}
+			<button class="mark-read-btn" on:click={handleMarkAsRead}>
+				📖 Mark as Read
+			</button>
 		{/if}
-		<button class="reply-btn" on:click={handleReply}>💬 Reply</button>
 	</div>
 </div>
 
@@ -79,6 +107,11 @@
 	.message-author {
 		font-weight: 600;
 		color: #374151;
+	}
+	.message-header-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 	.message-time {
 		font-size: 12px;
@@ -115,20 +148,21 @@
 	.read-status-icon.partially-read {
 		opacity: 0.8;
 	}
-	.reply-btn {
-		background: none;
-		border: 1px solid #d1d5db;
-		color: #6b7280;
+	.mark-read-btn {
+		background: #3b82f6;
+		color: white;
+		border: none;
 		padding: 4px 8px;
 		border-radius: 4px;
-		cursor: pointer;
 		font-size: 12px;
-		transition: all 0.2s ease;
+		cursor: pointer;
+		transition: background-color 0.2s ease;
+		display: flex;
+		align-items: center;
+		gap: 4px;
 	}
-	.reply-btn:hover {
-		background: #f9fafb;
-		border-color: #9ca3af;
-		color: #374151;
+	.mark-read-btn:hover {
+		background: #2563eb;
 	}
 
 	/* Markdown content styling */

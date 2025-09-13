@@ -17,6 +17,9 @@ export const roleTemplates = pgTable('role_templates', {
 	name: text('name').notNull(),
 	description: text('description'),
 	prefix: text('prefix').notNull(), // Agent ID prefix like 'be', 'fe', 'pm'
+	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role template
+	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role template
+	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for roles that can create development phases
 	version: integer('version').notNull().default(1),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -72,6 +75,9 @@ export const roles = pgTable('roles', {
 	templateId: integer('template_id').references(() => roleTemplates.id), // null for custom roles
 	name: text('name').notNull(),
 	content: text('content').notNull(), // Role-specific content (from role template file)
+	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role instances
+	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role instances
+	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for role instances that can create development phases
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -103,6 +109,10 @@ export const agents = pgTable('agents', {
 	roleId: integer('role_id').references(() => roles.id), // FK to specific role instance (nullable)
 	roleType: text('role_type').notNull(), // Role type: 'backend-developer', 'product-manager', 'human-director'
 	squadId: text('squad_id').references(() => squads.id),
+	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director agent
+	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator agent
+	isAssistantToHumanDirector: boolean('is_assistant_to_human_director').notNull().default(false), // true for director assistant agent
+	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for agent instances that can create development phases
 	model: text('model').notNull().default('sonnet'), // 'sonnet', 'opus', 'haiku'
 	status: text('status').notNull().default('launching'), // launching, active, offline
 	tmuxSession: text('tmux_session'),

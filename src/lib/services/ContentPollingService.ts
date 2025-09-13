@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { contentActions } from '$lib/stores/contentStore';
 
 export interface ContentUpdate {
 	id: number;
@@ -128,54 +129,97 @@ class ContentPollingService {
 		if (!this.projectId) return;
 
 		try {
-			const params = new URLSearchParams({
-				projectId: this.projectId.toString()
-			});
+			// Fetch both content updates and agents data in parallel
+			const [contentResponse, agentsResponse] = await Promise.all([
+				this.fetchContentUpdates(),
+				this.fetchAgentsData()
+			]);
 
-			if (this.lastTimestamp) {
-				params.set('since', this.lastTimestamp);
-			}
+			// Process content updates
+			if (contentResponse && contentResponse.count > 0) {
+				console.log(`📬 Received ${contentResponse.count} content updates:`, contentResponse.updates);
 
-			const response = await fetch(`/api/content/updates?${params}`);
-			
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-			}
-
-			const data = await response.json();
-
-			// Update the timestamp for next poll
-			this.lastTimestamp = data.timestamp;
-
-			// Only process if there are new updates
-			if (data.count > 0) {
-				console.log(`📬 Received ${data.count} content updates:`, data.updates);
+				// Update content store with new data
+				contentActions.mergeContentUpdates(contentResponse.updates);
 
 				contentPollingStore.update(state => ({
 					...state,
-					lastUpdate: data.timestamp,
-					updates: data.updates,
+					lastUpdate: contentResponse.timestamp,
+					updates: contentResponse.updates,
 					error: null
 				}));
 
 				// Emit custom event for other components to listen to
 				window.dispatchEvent(new CustomEvent('contentUpdates', {
 					detail: {
-						updates: data.updates,
-						count: data.count,
-						timestamp: data.timestamp
+						updates: contentResponse.updates,
+						count: contentResponse.count,
+						timestamp: contentResponse.timestamp
+					}
+				}));
+			}
+
+			// Process agents data updates
+			if (agentsResponse) {
+				// Update agents store with fresh data
+				contentActions.setAgents(agentsResponse);
+
+				// Emit custom event for agents updates
+				window.dispatchEvent(new CustomEvent('agentsUpdated', {
+					detail: {
+						agents: agentsResponse,
+						timestamp: new Date().toISOString()
 					}
 				}));
 			}
 
 		} catch (error) {
-			console.error('❌ Failed to fetch content updates:', error);
+			console.error('❌ Failed to fetch updates:', error);
 			
 			contentPollingStore.update(state => ({
 				...state,
 				error: error instanceof Error ? error.message : 'Unknown error occurred'
 			}));
 		}
+	}
+
+	/**
+	 * Fetch content updates from server
+	 */
+	private async fetchContentUpdates() {
+		const params = new URLSearchParams({
+			projectId: this.projectId!.toString()
+		});
+
+		if (this.lastTimestamp) {
+			params.set('since', this.lastTimestamp);
+		}
+
+		const response = await fetch(`/api/content/updates?${params}`);
+		
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		}
+
+		const data = await response.json();
+
+		// Update the timestamp for next poll
+		this.lastTimestamp = data.timestamp;
+
+		return data.count > 0 ? data : null;
+	}
+
+	/**
+	 * Fetch fresh agents data from server
+	 */
+	private async fetchAgentsData() {
+		const response = await fetch(`/api/agents?projectId=${this.projectId}`);
+		
+		if (!response.ok) {
+			throw new Error(`Failed to fetch agents: ${response.status}`);
+		}
+
+		return await response.json();
 	}
 
 	/**
@@ -210,9 +254,7 @@ export const contentPollingService = new ContentPollingService();
 
 // Helper function to format content updates for display
 export function formatContentForDisplay(content: ContentUpdate): string {
-	const authorDisplay = content.authorAgentId === 'human-director' 
-		? 'Human Director' 
-		: content.authorAgentId || 'System';
+	const authorDisplay = content.authorAgentId || 'System';
 		
 	const timeAgo = formatTimeAgo(content.updatedAt);
 	
@@ -238,22 +280,9 @@ export function formatTimeAgo(timestamp: string): string {
 	return messageTime.toLocaleDateString();
 }
 
-// Helper function to get unread count for human director
+import { isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
+
+// Helper function to get unread count for human director  
 export function getUnreadCountForHumanDirector(content: ContentUpdate): number {
-	if (!content.readingAssignments) return 0;
-	
-	let unreadCount = 0;
-	content.readingAssignments.forEach(assignment => {
-		// Check if this assignment is for human-director and unread (including old 'director' assignments)
-		if ((assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-		    (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director')) {
-			// Check if human-director has read this assignment (including old 'director' reads)
-			const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
-			if (!hasRead) {
-				unreadCount++;
-			}
-		}
-	});
-	
-	return unreadCount;
+	return isContentUnreadByHumanDirector(content) ? 1 : 0;
 }

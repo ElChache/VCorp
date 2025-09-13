@@ -1,14 +1,29 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
+	import { tickets, agents, roleTypes, isLoading, error, contentActions } from '$lib/stores/contentStore';
+	import TicketComments from './TicketComments.svelte';
 
-	export let selectedProject;
+	export let selectedProject: any;
 
-	let tickets = [];
-	let roles = [];
-	let selectedRole = null;
-	let filteredTickets = [];
-	let loading = false;
-	let error = null;
+	// Reactive data from content store
+	$: storeTickets = $tickets;
+	$: storeRoleTypes = $roleTypes;
+	$: storeIsLoading = $isLoading;
+	$: storeError = $error;
+	
+	// Local component state
+	let selectedRole: any = null;
+	
+	// Comments panel state (following same pattern as ThreadView)
+	let selectedTicket: any = null;
+	let isCommentsColumnOpen: boolean = false;
+	let replyContent: string = '';
+	let ticketCommentsRef: any;
+	
+	// Reactive filtering
+	$: filteredTickets = selectedRole && storeTickets ? 
+		storeTickets.filter(ticket => ticket.assignedToRoleType === selectedRole.name) : 
+		storeTickets;
 	let showCreateDialog = false;
 	let newTicket = {
 		title: '',
@@ -44,59 +59,16 @@
 	
 	const priorityOptions = ['low', 'medium', 'high', 'critical'];
 
-	onMount(async () => {
-		if (selectedProject) {
-			await loadData();
-		}
-	});
-
+	// Load content when project changes
 	$: if (selectedProject) {
-		loadData();
+		contentActions.loadContent(selectedProject.id);
 	}
 
-	$: if (selectedRole && tickets) {
-		filteredTickets = tickets.filter(ticket => 
-			ticket.assignedToRoleType === selectedRole.name
-		);
-	}
-
-	async function loadData() {
-		await Promise.all([
-			loadTickets(),
-			loadRoles()
-		]);
-	}
-
-	async function loadTickets() {
-		loading = true;
-		error = null;
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/content?type=ticket`);
-			if (response.ok) {
-				tickets = await response.json();
-			} else {
-				error = 'Failed to load tickets';
-			}
-		} catch (err) {
-			error = 'Failed to load tickets: ' + err.message;
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function loadRoles() {
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/roles`);
-			if (response.ok) {
-				roles = await response.json();
-				// Auto-select first role if none selected
-				if (roles.length > 0 && !selectedRole) {
-					selectedRole = roles[0];
-				}
-			}
-		} catch (err) {
-			console.error('Failed to load roles:', err);
-		}
+	// Data is now managed by the centralized content store
+	
+	// Auto-select first role when roles are loaded
+	$: if (storeRoleTypes.length > 0 && !selectedRole) {
+		selectedRole = storeRoleTypes[0];
 	}
 
 	function selectRole(role) {
@@ -104,12 +76,12 @@
 	}
 
 	function getRoleTicketCount(role) {
-		return tickets.filter(ticket => ticket.assignedToRoleType === role.name).length;
+		return storeTickets.filter(ticket => ticket.assignedToRoleType === role.name).length;
 	}
 
 	async function createTicket() {
 		if (!newTicket.title || !newTicket.body || !newTicket.assignedToRoleType) {
-			error = 'Please fill in all required fields';
+			// TODO: Add local validation feedback
 			return;
 		}
 
@@ -127,8 +99,8 @@
 
 			if (response.ok) {
 				const createdTicket = await response.json();
-				tickets = [...tickets, createdTicket];
 				showCreateDialog = false;
+				// ContentPollingService will automatically pick up the new ticket
 				newTicket = {
 					title: '',
 					body: '',
@@ -138,10 +110,10 @@
 				};
 			} else {
 				const errorData = await response.json();
-				error = errorData.error || 'Failed to create ticket';
+				console.error('Failed to create ticket:', errorData.error);
 			}
 		} catch (err) {
-			error = 'Failed to create ticket: ' + err.message;
+			console.error('Failed to create ticket:', err.message);
 		}
 	}
 
@@ -161,7 +133,7 @@
 
 			if (response.ok) {
 				const updatedTicket = await response.json();
-				tickets = tickets.map(t => t.id === ticket.id ? updatedTicket : t);
+				// ContentPollingService will automatically pick up the updated ticket
 			}
 		} catch (err) {
 			console.error('Failed to update ticket status:', err);
@@ -175,7 +147,67 @@
 	function openCreateDialog() {
 		newTicket.assignedToRoleType = selectedRole?.name || '';
 		showCreateDialog = true;
-		error = null;
+		// Content store manages error state
+	}
+
+	// Ticket comments handling functions (following same pattern as thread handling)
+	function onTicketSelect(ticket: any) {
+		selectedTicket = ticket;
+		isCommentsColumnOpen = true;
+	}
+
+	function closeCommentsColumn() {
+		isCommentsColumnOpen = false;
+		selectedTicket = null;
+	}
+
+	async function sendComment() {
+		if (!replyContent.trim() || !selectedTicket?.id || !selectedProject) return;
+
+		try {
+			const response = await fetch('/api/send-message', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					projectId: selectedProject.id,
+					parentContentId: selectedTicket.id,
+					type: 'message',
+					title: `Comment on: ${selectedTicket.title}`,
+					body: replyContent,
+					authorAgentId: 'human-director'
+				})
+			});
+
+			if (response.ok) {
+				replyContent = '';
+				// ContentPollingService will automatically pick up the new comment
+			} else {
+				const errorData = await response.json();
+				console.error('Failed to send comment:', errorData.error);
+			}
+		} catch (err) {
+			console.error('Failed to send comment:', err.message);
+		}
+	}
+
+	function formatMessageTime(timestamp: string): string {
+		const now = new Date();
+		const messageTime = new Date(timestamp);
+		const diffMs = now.getTime() - messageTime.getTime();
+		const diffMins = Math.floor(diffMs / 60000);
+		
+		if (diffMins < 1) return 'Just now';
+		if (diffMins < 60) return `${diffMins}m ago`;
+		
+		const diffHours = Math.floor(diffMins / 60);
+		if (diffHours < 24) return `${diffHours}h ago`;
+		
+		const diffDays = Math.floor(diffHours / 24);
+		if (diffDays < 7) return `${diffDays}d ago`;
+		
+		return messageTime.toLocaleDateString();
 	}
 </script>
 
@@ -189,9 +221,9 @@
 		</div>
 	</div>
 
-	{#if error}
+	{#if storeError}
 		<div class="error-banner">
-			{error}
+			{storeError}
 		</div>
 	{/if}
 
@@ -200,7 +232,7 @@
 		<div class="roles-sidebar">
 			<h3>Roles</h3>
 			<div class="roles-list">
-				{#each roles as role}
+				{#each storeRoleTypes as role}
 					<button 
 						class="role-item {selectedRole?.id === role.id ? 'selected' : ''}"
 						on:click={() => selectRole(role)}
@@ -220,7 +252,7 @@
 					<div class="tickets-count">{filteredTickets.length} tickets</div>
 				</div>
 
-				{#if loading}
+				{#if storeIsLoading}
 					<div class="loading">Loading tickets...</div>
 				{:else if filteredTickets.length === 0}
 					<div class="empty-state">
@@ -232,7 +264,7 @@
 				{:else}
 					<div class="tickets-list">
 						{#each filteredTickets as ticket}
-							<div class="ticket-card">
+							<div class="ticket-card" on:click={() => onTicketSelect(ticket)}>
 								<div class="ticket-header">
 									<div class="ticket-title">{ticket.title}</div>
 									<div class="ticket-badges">
@@ -277,6 +309,18 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Ticket Comments Panel -->
+		<TicketComments 
+			bind:this={ticketCommentsRef}
+			{selectedProject}
+			{selectedTicket}
+			{isCommentsColumnOpen}
+			bind:replyContent
+			{formatMessageTime}
+			on:close={closeCommentsColumn}
+			on:sendComment={sendComment}
+		/>
 	</div>
 </div>
 
@@ -305,7 +349,7 @@
 					<label for="ticket-role">Assigned To *</label>
 					<select id="ticket-role" bind:value={newTicket.assignedToRoleType}>
 						<option value="">Select a role</option>
-						{#each roles as role}
+						{#each storeRoleTypes as role}
 							<option value={role.name}>{role.name}</option>
 						{/each}
 					</select>
@@ -382,6 +426,7 @@
 		flex: 1;
 		display: flex;
 		min-height: 0;
+		position: relative;
 	}
 
 	.roles-sidebar {
@@ -490,6 +535,7 @@
 		border-radius: 8px;
 		padding: 1rem;
 		transition: border-color 0.2s;
+		cursor: pointer;
 	}
 
 	.ticket-card:hover {

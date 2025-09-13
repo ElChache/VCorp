@@ -21,8 +21,22 @@ export async function POST() {
 				.limit(1);
 				
 			if (existing) {
-				createdRoleTemplates[roleTemplate.name] = existing;
-				console.log(`♻️ Using existing role template: ${existing.name} (ID: ${existing.id})`);
+				// Update existing role template to ensure all fields are current
+				const [updated] = await db
+					.update(roleTemplates)
+					.set({
+						description: roleTemplate.description,
+						prefix: roleTemplate.prefix,
+						isHumanDirector: roleTemplate.isHumanDirector || false,
+						isItAdministrator: roleTemplate.isItAdministrator || false,
+						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
+						canCreatePhases: roleTemplate.canCreatePhases || false
+					})
+					.where(eq(roleTemplates.id, existing.id))
+					.returning();
+				
+				createdRoleTemplates[roleTemplate.name] = updated;
+				console.log(`🔄 Updated existing role template: ${updated.name} (ID: ${updated.id}) canCreatePhases: ${updated.canCreatePhases}`);
 			} else {
 				// Create new one if it doesn't exist
 				const [created] = await db
@@ -30,7 +44,11 @@ export async function POST() {
 					.values({
 						name: roleTemplate.name,
 						description: roleTemplate.description,
-						prefix: roleTemplate.prefix
+						prefix: roleTemplate.prefix,
+						isHumanDirector: roleTemplate.isHumanDirector || false,
+						isItAdministrator: roleTemplate.isItAdministrator || false,
+						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
+						canCreatePhases: roleTemplate.canCreatePhases || false
 					})
 					.returning();
 				
@@ -183,8 +201,8 @@ export async function POST() {
 		// Define the composition mappings - now only role-specific prompts
 		// Global prompts are handled via squad assignments
 		const rolePromptMappings = [
-			// product-manager - Only role description
-			{ role: 'product-manager', prompts: ['product-manager'] },
+			// product-manager - Role description + phase creation ability
+			{ role: 'product-manager', prompts: ['product-manager', 'phase_creator'] },
 			// backend-developer - Only role description
 			{ role: 'backend-developer', prompts: ['backend-developer'] },
 			// frontend-developer - Only role description
@@ -201,8 +219,10 @@ export async function POST() {
 			{ role: 'technical-qa', prompts: ['technical-qa'] },
 			// director-assistant - Role description + communication prompts + workflow prompts
 			{ role: 'director-assistant', prompts: ['director-assistant', 'core_team_to_human_comms', 'executive_to_human_comms', 'phase_workflow', 'ticketing_system'] },
-			// system-architect - Role description + Lead workflow
-			{ role: 'system-architect', prompts: ['system-architect', 'leads_worktree_workflow'] }
+			// system-architect - Role description + Lead workflow + phase creation ability
+			{ role: 'system-architect', prompts: ['system-architect', 'leads_worktree_workflow', 'phase_creator'] },
+			// it-administrator - Role description + git workflow (to monitor developer compliance)
+			{ role: 'it-administrator', prompts: ['it-administrator', 'worktree_workflow'] }
 		];
 
 		for (const mapping of rolePromptMappings) {

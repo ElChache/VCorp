@@ -62,6 +62,7 @@ class MonitoringManager {
 		statusUpdates: 0,
 		notificationsSent: 0,
 		gentlePokes: 0,
+		remindersSent: 0,
 		errors: 0,
 		startTime: new Date(),
 		lastCheck: null,
@@ -416,7 +417,7 @@ This is just a gentle reminder - no action needed if you're already working! üö
 					agentId: agent.id,
 					unreadCount: 0,
 					success: false,
-					error: error.message
+					error: error instanceof Error ? error.message : 'Unknown error'
 				});
 			}
 		}
@@ -577,7 +578,7 @@ This is just a gentle reminder - no action needed if you're already working! üö
 			.map(msg => {
 				if (msg.isReply && msg.thread && msg.thread.length > 0) {
 					// This is a reply - include the thread context with character limit
-					const threadContext = this.buildThreadContextWithLimit(msg.thread, 3000);
+					const threadContext = this.buildThreadContextWithLimit(msg.thread, 300);
 					return `‚Ä¢ THREAD UPDATE (${msg.type}):\n${threadContext}`;
 				} else {
 					// Regular message
@@ -705,7 +706,7 @@ This is just a gentle reminder - no action needed if you're already working! üö
 					agentId: agent.id,
 					idleStartTime,
 					success: false,
-					error: error.message
+					error: error instanceof Error ? error.message : 'Unknown error'
 				});
 			}
 		}
@@ -770,7 +771,7 @@ This is just a gentle reminder - no action needed if you're already working! üö
 					reminderName: reminder.name,
 					targetRoleType: reminder.targetRoleType,
 					success: false,
-					error: error.message
+					error: error instanceof Error ? error.message : 'Unknown error'
 				});
 			}
 		}
@@ -887,7 +888,7 @@ Status: ${phase.status}`;
 					contentId: readingAssignments.contentId,
 					assignedTo: readingAssignments.assignedTo,
 					assignedToType: readingAssignments.assignedToType,
-					createdAt: readingAssignments.createdAt
+					assignedAt: readingAssignments.assignedAt
 				})
 				.from(readingAssignments)
 				.innerJoin(content, eq(readingAssignments.contentId, content.id))
@@ -939,7 +940,7 @@ Status: ${phase.status}`;
 						contentId: assignment.contentId,
 						originalAssignment: assignment.id,
 						success: false,
-						error: error.message
+						error: error instanceof Error ? error.message : 'Unknown error'
 					});
 					console.error(`‚ùå Failed to forward content ${assignment.contentId} to assistant:`, error);
 				}

@@ -18,7 +18,9 @@ export { phase_workflow } from './phase_workflow';
 export { visual_testing_instructions } from './visual_testing_instructions';
 export { director_assistant_role as director_assistant } from './director_assistant_role';
 export { system_architect_role as system_architect } from './system_architect_role';
+export { it_administrator } from './it-administrator';
 export { human_director_role as human_director } from './human_director_role';
+export { phase_creator } from './phase_creator';
 
 // Re-create the CORE_PROMPT_TEMPLATES object from individual templates
 import { general_communication } from './general_communication';
@@ -40,7 +42,9 @@ import { phase_workflow } from './phase_workflow';
 import { visual_testing_instructions } from './visual_testing_instructions';
 import { director_assistant_role } from './director_assistant_role';
 import { system_architect_role } from './system_architect_role';
+import { it_administrator } from './it-administrator';
 import { human_director_role } from './human_director_role';
+import { phase_creator } from './phase_creator';
 
 export const CORE_PROMPT_TEMPLATES = {
   general_communication,
@@ -62,5 +66,7 @@ export const CORE_PROMPT_TEMPLATES = {
   visual_testing_instructions,
   'director-assistant': director_assistant_role,
   'system-architect': system_architect_role,
-  'human-director': human_director_role
+  'it-administrator': it_administrator,
+  'human-director': human_director_role,
+  phase_creator
 };

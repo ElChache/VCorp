@@ -6,12 +6,10 @@
 	import AgentsSection from '$lib/components/AgentsSection.svelte';
 	import ChannelsSection from '$lib/components/ChannelsSection.svelte';
 	import SquadsSection from '$lib/components/SquadsSection.svelte';
-	import PhasesSection from '$lib/components/PhasesSection.svelte';
-	import ScheduledRemindersSection from '$lib/components/ScheduledRemindersSection.svelte';
-	import TicketsSection from '$lib/components/TicketsSection.svelte';
-	import DocumentsSection from '$lib/components/DocumentsSection.svelte';
+		import ScheduledRemindersSection from '$lib/components/ScheduledRemindersSection.svelte';
 	import CommunicationsSection from '$lib/components/CommunicationsSection.svelte';
 	import { contentPollingStore } from '$lib/services/ContentPollingService';
+	import { isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -35,10 +33,6 @@
 	
 	
 
-	// Phases variables
-	let phases: any[] = [];
-	let phasesByRole: Record<string, any[]> = {};
-	let showCreatePhaseDialog = false;
 
 
 	// Squad data (needed for document assignments and other integrations)
@@ -50,72 +44,25 @@
 	// Communications Center unread count
 	$: pollingState = $contentPollingStore;
 	$: totalUnreadCount = calculateTotalUnreadCount(pollingState.updates);
-	$: documentsUnreadCount = calculateDocumentsUnreadCount(pollingState.updates);
 
 	function calculateTotalUnreadCount(updates: any): number {
 		if (!updates) return 0;
 
-		// Helper function to check if a message is unread by human director
-		function isUnreadByHumanDirector(message: any): boolean {
-			if (!message.readingAssignments) return false;
-			
-			return message.readingAssignments.some((assignment: any) => {
-				// Check if this assignment is for human-director (including old 'director' assignments)
-				const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-				
-				if (!isForHumanDirector) return false;
-				
-				// Check if human-director has read this assignment (including old 'director' reads)
-				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
-				return !hasRead;
-			});
-		}
-
 		// Count unread channel messages + unread direct messages (type "message" or "reply")
 		const channelUnread = updates.channelMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		).length || 0;
 
 		const dmUnread = updates.directMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		).length || 0;
 
-		// Count unread documents
-		const documentsUnread = updates.documents?.filter((doc: any) => 
-			isUnreadByHumanDirector(doc)
-		).length || 0;
-
-		return channelUnread + dmUnread + documentsUnread;
+		return channelUnread + dmUnread;
 	}
 
-	function calculateDocumentsUnreadCount(updates: any): number {
-		if (!updates) return 0;
-
-		// Helper function to check if a document is unread by human director
-		function isUnreadByHumanDirector(document: any): boolean {
-			if (!document.readingAssignments) return false;
-			
-			return document.readingAssignments.some((assignment: any) => {
-				// Check if this assignment is for human-director (including old 'director' assignments)
-				const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-				                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-				
-				if (!isForHumanDirector) return false;
-				
-				// Check if human-director has read this assignment (including old 'director' reads)
-				const hasRead = assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director');
-				return !hasRead;
-			});
-		}
-
-		// Count only unread documents
-		return updates.documents?.filter((doc: any) => isUnreadByHumanDirector(doc)).length || 0;
-	}
 
 	onMount(async () => {
 		await loadProjects();
-		await loadPhases();
 		
 		// Add global debug functions for testing
 		(window as any).debugChannels = () => {
@@ -154,37 +101,9 @@
 
 
 	async function onProjectChange() {
-		await loadPhases();
 		currentSection = 'overview';
 	}
 
-	async function loadPhases() {
-		if (!selectedProject) {
-			phases = [];
-			phasesByRole = {};
-			return;
-		}
-		
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/content?type=phase`);
-			if (response.ok) {
-				phases = await response.json();
-				
-				// Group phases by role
-				phasesByRole = {};
-				for (const phase of phases) {
-					if (!phasesByRole[phase.assignedToRoleType]) {
-						phasesByRole[phase.assignedToRoleType] = [];
-					}
-					phasesByRole[phase.assignedToRoleType].push(phase);
-				}
-			}
-		} catch (error) {
-			console.error('Failed to load phases:', error);
-			phases = [];
-			phasesByRole = {};
-		}
-	}
 
 
 
@@ -216,7 +135,7 @@
 
 	function closeCreateDialog() {
 		showCreateDialog = false;
-		newProject = { name: '', description: '' };
+		newProject = { name: '', description: '', path: '' };
 	}
 
 	function openDeleteDialog() {
@@ -297,7 +216,7 @@
 			}
 		} catch (error) {
 			console.error('Failed to delete project:', error);
-			alert(`Failed to delete project: ${error.message}`);
+			alert(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
 	}
 
@@ -406,34 +325,10 @@
 				</button>
 				<button 
 					class="nav-btn" 
-					class:active={currentSection === 'phases'}
-					on:click={() => { currentSection = 'phases'; loadPhases(); }}
-				>
-					Phases
-				</button>
-				<button 
-					class="nav-btn" 
 					class:active={currentSection === 'scheduled-reminders'}
 					on:click={() => { currentSection = 'scheduled-reminders'; }}
 				>
 					⏰ Scheduled Reminders
-				</button>
-				<button 
-					class="nav-btn" 
-					class:active={currentSection === 'tickets'}
-					on:click={() => currentSection = 'tickets'}
-				>
-					🎫 Tickets
-				</button>
-				<button 
-					class="nav-btn" 
-					class:active={currentSection === 'documents'}
-					on:click={() => { currentSection = 'documents'; }}
-				>
-					📄 Documents
-					{#if documentsUnreadCount > 0}
-						<span class="unread-badge">{documentsUnreadCount}</span>
-					{/if}
 				</button>
 				<button 
 					class="nav-btn director-btn nav-btn-with-badge" 
@@ -475,16 +370,8 @@
 			{:else if currentSection === 'scheduled-reminders'}
 				<ScheduledRemindersSection {selectedProject} bind:scheduledReminders bind:showCreateReminderDialog bind:showEditReminderDialog />
 
-			{:else if currentSection === 'tickets'}
-				<TicketsSection {selectedProject} />
-
-		{:else if currentSection === 'documents'}
-			<DocumentsSection {selectedProject} />
-
 		{:else if currentSection === 'communications'}
 			<CommunicationsSection {selectedProject} />
-			{:else if currentSection === 'phases'}
-				<PhasesSection {selectedProject} bind:phases bind:phasesByRole bind:showCreatePhaseDialog />
 			{/if}
 		{:else}
 			<p>Select or create a project to get started</p>

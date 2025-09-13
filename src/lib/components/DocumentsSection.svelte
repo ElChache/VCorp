@@ -1,15 +1,22 @@
 <script>
 	import { onMount } from 'svelte';
 	import { marked } from 'marked';
+	import { documents, agents, roleTypes, squads, replies, isLoading, error, contentActions } from '$lib/stores/contentStore';
+	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 
 	export let selectedProject;
 
-	let documents = [];
-	let roleTypes = [];
-	let agents = [];
-	let squads = [];
+	// Reactive data from content store
+	$: storeDocuments = $documents;
+	$: storeAgents = $agents;
+	$: storeRoleTypes = $roleTypes;
+	$: storeSquads = $squads;
+	$: storeReplies = $replies;
+	$: storeIsLoading = $isLoading;
+	$: storeError = $error;
+	
+	// Local component state
 	let selectedDocument = null;
-	let documentReplies = [];
 	let showCreateDocumentDialog = false;
 	let showAssignReadingDialog = false;
 	let newDocument = { 
@@ -25,116 +32,21 @@
 	let replyToContentId = null;
 	let documentReadingAssignments = [];
 	let newReadingAssignments = [];
-	let loading = false;
-	let error = null;
+	
+	// Get replies for selected document
+	$: documentReplies = selectedDocument ? storeReplies.filter(reply => reply.parentContentId === selectedDocument.id) : [];
 
-	onMount(async () => {
-		if (selectedProject) {
-			await loadDocuments();
-			await loadRoleTypes();
-			await loadAgents();
-			await loadSquads();
-		}
-	});
-
+	// Load content when project changes
 	$: if (selectedProject) {
-		loadDocuments();
-		loadRoleTypes();
-		loadAgents();
-		loadSquads();
+		contentActions.loadContent(selectedProject.id);
 	}
 
-	async function loadDocuments() {
-		if (!selectedProject?.id) return;
-		
-		loading = true;
-		error = null;
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/content?type=document`);
-			if (response.ok) {
-				documents = await response.json();
-				
-				// Load reading assignments for each document
-				for (let document of documents) {
-					await loadDocumentReadingAssignments(document);
-				}
-			} else {
-				error = 'Failed to load documents';
-			}
-		} catch (err) {
-			error = 'Failed to load documents: ' + err.message;
-		} finally {
-			loading = false;
-		}
-	}
+	// Data is now managed by the centralized content store
 
-	async function loadRoleTypes() {
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/role-types`);
-			if (response.ok) {
-				roleTypes = await response.json();
-			}
-		} catch (err) {
-			console.error('Failed to load role types:', err);
-		}
-	}
-
-	async function loadAgents() {
-		try {
-			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				agents = await response.json();
-			}
-		} catch (err) {
-			console.error('Failed to load agents:', err);
-		}
-	}
-
-	async function loadSquads() {
-		try {
-			const response = await fetch(`/api/squads?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				squads = await response.json();
-			}
-		} catch (err) {
-			console.error('Failed to load squads:', err);
-		}
-	}
-
-	async function loadDocumentReadingAssignments(document) {
-		try {
-			const response = await fetch(`/api/content/${document.id}/reading-assignments`);
-			if (response.ok) {
-				const assignments = await response.json();
-				document.readingAssignments = assignments;
-			}
-		} catch (err) {
-			console.error('Failed to load reading assignments for document:', err);
-		}
-	}
-
-	async function loadDocumentReplies() {
-		if (!selectedDocument?.id) return;
-
-		try {
-			// Use content updates API to get replies with full reading assignment data
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const data = await response.json();
-				// Filter replies for this specific document
-				documentReplies = data.updates.replies?.filter(reply => 
-					reply.parentContentId === selectedDocument.id
-				) || [];
-			}
-		} catch (err) {
-			console.error('Failed to load document replies:', err);
-		}
-	}
-
-	async function onDocumentSelect(document) {
+	function onDocumentSelect(document) {
 		selectedDocument = document;
 		replyToContentId = document.id; // Set this for the comment form
-		await loadDocumentReplies();
+		// Document replies are automatically available via reactive statement
 	}
 
 	function openCreateDocumentDialog() {
@@ -149,12 +61,12 @@
 		};
 		documentReadingAssignments = [];
 		showCreateDocumentDialog = true;
-		error = null;
+		// Content store manages error state
 	}
 
 	async function createDocument() {
 		if (!newDocument.title || !newDocument.body) {
-			error = 'Please fill in all required fields';
+			// TODO: Add local error handling or use content store error
 			return;
 		}
 
@@ -172,8 +84,8 @@
 
 			if (response.ok) {
 				const createdDocument = await response.json();
-				documents = [...documents, createdDocument];
 				showCreateDocumentDialog = false;
+				// ContentPollingService will automatically pick up the new document
 				newDocument = { 
 					title: '', 
 					body: '', 
@@ -186,17 +98,17 @@
 				documentReadingAssignments = [];
 			} else {
 				const errorData = await response.json();
-				error = errorData.error || 'Failed to create document';
+				console.error('Failed to create document:', errorData.error);
 			}
 		} catch (err) {
-			error = 'Failed to create document: ' + err.message;
+			console.error('Failed to create document:', err.message);
 		}
 	}
 
 
 	async function replyToDocument() {
 		if (!documentReplyContent) {
-			error = 'Please enter a reply message';
+			// TODO: Add local validation feedback
 			return;
 		}
 
@@ -210,7 +122,7 @@
 					projectId: selectedProject.id,
 					body: documentReplyContent,
 					parentContentId: replyToContentId,
-					authorAgentId: 'human-director'
+					authorAgentId: getHumanDirectorAgentId()
 				})
 			});
 
@@ -219,10 +131,10 @@
 				documentReplyContent = '';
 			} else {
 				const errorData = await response.json();
-				error = errorData.error || 'Failed to reply to document';
+				console.error('Failed to reply to document:', errorData.error);
 			}
 		} catch (err) {
-			error = 'Failed to reply to document: ' + err.message;
+			console.error('Failed to reply to document:', err.message);
 		}
 	}
 
@@ -236,19 +148,14 @@
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({
-					agentId: 'human-director'
+					agentId: getHumanDirectorAgentId()
 				})
 			});
 
 			if (response.ok) {
 				// Refresh the document's reading assignments
 				await loadDocumentReadingAssignments(selectedDocument);
-				// Update the documents list
-				const index = documents.findIndex(d => d.id === selectedDocument.id);
-				if (index >= 0) {
-					documents[index] = { ...selectedDocument };
-					documents = [...documents];
-				}
+				// ContentPollingService will automatically pick up the updated document
 			}
 		} catch (err) {
 			console.error('Failed to mark document as read:', err);
@@ -270,7 +177,7 @@
 		selectedDocument = document;
 		newReadingAssignments = [];
 		showAssignReadingDialog = true;
-		error = null;
+		// Content store manages error state
 	}
 
 	function addNewReadingAssignment() {
@@ -286,14 +193,14 @@
 
 	async function assignReadingToDocument() {
 		if (!selectedDocument || newReadingAssignments.length === 0) {
-			error = 'Please add at least one reading assignment';
+			// TODO: Add local validation feedback
 			return;
 		}
 
 		// Validate assignments
 		for (const assignment of newReadingAssignments) {
 			if (!assignment.assignedToType || !assignment.assignedTo) {
-				error = 'Please fill in all assignment fields';
+				// TODO: Add local validation feedback
 				return;
 			}
 		}
@@ -312,20 +219,15 @@
 			if (response.ok) {
 				// Refresh the document's reading assignments
 				await loadDocumentReadingAssignments(selectedDocument);
-				// Update the documents list
-				const index = documents.findIndex(d => d.id === selectedDocument.id);
-				if (index >= 0) {
-					documents[index] = { ...selectedDocument };
-					documents = [...documents];
-				}
+				// ContentPollingService will automatically pick up the updated document
 				showAssignReadingDialog = false;
 				newReadingAssignments = [];
 			} else {
 				const errorData = await response.json();
-				error = errorData.error || 'Failed to assign reading';
+				console.error('Failed to assign reading:', errorData.error);
 			}
 		} catch (err) {
-			error = 'Failed to assign reading: ' + err.message;
+			console.error('Failed to assign reading:', err.message);
 		}
 	}
 
@@ -489,7 +391,7 @@
 		<div class="message">
 			<div class="message-header">
 				<span class="message-author">
-					{#if comment.authorAgentId === 'human-director'}
+					{#if isMessageFromHumanDirector(comment)}
 						Human Director
 					{:else if comment.authorAgentId}
 						{comment.authorAgentId}
@@ -531,9 +433,9 @@
 		</button>
 	</div>
 
-	{#if error}
+	{#if storeError}
 		<div class="error-banner">
-			{error}
+			{storeError}
 		</div>
 	{/if}
 	
@@ -541,10 +443,10 @@
 		<!-- Column 1: Documents List (Narrower) -->
 		<div class="documents-sidebar">
 			<div class="documents-list">
-				{#if loading}
+				{#if storeIsLoading}
 					<div class="loading">Loading documents...</div>
-				{:else if documents.length > 0}
-					{#each documents as document}
+				{:else if storeDocuments.length > 0}
+					{#each storeDocuments as document}
 						<div 
 							class="document-item"
 							class:selected={selectedDocument?.id === document.id}
@@ -582,7 +484,7 @@
 							<span class="document-type-badge">{selectedDocument.type}</span>
 							<span class="author">by {selectedDocument.authorAgentId || 'Unknown'}</span>
 							<span class="date">{formatDate(selectedDocument.createdAt)}</span>
-							{#if selectedDocument.readingAssignments?.some(assignment => assignment.assignedTo === 'human-director' && assignment.reads?.length === 0)}
+							{#if isContentUnreadByHumanDirector(selectedDocument)}
 								<button 
 									class="btn-secondary btn-sm"
 									on:click={markDocumentAsRead}
@@ -727,21 +629,21 @@
 								{#if assignment.assignedToType === 'role'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Role Type</option>
-										{#each roleTypes as roleType}
+										{#each storeRoleTypes as roleType}
 											<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'agent'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Agent</option>
-										{#each agents as agent}
+										{#each storeAgents as agent}
 											<option value={agent.id}>{agent.id} ({agent.roleType})</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'squad'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Squad</option>
-										{#each squads as squad}
+										{#each storeSquads as squad}
 											<option value={squad.templateId}>{squad.name}</option>
 										{/each}
 									</select>
@@ -812,21 +714,21 @@
 								{#if assignment.assignedToType === 'role'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Role Type</option>
-										{#each roleTypes as roleType}
+										{#each storeRoleTypes as roleType}
 											<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'agent'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Agent</option>
-										{#each agents as agent}
+										{#each storeAgents as agent}
 											<option value={agent.id}>{agent.id} ({agent.roleType})</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'squad'}
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Squad</option>
-										{#each squads as squad}
+										{#each storeSquads as squad}
 											<option value={squad.templateId}>{squad.name}</option>
 										{/each}
 									</select>
@@ -886,6 +788,7 @@
 		padding: 1rem;
 		border-bottom: 1px solid #e5e7eb;
 	}
+
 
 	.section-header h2 {
 		margin: 0;

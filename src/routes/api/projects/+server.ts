@@ -97,6 +97,10 @@ export async function POST({ request }) {
 						templateId: roleTemplate.id,
 						name: roleTemplate.name,
 						content: humanDirectorPromptTemplate ? humanDirectorPromptTemplate.content : 'human-director role content',
+						isHumanDirector: roleTemplate.isHumanDirector || false,
+						isItAdministrator: roleTemplate.isItAdministrator || false,
+						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
+						canCreatePhases: roleTemplate.canCreatePhases || false,
 					})
 					.returning();
 
@@ -112,6 +116,10 @@ export async function POST({ request }) {
 						templateId: roleTemplate.id,
 						name: roleTemplate.name,
 						content: primaryPrompt.promptTemplate.content,
+						isHumanDirector: roleTemplate.isHumanDirector || false,
+						isItAdministrator: roleTemplate.isItAdministrator || false,
+						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
+						canCreatePhases: roleTemplate.canCreatePhases || false,
 					})
 					.returning();
 
@@ -143,6 +151,7 @@ export async function POST({ request }) {
 					projectId: newProject.id,
 					roleId: humanDirectorRole.id,
 					roleType: 'Human Director',
+					isHumanDirector: true,
 					status: 'online', // Human is always online
 					model: 'human', // Special model type for human users
 				});
@@ -355,12 +364,45 @@ export async function POST({ request }) {
 				.limit(1);
 
 			if (humanDirectorRole) {
-				// Generate a unique human-director agent ID
-				const humanNames = ['alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry', 'ivy', 'jack', 'kate', 'leo', 'maya', 'noah', 'olivia', 'peter', 'quinn', 'ruby', 'sam', 'tina', 'uma', 'victor', 'wendy', 'xavier', 'yara', 'zoe'];
-				const humanName = humanNames[Math.floor(Math.random() * humanNames.length)];
-				const agentId = `hd_${humanName}`;
+				// Generate a unique human-director agent ID with diverse names and 4-digit suffix
+				const diverseNames = [
+					// English/Western names
+					'alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry',
+					'ivy', 'jack', 'kate', 'leo', 'maya', 'noah', 'olivia', 'peter',
+					'quinn', 'ruby', 'sam', 'tina', 'uma', 'victor', 'wendy', 'xavier',
+					'yara', 'zoe', 'alex', 'blake', 'casey', 'drew', 'emery', 'finley',
+					
+					// Hispanic/Latino names
+					'ana', 'carlos', 'sofia', 'diego', 'lucia', 'miguel', 'elena', 'pablo',
+					'maria', 'antonio', 'isabella', 'manuel', 'valeria', 'ricardo', 'camila', 'felipe',
+					'alejandra', 'javier', 'natalia', 'fernando', 'adriana', 'gabriel', 'daniela', 'eduardo',
+					'patricia', 'jorge', 'andrea', 'rafael', 'monica', 'sergio', 'carmen', 'oscar',
+					
+					// Asian names (East Asian, South Asian, Southeast Asian)
+					'akira', 'yuki', 'kenji', 'sakura', 'takeshi', 'mai', 'hiroshi', 'emi',
+					'chen', 'mei', 'kai', 'lin', 'wei', 'yan', 'jun', 'xin',
+					'arjun', 'priya', 'ravi', 'anita', 'vikram', 'sita', 'raj', 'kavita',
+					'kim', 'park', 'lee', 'cho', 'jung', 'min', 'sung', 'hye',
+					'nguyen', 'tran', 'pham', 'le', 'hoang', 'vu', 'dao', 'bui',
+					
+					// Middle Eastern/Arabic names
+					'omar', 'fatima', 'hassan', 'aisha', 'ahmed', 'zara', 'ali', 'layla',
+					'nadia', 'samir', 'dina', 'ameer', 'sara', 'tariq', 'rana', 'khalid',
+					
+					// African names
+					'kemi', 'taiwo', 'ade', 'ngozi', 'kwame', 'ama', 'kofi', 'akosua',
+					'amara', 'zuri', 'jengo', 'nia', 'kesi', 'tau', 'ife', 'asante',
+					
+					// Additional international names
+					'raja', 'noor', 'soren', 'astrid', 'lars', 'freya', 'enzo', 'giulia',
+					'pierre', 'marie', 'hans', 'greta', 'ivan', 'anya', 'dmitri', 'nina'
+				];
+				
+				const humanName = diverseNames[Math.floor(Math.random() * diverseNames.length)];
+				const randomSuffix = Math.floor(1000 + Math.random() * 9000); // 4-digit number (1000-9999)
+				const agentId = `hd_${humanName}_${randomSuffix}`;
 
-				// Check if this agent ID already exists
+				// Check if this agent ID already exists (with 4-digit suffix, collisions should be extremely rare)
 				const [existingAgent] = await db
 					.select()
 					.from(agents)
@@ -376,6 +418,8 @@ export async function POST({ request }) {
 							projectId: newProject.id,
 							roleId: humanDirectorRole.id,
 							roleType: 'human-director',
+							isHumanDirector: true,
+							canCreatePhases: humanDirectorRole.canCreatePhases || false,
 							model: 'human',
 							status: 'active', // Human director starts as active
 							tmuxSession: `vcorp-${agentId}`,

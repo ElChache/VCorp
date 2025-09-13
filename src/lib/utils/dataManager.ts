@@ -11,6 +11,13 @@ import {
 	markMessageAsRead 
 } from './messageOperations';
 
+import { 
+	isMessageFromHumanDirector,
+	isAssignmentForHumanDirector,
+	isContentUnreadByHumanDirector,
+	getHumanDirectorAgentId
+} from './humanDirectorClientHelpers';
+
 export interface DataManagerCallbacks {
 	updateChannelMessages?: (messages: any[]) => void;
 	updateDMMessages?: (messages: any[]) => void;
@@ -82,7 +89,7 @@ export class DataManager {
 		
 		// Debug logging
 		console.log(`📊 DM Count Debug - Found ${updates.directMessages?.length || 0} total DMs, ${unreadDMs.length} unread:`, 
-			unreadDMs.map(dm => `ID:${dm.id} from:${dm.authorAgentId} type:${dm.type}`)
+			unreadDMs.map((dm: any) => `ID:${dm.id} from:${dm.authorAgentId} type:${dm.type}`)
 		);
 
 		// Count unread documents  
@@ -159,7 +166,7 @@ export class DataManager {
 				}
 				
 				// Automatically mark all messages as read (batch operation to avoid multiple refreshes)
-				const unreadMessages = messages.filter(message => hasUnreadAssignmentForHumanDirector(message));
+				const unreadMessages = messages.filter((message: any) => hasUnreadAssignmentForHumanDirector(message));
 				if (unreadMessages.length > 0) {
 					console.log(`📖 Auto-marking ${unreadMessages.length} unread messages as read for channel ${channel.name}`);
 					
@@ -202,14 +209,14 @@ export class DataManager {
 				
 				// Load message counts for each channel
 				const channelsWithCounts = await Promise.all(
-					channelsData.map(async (channel) => {
+					channelsData.map(async (channel: any) => {
 						try {
 							const msgResponse = await fetch(`/api/messages?projectId=${this.selectedProject.id}&channelId=${channel.id}`);
 							if (msgResponse.ok) {
 								const messages = await msgResponse.json();
 								
 								// Calculate unread messages for human-director only
-								const unreadCount = messages.filter(message => isUnreadByHumanDirector(message)).length;
+								const unreadCount = messages.filter((message: any) => isUnreadByHumanDirector(message)).length;
 								
 								return {
 									...channel,
@@ -330,13 +337,14 @@ export class DataManager {
 				// Find all agents that have DM conversations with human-director
 				const conversationAgents = new Set();
 				
-				directMessages.forEach(dm => {
+				const humanDirectorId = getHumanDirectorAgentId();
+				
+				directMessages.forEach((dm: any) => {
 					// Case 1: Message FROM another agent TO human-director
-					if (dm.authorAgentId && dm.authorAgentId !== 'human-director') {
+					if (dm.authorAgentId && !isMessageFromHumanDirector(dm)) {
 						// Check if this message has reading assignment for human-director
-						const hasAssignmentToHuman = dm.readingAssignments?.some(a => 
-							(a.assignedToType === 'agent' && a.assignedTo === 'human-director') ||
-							(a.assignedToType === 'role' && a.assignedTo === 'Human Director')
+						const hasAssignmentToHuman = dm.readingAssignments?.some((a: any) => 
+							isAssignmentForHumanDirector(a)
 						);
 						if (hasAssignmentToHuman) {
 							conversationAgents.add(dm.authorAgentId);
@@ -344,24 +352,24 @@ export class DataManager {
 					}
 					
 					// Case 2: Message FROM human-director TO other agents
-					if (dm.authorAgentId === 'human-director' && dm.readingAssignments) {
-						dm.readingAssignments.forEach(assignment => {
+					if (isMessageFromHumanDirector(dm) && dm.readingAssignments) {
+						dm.readingAssignments.forEach((assignment: any) => {
 							// Direct agent assignment
-							if (assignment.assignedToType === 'agent' && assignment.assignedTo !== 'human-director') {
+							if (assignment.assignedToType === 'agent' && assignment.assignedTo !== humanDirectorId) {
 								conversationAgents.add(assignment.assignedTo);
 							}
 							// Role assignment - use targetAgents to find actual agents
 							else if (assignment.assignedToType === 'role' && assignment.targetAgents) {
-								assignment.targetAgents.forEach(agentId => {
-									if (agentId !== 'human-director') {
+								assignment.targetAgents.forEach((agentId: string) => {
+									if (agentId !== humanDirectorId) {
 										conversationAgents.add(agentId);
 									}
 								});
 							}
 							// Squad assignment - use targetAgents to find actual agents
 							else if (assignment.assignedToType === 'squad' && assignment.targetAgents) {
-								assignment.targetAgents.forEach(agentId => {
-									if (agentId !== 'human-director') {
+								assignment.targetAgents.forEach((agentId: string) => {
+									if (agentId !== humanDirectorId) {
 										conversationAgents.add(agentId);
 									}
 								});
@@ -373,10 +381,10 @@ export class DataManager {
 				// Create agent objects for UI
 				const dmAgents = Array.from(conversationAgents).map(agentId => {
 					// Find most recent message in this conversation
-					const conversationMessages = directMessages.filter(dm => 
+					const conversationMessages = directMessages.filter((dm: any) => 
 						dm.authorAgentId === agentId || 
-						(dm.authorAgentId === 'human-director' && 
-						 dm.readingAssignments?.some(a => 
+						(isMessageFromHumanDirector(dm) && 
+						 dm.readingAssignments?.some((a: any) => 
 							(a.assignedToType === 'agent' && a.assignedTo === agentId) ||
 							(a.assignedToType === 'role' && a.targetAgents?.includes(agentId)) ||
 							(a.assignedToType === 'squad' && a.targetAgents?.includes(agentId))
@@ -384,23 +392,23 @@ export class DataManager {
 					);
 					
 					const recentMessage = conversationMessages
-						.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+						.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
 					// Count unread messages from this agent to human-director
-					const unreadCount = directMessages.filter(dm => 
+					const unreadCount = directMessages.filter((dm: any) => 
 						dm.authorAgentId === agentId && isUnreadByHumanDirector(dm)
 					).length;
 
 					// Determine role type from agent ID
 					let roleType = 'Unknown';
-					if (agentId.startsWith('pm_')) roleType = 'Product Manager';
-					else if (agentId.startsWith('be_')) roleType = 'Backend Developer';
-					else if (agentId.startsWith('fe_')) roleType = 'Frontend Developer';
-					else if (agentId.startsWith('ai_')) roleType = 'AI Developer';
-					else if (agentId.startsWith('ux_')) roleType = 'UX Expert';
-					else if (agentId.startsWith('design_')) roleType = 'Graphic Designer';
-					else if (agentId.startsWith('qa_')) roleType = 'Technical QA';
-					else if (agentId.startsWith('sa_')) roleType = 'System Architect';
+					if ((agentId as string).startsWith('pm_')) roleType = 'Product Manager';
+					else if ((agentId as string).startsWith('be_')) roleType = 'Backend Developer';
+					else if ((agentId as string).startsWith('fe_')) roleType = 'Frontend Developer';
+					else if ((agentId as string).startsWith('ai_')) roleType = 'AI Developer';
+					else if ((agentId as string).startsWith('ux_')) roleType = 'UX Expert';
+					else if ((agentId as string).startsWith('design_')) roleType = 'Graphic Designer';
+					else if ((agentId as string).startsWith('qa_')) roleType = 'Technical QA';
+					else if ((agentId as string).startsWith('sa_')) roleType = 'System Architect';
 
 					return {
 						id: agentId,
@@ -447,13 +455,13 @@ export class DataManager {
 				const allDMs = data.updates.directMessages || [];
 				
 				// Filter to show only conversation between human-director and the selected agent
-				let dmMessages = allDMs.filter(msg => {
+				let dmMessages = allDMs.filter((msg: any) => {
 					// Include if the message is from the selected agent
 					if (msg.authorAgentId === agentId) return true;
 					
 					// Include if the message is from human-director AND has a reading assignment for the selected agent
-					if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
-						return msg.readingAssignments.some(assignment => 
+					if (isMessageFromHumanDirector(msg) && msg.readingAssignments) {
+						return msg.readingAssignments.some((assignment: any) => 
 							(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
 							(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
 							(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
@@ -509,11 +517,11 @@ export class DataManager {
 						const allRefreshDMs = refreshData.updates.directMessages || [];
 						
 						// Re-filter to get updated message data
-						dmMessages = allRefreshDMs.filter(msg => {
+						dmMessages = allRefreshDMs.filter((msg: any) => {
 							if (msg.authorAgentId === agentId) return true;
 							
-							if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
-								return msg.readingAssignments.some(assignment => 
+							if (isMessageFromHumanDirector(msg) && msg.readingAssignments) {
+								return msg.readingAssignments.some((assignment: any) => 
 									(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
 									(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
 									(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))

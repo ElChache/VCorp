@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, agents, channels, readingAssignments } from '$lib/db/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
+import { getHumanDirectorIdForProject } from '$lib/utils/humanDirectorHelpers';
 
 // GET /api/director/activity?projectId=1 - Get activity overview for director dashboard
 export async function GET({ url }) {
@@ -61,6 +62,12 @@ export async function GET({ url }) {
 			.groupBy(content.channelId, channels.name, channels.isForHumanDirector)
 			.orderBy(desc(sql`max(${content.createdAt})`));
 
+		// Get the actual human director ID for this project
+		const humanDirectorId = await getHumanDirectorIdForProject(parseInt(projectId));
+		if (!humanDirectorId) {
+			return json({ error: 'No human director found for this project' }, { status: 404 });
+		}
+
 		// Get unread message counts for director
 		const unreadCounts = await db
 			.select({
@@ -70,12 +77,12 @@ export async function GET({ url }) {
 			.innerJoin(content, eq(readingAssignments.contentId, content.id))
 			.leftJoin(
 				sql`reading_assignment_reads`,
-				sql`reading_assignment_reads.reading_assignment_id = ${readingAssignments.id} AND reading_assignment_reads.agent_id = 'human-director'`
+				sql`reading_assignment_reads.reading_assignment_id = ${readingAssignments.id} AND reading_assignment_reads.agent_id = ${humanDirectorId}`
 			)
 			.where(and(
 				eq(content.projectId, parseInt(projectId)),
 				eq(readingAssignments.assignedToType, 'agent'),
-				eq(readingAssignments.assignedTo, 'human-director'),
+				eq(readingAssignments.assignedTo, humanDirectorId),
 				sql`reading_assignment_reads.id IS NULL` // Not read yet
 			));
 

@@ -103,8 +103,22 @@ export async function GET({ url }) {
 						if (assignment.assignedToType === 'agent') {
 							// Direct agent assignment
 							if (assignment.assignedTo === 'human-director') {
-								// Special case: human-director is not in agents table
-								targetAgents = ['human-director'];
+								// Special case: resolve human-director to actual human director agent ID
+								const humanDirector = await db
+									.select({ id: agents.id })
+									.from(agents)
+									.where(and(
+										eq(agents.projectId, parsedProjectId),
+										eq(agents.isHumanDirector, true)
+									))
+									.limit(1);
+								
+								if (humanDirector.length > 0) {
+									targetAgents = [humanDirector[0].id];
+								} else {
+									// Fallback if no human director found
+									targetAgents = ['human-director'];
+								}
 							} else {
 								const agent = await db
 									.select({ id: agents.id })

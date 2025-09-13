@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 // POST /api/documents - Create a new document
 export async function POST({ request }) {
@@ -132,18 +132,38 @@ export async function POST({ request }) {
 			})
 			.returning();
 
+		// Helper function to resolve agent ID
+		const resolveAgentId = async (target: string, type: string): Promise<string> => {
+			if (type === 'agent' && target === 'human-director') {
+				// Find the actual human director agent ID for this project
+				const [humanDirector] = await db
+					.select({ id: agents.id })
+					.from(agents)
+					.where(and(
+						eq(agents.projectId, parsedProjectId),
+						eq(agents.isHumanDirector, true)
+					))
+					.limit(1);
+				
+				return humanDirector?.id || target; // Fallback to original if not found
+			}
+			return target;
+		};
+
 		// Create reading assignments
 		let assignmentSummary = [];
 		
 		// Only manual assignments for documents (no automatic channel assignments)
 		if (assignTo && assignTo.length > 0) {
 			const assignmentPromises = assignTo.map(async (assignment) => {
+				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
+				
 				return await db
 					.insert(readingAssignments)
 					.values({
 						contentId: newDocument.id,
 						assignedToType: assignment.type,
-						assignedTo: assignment.target,
+						assignedTo: resolvedTarget,
 					})
 					.returning();
 			});

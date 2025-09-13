@@ -18,7 +18,9 @@
 		try {
 			const response = await fetch(`/api/projects/${selectedProject.id}/roles`);
 			if (response.ok) {
-				roles = await response.json();
+				const allRoles = await response.json();
+				// Filter out human director roles - they're auto-managed
+				roles = allRoles.filter(role => !role.isHumanDirector);
 				selectedRole = roles.length > 0 ? roles[0] : null;
 				if (selectedRole) {
 					await loadRolePrompts();
@@ -123,7 +125,9 @@
 			// Reload all roles to get updated content
 			const response = await fetch(`/api/projects/${selectedProject.id}/roles`);
 			if (response.ok) {
-				roles = await response.json();
+				const allRoles = await response.json();
+				// Filter out human director roles - they're auto-managed
+				roles = allRoles.filter(role => !role.isHumanDirector);
 				// Find and update the selected role
 				selectedRole = roles.find(role => role.id === currentRoleId) || null;
 			}

@@ -116,7 +116,8 @@ export const CORE_ROLE_TEMPLATES = [
     id: 1,
     name: 'product-manager',
     description: 'Defines user experience and product requirements',
-    prefix: 'pm'
+    prefix: 'pm',
+    canCreatePhases: true
   },
   {
     id: 2, 
@@ -164,19 +165,29 @@ export const CORE_ROLE_TEMPLATES = [
     id: 9,
     name: 'director-assistant',
     description: 'Provides comprehensive assistance to the human director with communication, coordination, and administrative tasks',
-    prefix: 'da'
+    prefix: 'da',
+    isAssistantToHumanDirector: true
   },
   {
     id: 10,
     name: 'system-architect',
     description: 'Designs system architecture and creates technical task breakdowns',
-    prefix: 'sa'
+    prefix: 'sa',
+    canCreatePhases: true
   },
   {
     id: 11,
+    name: 'it-administrator',
+    description: 'Educates agents on platform usage, enforces best practices, manages housekeeping, and maintains project organization',
+    prefix: 'it',
+    isItAdministrator: true
+  },
+  {
+    id: 12,
     name: 'human-director',
     description: 'Strategic leader and ultimate decision-maker overseeing all AI agents and project activities',
-    prefix: 'hd'
+    prefix: 'hd',
+    isHumanDirector: true
   }
 ];
 
@@ -207,13 +218,14 @@ export const CORE_SQUAD_ROLE_ASSIGNMENTS = [
   { squadTemplateId: 'leadership', roleName: 'lead-developer' },
   { squadTemplateId: 'leadership', roleName: 'system-architect' },
   
-  // Core Team Squad: Developer roles
+  // Core Team Squad: Developer roles + IT Administrator
   { squadTemplateId: 'core_team', roleName: 'backend-developer' },
   { squadTemplateId: 'core_team', roleName: 'frontend-developer' },
   { squadTemplateId: 'core_team', roleName: 'ai-developer' },
   { squadTemplateId: 'core_team', roleName: 'ux-expert' },
   { squadTemplateId: 'core_team', roleName: 'graphic-designer' },
   { squadTemplateId: 'core_team', roleName: 'technical-qa' },
+  { squadTemplateId: 'core_team', roleName: 'it-administrator' },
   
   // Visual Testers Squad: Visual-focused roles
   { squadTemplateId: 'visual_testers', roleName: 'ux-expert' },
@@ -239,6 +251,7 @@ export const CORE_CHANNEL_ROLE_ASSIGNMENTS = [
   { channelTemplateId: 'general', roleName: 'technical-qa' },
   { channelTemplateId: 'general', roleName: 'director-assistant' },
   { channelTemplateId: 'general', roleName: 'system-architect' },
+  { channelTemplateId: 'general', roleName: 'it-administrator' },
 
   // Blockers channel - all roles can report blockers
   { channelTemplateId: 'blockers', roleName: 'product-manager' },
@@ -251,6 +264,7 @@ export const CORE_CHANNEL_ROLE_ASSIGNMENTS = [
   { channelTemplateId: 'blockers', roleName: 'technical-qa' },
   { channelTemplateId: 'blockers', roleName: 'director-assistant' },
   { channelTemplateId: 'blockers', roleName: 'system-architect' },
+  { channelTemplateId: 'blockers', roleName: 'it-administrator' },
 
   // Fun channel - all roles can participate
   { channelTemplateId: 'fun', roleName: 'product-manager' },
@@ -263,11 +277,13 @@ export const CORE_CHANNEL_ROLE_ASSIGNMENTS = [
   { channelTemplateId: 'fun', roleName: 'technical-qa' },
   { channelTemplateId: 'fun', roleName: 'director-assistant' },
   { channelTemplateId: 'fun', roleName: 'system-architect' },
+  { channelTemplateId: 'fun', roleName: 'it-administrator' },
 
-  // Director-comms channel - PM, SA, Lead only
+  // Director-comms channel - PM, SA, Lead, IT Admin (for platform issues)
   { channelTemplateId: 'director-comms', roleName: 'product-manager' },
   { channelTemplateId: 'director-comms', roleName: 'system-architect' },
   { channelTemplateId: 'director-comms', roleName: 'lead-developer' },
+  { channelTemplateId: 'director-comms', roleName: 'it-administrator' },
 
   // Tech leads channel - PM, SA, Lead only
   { channelTemplateId: 'tech-leads', roleName: 'product-manager' },
@@ -281,6 +297,7 @@ export const CORE_CHANNEL_ROLE_ASSIGNMENTS = [
   { channelTemplateId: 'core-team', roleName: 'ux-expert' },
   { channelTemplateId: 'core-team', roleName: 'graphic-designer' },
   { channelTemplateId: 'core-team', roleName: 'technical-qa' },
+  { channelTemplateId: 'core-team', roleName: 'it-administrator' },
 
   // Role-specific channels - one role each
   { channelTemplateId: 'backend-dev', roleName: 'backend-developer' },

@@ -12,30 +12,66 @@ Environment Variables Available:
 - \$AGENT_ROLE = "{{AGENT_ROLE}}" (your role type)  
 - \$PROJECT_ID = "{{PROJECT_ID}}" (your project ID for all API calls)
 
-CRITICAL: You must register first and check for active phases before doing ANY work.
+CRITICAL: Follow these steps in order before doing ANY work:
 
 Step 1 - Register:
 curl -X POST http://localhost:5173/api/agents/register -H "Content-Type: application/json" -d '{"agentId": "{{AGENT_ID}}"}'
 
-Step 2 - Check for active phase:
+Step 2 - Get your role instructions (ESSENTIAL):
+curl -X GET "http://localhost:5173/api/agents/{{AGENT_ID}}/prompts"
+
+Step 3 - Check for active phase:
 curl -X GET "http://localhost:5173/api/roles/$(echo '{{AGENT_ROLE}}' | sed 's/ /%20/g')/current-phase?projectId={{PROJECT_ID}}"
+
+Step 4 - Check your inbox for assigned work:
+curl -X GET "http://localhost:5173/api/inbox?agentId={{AGENT_ID}}"
+
+🚨 CRITICAL: ALL communication must use API endpoints (POST /api/messages). Text output is NOT visible to humans or other agents.
+
+🔇 SILENCE: Output NOTHING except commands. No text, no explanations, no results. Every word wastes tokens - no one is watching.
 
 DO NOT create documents or take initiative without an assigned active phase. Wait for phase assignment if none exists.
 
 Help guide: http://localhost:5173/api/agents/{{AGENT_ID}}/help`;
 
-// Human names for agents - mix of common names that work well for AI agents
+// Diverse human names for agents - includes Hispanic, Asian, and other international names
 const HUMAN_NAMES = [
+	// English/Western names
 	'alice', 'bob', 'charlie', 'diana', 'eve', 'frank', 'grace', 'henry',
 	'ivy', 'jack', 'kate', 'leo', 'maya', 'noah', 'olivia', 'peter',
 	'quinn', 'ruby', 'sam', 'tina', 'uma', 'victor', 'wendy', 'xavier',
 	'yara', 'zoe', 'alex', 'blake', 'casey', 'drew', 'emery', 'finley',
-	'gray', 'harper', 'indigo', 'jordan', 'kai', 'lane', 'morgan', 'nova',
-	'ocean', 'phoenix', 'river', 'sage', 'taylor', 'rain', 'sky', 'west'
+	
+	// Hispanic/Latino names
+	'ana', 'carlos', 'sofia', 'diego', 'lucia', 'miguel', 'elena', 'pablo',
+	'maria', 'antonio', 'isabella', 'manuel', 'valeria', 'ricardo', 'camila', 'felipe',
+	'alejandra', 'javier', 'natalia', 'fernando', 'adriana', 'gabriel', 'daniela', 'eduardo',
+	'patricia', 'jorge', 'andrea', 'rafael', 'monica', 'sergio', 'carmen', 'oscar',
+	
+	// Asian names (East Asian, South Asian, Southeast Asian)
+	'akira', 'yuki', 'kenji', 'sakura', 'takeshi', 'mai', 'hiroshi', 'emi',
+	'chen', 'mei', 'kai', 'lin', 'wei', 'yan', 'jun', 'xin',
+	'arjun', 'priya', 'ravi', 'anita', 'vikram', 'sita', 'raj', 'kavita',
+	'kim', 'park', 'lee', 'cho', 'jung', 'min', 'sung', 'hye',
+	'nguyen', 'tran', 'pham', 'le', 'hoang', 'vu', 'dao', 'bui',
+	
+	// Middle Eastern/Arabic names
+	'omar', 'fatima', 'hassan', 'aisha', 'ahmed', 'zara', 'ali', 'layla',
+	'nadia', 'samir', 'dina', 'ameer', 'sara', 'tariq', 'rana', 'khalid',
+	
+	// African names
+	'kemi', 'taiwo', 'ade', 'ngozi', 'kwame', 'ama', 'kofi', 'akosua',
+	'amara', 'zuri', 'jengo', 'nia', 'kesi', 'tau', 'ife', 'asante',
+	
+	// Additional international names
+	'raja', 'noor', 'soren', 'astrid', 'lars', 'freya', 'enzo', 'giulia',
+	'pierre', 'marie', 'hans', 'greta', 'ivan', 'anya', 'dmitri', 'nina'
 ];
 
-function getRandomHumanName() {
-	return HUMAN_NAMES[Math.floor(Math.random() * HUMAN_NAMES.length)];
+function generateAgentId(rolePrefix) {
+	const humanName = HUMAN_NAMES[Math.floor(Math.random() * HUMAN_NAMES.length)];
+	const randomSuffix = Math.floor(1000 + Math.random() * 9000); // 4-digit number (1000-9999)
+	return `${rolePrefix}_${humanName}_${randomSuffix}`;
 }
 
 export async function POST({ request }) {
@@ -59,14 +95,13 @@ export async function POST({ request }) {
 		const rolePrefix = roleTemplate?.prefix || roleType.toLowerCase().replace(/[^a-z]/g, '').substring(0,2);
 		console.log(`📝 Using prefix: ${rolePrefix} for role: ${roleType}`);
 		
-		// Generate agent ID with human name, ensuring uniqueness
+		// Generate agent ID with diverse name and 4-digit suffix for uniqueness
 		let agentId;
 		let attempts = 0;
 		const maxAttempts = 50;
 		
 		do {
-			const humanName = getRandomHumanName();
-			agentId = `${rolePrefix}_${humanName}`;
+			agentId = generateAgentId(rolePrefix);
 			attempts++;
 			
 			// Check if this agent ID already exists
@@ -134,6 +169,9 @@ export async function POST({ request }) {
 				roleType: roleType,
 				model: model,
 				status: 'launching',
+				isItAdministrator: projectRole.isItAdministrator || false,
+				isAssistantToHumanDirector: projectRole.isAssistantToHumanDirector || false,
+				canCreatePhases: projectRole.canCreatePhases || false,
 				tmuxSession: `vcorp-${agentId}`,
 				worktreePath: `${workingDirectory}/agent_workspaces/${agentId}/`,
 			})
@@ -200,6 +238,27 @@ export async function POST({ request }) {
 		}, 500);
 
 		console.log(`✅ Agent ${agentId} launched successfully`);
+
+		// Notify IT Administrator about new agent (brief alert)
+		try {
+			const itNotification = {
+				projectId: parseInt(projectId),
+				channelId: null, // DM
+				body: `New agent launched: ${agentId} (${roleType}). Please welcome and provide brief platform orientation if needed.`,
+				authorAgentId: 'system',
+				assignTo: [{ type: 'role', target: 'it-administrator' }]
+			};
+			
+			await fetch('http://localhost:5174/api/messages', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(itNotification)
+			});
+		} catch (error) {
+			console.log('⚠️ Failed to notify IT Administrator:', error);
+			// Don't fail the launch if notification fails
+		}
+
 		return json({
 			success: true,
 			message: `Agent ${agentId} launched successfully`,

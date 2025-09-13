@@ -11,7 +11,6 @@
 	export let isMessageFullyRead: (message: any) => boolean;
 	export let isMessagePartiallyRead: (message: any) => boolean;
 	export let toggleReadStatusTooltip: (event: MouseEvent, message: any) => void;
-	export let startReply: (message: any) => void;
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
@@ -45,7 +44,6 @@
 							{isMessageFullyRead}
 							{isMessagePartiallyRead}
 							{toggleReadStatusTooltip}
-							{startReply}
 							on:select={handleMessageSelect}
 						/>
 					{/each}

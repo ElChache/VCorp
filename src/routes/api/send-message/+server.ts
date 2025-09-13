@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents, roles, channels, channelRoleAssignments } from '$lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { resolveAssignmentTarget, isHumanDirectorId, getHumanDirectorIdForProject } from '$lib/utils/humanDirectorHelpers';
 
 // POST /api/send-message - Send a message with automatic reading assignments
 export async function POST({ request }) {
@@ -81,20 +82,23 @@ export async function POST({ request }) {
 			}
 		}
 
-		// Map common agent ID aliases to correct values
+		// Resolve human director aliases to actual agent IDs
 		if (assignTo && assignTo.length > 0) {
-			assignTo.forEach(assignment => {
-				if (assignment.type === 'agent') {
-					// Map director aliases to human-director
-					if (['director', 'human', 'human_director'].includes(assignment.target)) {
-						assignment.target = 'human-director';
+			for (let i = 0; i < assignTo.length; i++) {
+				if (assignTo[i].type === 'agent' && ['director', 'human', 'human_director', 'human-director'].includes(assignTo[i].target)) {
+					try {
+						assignTo[i] = await resolveAssignmentTarget(assignTo[i], parsedProjectId);
+					} catch (error) {
+						return json({ 
+							error: `Cannot assign to human director: ${error.message}`
+						}, { status: 400 });
 					}
 				}
-			});
+			}
 		}
 
 		// Validate author agent exists (if provided)
-		if (authorAgentId && !['director', 'human-director'].includes(authorAgentId)) {
+		if (authorAgentId && !isHumanDirectorId(authorAgentId)) {
 			if (typeof authorAgentId !== 'string' || authorAgentId.trim() === '') {
 				return json({ 
 					error: 'Invalid authorAgentId: must be a non-empty string'
@@ -120,9 +124,13 @@ export async function POST({ request }) {
 			}
 		}
 
-		// Check if any assignments target the human director (after mapping)
+		// Check if any assignments target the human director (after resolution)
+		const humanDirectorId = await getHumanDirectorIdForProject(parsedProjectId);
 		const hasDirectorAssignment = assignTo && assignTo.some(assignment => 
-			assignment.type === 'agent' && assignment.target === 'human-director'
+			assignment.type === 'agent' && (
+				assignment.target === humanDirectorId ||
+				isHumanDirectorId(assignment.target)
+			)
 		);
 
 		// If targeting human director, ensure this is a DM (no channelId)
@@ -220,6 +228,24 @@ export async function POST({ request }) {
 			})
 			.returning();
 
+		// Helper function to resolve agent ID
+		const resolveAgentId = async (target: string, type: string): Promise<string> => {
+			if (type === 'agent' && target === 'human-director') {
+				// Find the actual human director agent ID for this project
+				const [humanDirector] = await db
+					.select({ id: agents.id })
+					.from(agents)
+					.where(and(
+						eq(agents.projectId, parsedProjectId),
+						eq(agents.isHumanDirector, true)
+					))
+					.limit(1);
+				
+				return humanDirector?.id || target; // Fallback to original if not found
+			}
+			return target;
+		};
+
 		// Create reading assignments
 		let createdAssignments = [];
 		let assignmentSummary = [];
@@ -227,8 +253,10 @@ export async function POST({ request }) {
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
 			const assignmentPromises = assignTo.map(async (assignment) => {
+				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
+				
 				// Skip creating assignment if the author is assigning to themselves
-				if (assignment.type === 'agent' && assignment.target === authorAgentId) {
+				if (assignment.type === 'agent' && resolvedTarget === authorAgentId) {
 					return null; // Skip this assignment
 				}
 				
@@ -237,7 +265,7 @@ export async function POST({ request }) {
 					.values({
 						contentId: newMessage.id,
 						assignedToType: assignment.type,
-						assignedTo: assignment.target,
+						assignedTo: resolvedTarget,
 					})
 					.returning();
 			});

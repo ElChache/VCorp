@@ -1,11 +1,14 @@
 <script>
 	import { onMount } from 'svelte';
+	import { agents as agentsStore, contentActions, currentProjectId } from '$lib/stores/contentStore';
 	
 	export let selectedProject = null;
 	
 	let roles = [];
-	let agents = [];
 	let selectedAgent = null;
+	
+	// Subscribe to agents store instead of manual API calls
+	$: agents = $agentsStore.filter(agent => !agent.isHumanDirector);
 	let selectedRoleType = '';
 	let selectedModel = 'sonnet';
 	let showStartupPromptEditor = false;
@@ -17,13 +20,21 @@
 	onMount(async () => {
 		if (selectedProject) {
 			await loadRoles();
-			await loadAgentsData();
+			// Set project context for the store if not already set
+			if ($currentProjectId !== selectedProject.id) {
+				contentActions.setProject(selectedProject.id);
+				await contentActions.loadAgents(selectedProject.id);
+			}
 		}
 	});
 
 	$: if (selectedProject) {
 		loadRoles();
-		loadAgentsData();
+		// Ensure store has project context and agents data
+		if ($currentProjectId !== selectedProject.id) {
+			contentActions.setProject(selectedProject.id);
+			contentActions.loadAgents(selectedProject.id);
+		}
 	}
 
 	// Agent management functions
@@ -53,7 +64,7 @@
 				console.log('Agent launched successfully');
 				// Wait a moment for agent to potentially register, then reload
 				setTimeout(async () => {
-					await loadAgentsData();
+					await contentActions.loadAgents(selectedProject.id);
 				}, 2000);
 			} else {
 				const error = await response.json();
@@ -86,7 +97,7 @@
 			
 			if (response.ok) {
 				console.log('Agent sent home successfully');
-				await loadAgentsData();
+				await contentActions.loadAgents(selectedProject.id);
 			} else {
 				const error = await response.json();
 				console.error('Failed to send agent home:', error.error);
@@ -118,7 +129,7 @@
 			
 			if (response.ok) {
 				console.log('Agent forced home successfully');
-				await loadAgentsData();
+				await contentActions.loadAgents(selectedProject.id);
 			} else {
 				const error = await response.json();
 				console.error('Failed to force agent home:', error.error);
@@ -151,7 +162,7 @@
 			
 			if (response.ok) {
 				console.log('Agent brought back successfully');
-				await loadAgentsData();
+				await contentActions.loadAgents(selectedProject.id);
 			} else {
 				const error = await response.json();
 				console.error('Failed to bring agent back:', error.error);
@@ -185,7 +196,7 @@
 			if (response.ok) {
 				console.log('Agent killed successfully');
 				selectedAgent = null;
-				await loadAgentsData();
+				await contentActions.loadAgents(selectedProject.id);
 			} else {
 				const error = await response.json();
 				console.error('Failed to kill agent:', error.error);
@@ -197,30 +208,9 @@
 		}
 	}
 
-	async function loadAgentsData() {
-		if (!selectedProject) {
-			agents = [];
-			return;
-		}
-
-		try {
-			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const allAgents = await response.json();
-				// Filter out human-director - they don't need to be "sent home"! 😄
-				agents = allAgents.filter(agent => agent.id !== 'human-director');
-				// Update selectedAgent if it no longer exists
-				if (selectedAgent && !agents.find(a => a.id === selectedAgent.id)) {
-					selectedAgent = null;
-				}
-			} else {
-				console.error('Failed to load agents');
-				agents = [];
-			}
-		} catch (error) {
-			console.error('Error loading agents:', error);
-			agents = [];
-		}
+	// Update selectedAgent if it no longer exists
+	$: if (selectedAgent && !agents.find(a => a.id === selectedAgent.id)) {
+		selectedAgent = null;
 	}
 
 	async function loadRoles() {
@@ -232,7 +222,9 @@
 		try {
 			const response = await fetch(`/api/roles?projectId=${selectedProject.id}`);
 			if (response.ok) {
-				roles = await response.json();
+				const allRoles = await response.json();
+				// Filter out human director roles - they should be automatically created
+				roles = allRoles.filter(role => !role.isHumanDirector);
 			} else {
 				console.error('Failed to load roles');
 				roles = [];

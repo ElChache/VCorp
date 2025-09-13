@@ -1,1 +1,0 @@
-ALTER TABLE "channel_templates" ADD COLUMN "channel_id" text NOT NULL;

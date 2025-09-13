@@ -13,8 +13,8 @@ Use channels marked as "Director Communication" (isForHumanDirector=true) for:
 - ❓ **Strategic Decisions**: When you need direction on architectural choices or business priorities
 - 🎯 **Goal Clarification**: When requirements are ambiguous or conflicting
 
-## Method 2: Direct Messages to "human-director"
-Send DM to agent ID "human-director" for:
+## Method 2: Direct Messages to Human Director
+Use POST /api/projects/$PROJECT_ID/message-director for:
 - 💬 **Quick Questions**: Clarification on specific tasks or requirements
 - 📢 **FYI Updates**: Progress updates that don't require immediate attention
 - 🤝 **Collaboration Updates**: Cross-team coordination or dependency notifications
@@ -50,7 +50,7 @@ Action Needed: Immediate guidance on rollback vs. continuation strategy
 Next Steps: Awaiting direction before proceeding with any changes
 \`\`\`
 
-**Medium Priority (DM to human-director):**
+**Medium Priority (Message Director):**
 \`\`\`
 Subject: API Rate Limiting Strategy Decision
 Context: Implementing user management endpoints

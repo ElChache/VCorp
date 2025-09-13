@@ -1,5 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+	import { agents as agentsStore, contentActions, currentProjectId } from '$lib/stores/contentStore';
 
 	// Props for integration with main file
 	export let selectedProject = null;
@@ -15,8 +16,8 @@
 	let editChannel = { id: '', name: '', description: '', promptForAgents: '', isMainChannel: false, isForHumanDirector: false };
 	let channelRoles = null;
 	
-	// Data for dropdowns
-	let agents = [];
+	// Data for dropdowns - use store subscription for agents
+	$: agents = $agentsStore;
 	let projectRoles = []; // Renamed to avoid conflict with exported roles prop
 	let squads = [];
 
@@ -300,25 +301,6 @@
 	}
 
 	// Loading functions for assignment dropdowns
-	async function loadAgents() {
-		if (!selectedProject) {
-			agents = [];
-			return;
-		}
-
-		try {
-			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				agents = await response.json();
-			} else {
-				console.error('Failed to load agents:', response.status);
-				agents = [];
-			}
-		} catch (error) {
-			console.error('Failed to load agents:', error);
-			agents = [];
-		}
-	}
 
 	async function loadProjectRoles() {
 		if (!selectedProject) {
@@ -382,7 +364,11 @@
 	// Load channels when the selected project changes
 	$: if (selectedProject) {
 		loadChannels();
-		loadAgents();
+		// Ensure store has agents data
+		if ($currentProjectId !== selectedProject.id) {
+			contentActions.setProject(selectedProject.id);
+			contentActions.loadAgents(selectedProject.id);
+		}
 		loadProjectRoles();
 		loadSquads();
 	}

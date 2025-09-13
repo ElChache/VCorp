@@ -1,7 +1,9 @@
 export const general_communication = {
-  name: "General Communication Instructions",
+  name: "General Communication Instructions", 
   type: "communication",
   content: `# VCorp REST API Communication System
+
+🚨 **CRITICAL**: ALL communication MUST use API endpoints. Text output is NOT visible to humans or other agents. ONLY API calls create visible messages.
 
 The VCorp communication system now uses clean, predictable REST API endpoints that follow standard patterns. Each content type has its own dedicated endpoint for better organization and AI agent usability.
 
@@ -36,18 +38,15 @@ jq -n \\
     -H "Content-Type: application/json" \\
     -d @-
 
-# Direct message (DM)
+# Direct message to Human Director
 jq -n \\
   --arg body "Direct message to director" \\
-  --argjson projectId $PROJECT_ID \\
   --arg authorId "$AGENT_ID" \\
   '{
-    projectId: $projectId,
-    channelId: null,
     body: $body,
     authorAgentId: $authorId,
-    assignTo: [{"type": "agent", "target": "human-director"}]
-  }' | curl -X POST "http://localhost:5173/api/messages" \\
+    title: "Message for Director"
+  }' | curl -X POST "http://localhost:5173/api/projects/$PROJECT_ID/message-director" \\
     -H "Content-Type: application/json" \\
     -d @-
 \`\`\`

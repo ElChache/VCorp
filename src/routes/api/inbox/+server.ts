@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles } from '$lib/db/schema';
 import { eq, or, and, isNull } from 'drizzle-orm';
+import { isHumanDirectorId } from '$lib/utils/humanDirectorHelpers';
 
 // GET /api/inbox?agentId=be_001 - Get all messages assigned to an agent
 export async function GET({ url }) {
@@ -12,32 +13,28 @@ export async function GET({ url }) {
 			return json({ error: 'Agent ID is required' }, { status: 400 });
 		}
 
-		// Handle special "director" agent ID for human director (map to human-director)
-		let agent;
-		if (agentId === 'director' || agentId === 'human-director') {
-			agent = {
-				id: 'human-director',
-				roleType: 'Human Director',
-				squadId: null,
-				projectId: null // Director handles all projects
-			};
-		} else {
-			// Verify regular agent exists and get their info
-			const [foundAgent] = await db
-				.select({
-					id: agents.id,
-					roleType: agents.roleType,
-					squadId: agents.squadId,
-					projectId: agents.projectId,
-				})
-				.from(agents)
-				.where(eq(agents.id, agentId))
-				.limit(1);
+		// Handle legacy director IDs by rejecting them - they should use actual agent IDs
+		if (isHumanDirectorId(agentId)) {
+			return json({ 
+				error: 'Legacy director IDs are not supported. Use the actual human director agent ID for this project.' 
+			}, { status: 400 });
+		}
 
-			if (!foundAgent) {
-				return json({ error: 'Agent not found' }, { status: 404 });
-			}
-			agent = foundAgent;
+		// Verify agent exists and get their info
+		const [agent] = await db
+			.select({
+				id: agents.id,
+				roleType: agents.roleType,
+				squadId: agents.squadId,
+				projectId: agents.projectId,
+				isHumanDirector: agents.isHumanDirector
+			})
+			.from(agents)
+			.where(eq(agents.id, agentId))
+			.limit(1);
+
+		if (!agent) {
+			return json({ error: 'Agent not found' }, { status: 404 });
 		}
 
 		// Get all reading assignments that target this agent:

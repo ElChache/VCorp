@@ -2,14 +2,17 @@
 	import { createEventDispatcher } from 'svelte';
 
 	// Props
-	export let commsViewMode: 'communications' | 'direct-messages' = 'communications';
+	export let commsViewMode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases' = 'communications';
 	export let channelUnreadCount: number = 0;
 	export let dmUnreadCount: number = 0;
+	export let documentsUnreadCount: number = 0;
+	export let ticketsUnreadCount: number = 0;
+	export let phasesUnreadCount: number = 0;
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
 
-	function handleModeChange(mode: 'communications' | 'direct-messages') {
+	function handleModeChange(mode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases') {
 		dispatch('modeChange', mode);
 	}
 </script>
@@ -36,6 +39,42 @@
 			📩 Direct Messages
 			{#if dmUnreadCount > 0}
 				<span class="unread-badge nav-badge">{dmUnreadCount}</span>
+			{/if}
+		</span>
+	</button>
+	<button 
+		class="comms-nav-btn" 
+		class:active={commsViewMode === 'documents'}
+		on:click={() => handleModeChange('documents')}
+	>
+		<span class="nav-btn-content">
+			📄 Documents
+			{#if documentsUnreadCount > 0}
+				<span class="unread-badge nav-badge">{documentsUnreadCount}</span>
+			{/if}
+		</span>
+	</button>
+	<button 
+		class="comms-nav-btn" 
+		class:active={commsViewMode === 'tickets'}
+		on:click={() => handleModeChange('tickets')}
+	>
+		<span class="nav-btn-content">
+			🎫 Tickets
+			{#if ticketsUnreadCount > 0}
+				<span class="unread-badge nav-badge">{ticketsUnreadCount}</span>
+			{/if}
+		</span>
+	</button>
+	<button 
+		class="comms-nav-btn" 
+		class:active={commsViewMode === 'phases'}
+		on:click={() => handleModeChange('phases')}
+	>
+		<span class="nav-btn-content">
+			📋 Phases
+			{#if phasesUnreadCount > 0}
+				<span class="unread-badge nav-badge">{phasesUnreadCount}</span>
 			{/if}
 		</span>
 	</button>

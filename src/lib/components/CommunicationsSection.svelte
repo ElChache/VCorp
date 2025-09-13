@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { marked } from 'marked';
 	import { contentPollingService, contentPollingStore } from '$lib/services/ContentPollingService';
+	import { contentStore, channels, agents, roleTypes, squads, channelMessages, directMessages, tickets, messagesForChannel, dmConversationWith, isLoading, error, contentActions } from '$lib/stores/contentStore';
 	import CommunicationsNavigation from './CommunicationsNavigation.svelte';
 	import ChannelItem from './ChannelItem.svelte';
 	import DMAgentItem from './DMAgentItem.svelte';
@@ -12,7 +13,11 @@
 	import ChannelMessageList from './ChannelMessageList.svelte';
 	import ThreadView from './ThreadView.svelte';
 	import SendMessageDialog from './SendMessageDialog.svelte';
+	import DocumentsSection from './DocumentsSection.svelte';
+	import TicketsSection from './TicketsSection.svelte';
+	import PhasesSection from './PhasesSection.svelte';
 	import { toggleReadStatusTooltip } from '$lib/utils/tooltipManager';
+	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 	import { 
 		isUnreadByHumanDirector, 
 		isMessageFullyRead, 
@@ -22,13 +27,12 @@
 		markMessageAsRead, 
 		formatMessageTime 
 	} from '$lib/utils/messageOperations';
-	import { DataManager, type DataManagerCallbacks } from '$lib/utils/dataManager';
 
 	// Props
 	export let selectedProject: any = null;
 
 	// Communications Center variables
-	let commsViewMode: 'communications' | 'direct-messages' = 'communications';
+	let commsViewMode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases' = 'communications';
 	let replyContent = '';
 
 	// Send Message variables
@@ -36,7 +40,6 @@
 
 	// Communications variables
 	let selectedChannel: any = null;
-	let channelMessages: any[] = [];
 	let newMessageContent = '';
 	let replyingToMessage: any = null;
 	
@@ -46,18 +49,47 @@
 	let threadViewRef: any;
 
 	// Direct Messages variables
-	let dmAgents: any[] = [];
 	let selectedDMAgent: any = null;
-	let dmMessages: any[] = [];
 	let newDMContent = '';
 
-	// Channels for dropdown
-	let channels: any[] = [];
+	// Reactive data from content store
+	$: storeChannels = $channels;
+	$: storeAgents = $agents;
+	$: storeRoleTypes = $roleTypes;
+	$: storeSquads = $squads;
+	$: storeDirectMessages = $directMessages;
+	$: storeTickets = $tickets;
 	
-	// Data for dropdowns
-	let agents: any[] = [];
-	let roleTypes: any[] = [];
-	let squads: any[] = [];
+	// Filtered channel messages for selected channel
+	$: selectedChannelMessagesStore = selectedChannel ? messagesForChannel(selectedChannel.id) : null;
+	$: storeChannelMessages = selectedChannelMessagesStore ? $selectedChannelMessagesStore : [];
+	
+	// Enhance channels with message counts using all channel messages data
+	$: allChannelMessages = $channelMessages;
+	$: enhancedChannels = storeChannels.map(channel => {
+		// Filter messages for this specific channel
+		const channelMessages = allChannelMessages.filter(msg => msg.channelId === channel.id);
+		const messageCount = channelMessages.length;
+		
+		// Calculate unread count for human-director
+		const unreadCount = channelMessages.filter(msg => 
+			hasUnreadAssignmentForHumanDirector(msg)
+		).length;
+		
+		return {
+			...channel,
+			messageCount,
+			unreadCount
+		};
+	});
+	// Create reactive DM messages store for selected agent
+	$: dmMessagesStore = selectedDMAgent ? dmConversationWith(selectedDMAgent.id) : null;
+	$: storeDMMessages = dmMessagesStore ? $dmMessagesStore : [];
+	$: storeIsLoading = $isLoading;
+	$: storeError = $error;
+	
+	// Show all agents in DM list (excluding human director)
+	$: dmAgents = storeAgents.filter(agent => !agent.isHumanDirector);
 
 	// Event dispatcher for parent communication
 	import { createEventDispatcher } from 'svelte';
@@ -67,29 +99,25 @@
 	let contentUpdatesListener: any = null;
 	$: pollingState = $contentPollingStore;
 
-	// Unread message counts for badges
-	let totalUnreadCount = 0;
-	let channelUnreadCount = 0;
-	let dmUnreadCount = 0;
+	// Unread message counts for badges - calculated reactively
+	$: channelUnreadCount = allChannelMessages.filter(msg => 
+		(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+	).length;
+	
+	$: dmUnreadCount = storeDirectMessages.filter(msg => 
+		(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+	).length;
+	
+	// TODO: Implement documents and tickets unread counts when those systems are added
+	let documentsUnreadCount = 0;
+	let ticketsUnreadCount = 0;
+	
+	$: totalUnreadCount = channelUnreadCount + dmUnreadCount + documentsUnreadCount + ticketsUnreadCount;
 
-	// Create DataManager instance with callbacks
-	const dataManager = new DataManager({
-		updateChannelMessages: (messages) => { channelMessages = messages; },
-		updateDMMessages: (messages) => { dmMessages = messages; },
-		updateChannels: (channelList) => { channels = channelList; },
-		updateDMAgents: (agentList) => { dmAgents = agentList; },
-		updateAgents: (agentList) => { agents = agentList; },
-		updateRoleTypes: (roleTypeList) => { roleTypes = roleTypeList; },
-		updateSquads: (squadList) => { squads = squadList; },
-		updateUnreadCounts: (counts) => {
-			totalUnreadCount = counts.total;
-			channelUnreadCount = counts.channel;
-			dmUnreadCount = counts.dm;
-		}
-	});
+	// Content store provides centralized data management
 
 	// Handler for navigation mode changes
-	function handleModeChange(event: CustomEvent<'communications' | 'direct-messages'>) {
+	function handleModeChange(event: CustomEvent<'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases'>) {
 		commsViewMode = event.detail;
 	}
 
@@ -142,8 +170,7 @@
 
 	function onChannelSelect(channel) {
 		selectedChannel = channel;
-		dataManager.setSelectedChannel(channel);
-		dataManager.loadChannelMessages(channel);
+		// Channel messages are available via reactive store
 	}
 
 
@@ -170,8 +197,7 @@
 
 	function onDMAgentSelect(agent) {
 		selectedDMAgent = agent;
-		dataManager.setSelectedDMAgent(agent);
-		dataManager.loadDMMessages(agent.id);
+		// DM messages are available via reactive store dmConversationWith
 	}
 
 	async function sendDMMessage() {
@@ -183,7 +209,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					projectId: selectedProject.id,
-					authorAgentId: 'human-director',
+					authorAgentId: getHumanDirectorAgentId(),
 					body: newDMContent,
 					channelId: null, // This makes it a DM
 					assignTo: [
@@ -197,12 +223,7 @@
 
 			if (response.ok) {
 				newDMContent = '';
-				// Add a small delay to ensure the message is saved before reloading
-				setTimeout(async () => {
-					await dataManager.loadDMMessages(selectedDMAgent.id);
-					await dataManager.loadDMAgents(); // Refresh agent list to update timestamps
-					// Polling service will automatically pick up new data
-				}, 100);
+				// ContentPollingService will automatically pick up new data
 			} else {
 				console.error('Failed to send DM:', response.status);
 			}
@@ -226,10 +247,10 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					projectId: selectedProject.id,
-					authorAgentId: 'human-director',
+					authorAgentId: getHumanDirectorAgentId(),
 					body: replyContent,
 					parentContentId: messageId,
-					assignTo: message?.authorAgentId && message.authorAgentId !== 'human-director' ? [
+					assignTo: message?.authorAgentId && !isMessageFromHumanDirector(message) ? [
 						{
 							type: 'agent',
 							target: message.authorAgentId
@@ -247,9 +268,7 @@
 				// Handle inline reply
 				else if (replyingToMessage) {
 					cancelReply(); // Clear inline reply state
-					if (selectedChannel) {
-						await dataManager.loadChannelMessages(selectedChannel); // Refresh channel messages
-					}
+					// ContentPollingService will automatically pick up new data
 				}
 			} else {
 				console.error('Failed to send reply:', response.status);
@@ -276,7 +295,7 @@
 		try {
 			const requestBody = {
 				projectId: selectedProject.id,
-				authorAgentId: 'human-director',
+				authorAgentId: getHumanDirectorAgentId(),
 				title: newMessage.title || null,
 				body: newMessage.body,
 				channelId: newMessage.channelId || null,
@@ -297,22 +316,16 @@
 			// Close dialog and refresh data
 			showSendMessageDialog = false;
 			
-			// Add a small delay to ensure the message is saved before reloading
-			setTimeout(async () => {
-				await dataManager.loadDMAgents(); // Refresh agent list to show the new recipient
-				
-				// If a DM agent was selected from the assignTo, refresh their conversation
-				const firstAssignment = assignTo[0];
-				if (firstAssignment && firstAssignment.type === 'agent') {
-					// Find the agent in the list and select them
-					const targetAgent = dmAgents.find(agent => agent.id === firstAssignment.target);
-					if (targetAgent) {
-						selectedDMAgent = targetAgent;
-						dataManager.setSelectedDMAgent(targetAgent);
-						await dataManager.loadDMMessages(targetAgent.id);
-					}
+			// If a DM agent was selected from the assignTo, set as selected
+			const firstAssignment = assignTo[0];
+			if (firstAssignment && firstAssignment.type === 'agent') {
+				// Find the agent in the list and select them
+				const targetAgent = storeAgents.find(agent => agent.id === firstAssignment.target);
+				if (targetAgent) {
+					selectedDMAgent = targetAgent;
 				}
-			}, 100);
+			}
+			// ContentPollingService will automatically pick up new data
 		} catch (error) {
 			console.error('Failed to send message:', error);
 		}
@@ -325,7 +338,7 @@
 		try {
 			const requestBody = {
 				projectId: selectedProject.id,
-				authorAgentId: 'human-director',
+				authorAgentId: getHumanDirectorAgentId(),
 				body: newMessageContent,
 				channelId: selectedChannel?.id || null
 			};
@@ -343,9 +356,7 @@
 
 			// Clear the channel input and reload channel messages
 			newMessageContent = '';
-			if (selectedChannel) {
-				await dataManager.loadChannelMessages(selectedChannel);
-			}
+			// ContentPollingService will automatically pick up new data
 		} catch (error) {
 			console.error('Failed to send message:', error);
 		}
@@ -366,16 +377,8 @@
 
 	// Load data when project changes
 	$: if (selectedProject) {
-		// Set project context in DataManager
-		dataManager.setProject(selectedProject);
-		
-		// Load all data through DataManager
-		dataManager.loadChannels();
-		dataManager.loadAgents();
-		dataManager.loadRoleTypes();
-		dataManager.loadSquads();
-		dataManager.loadDMAgents();
-		dataManager.loadUnreadCounts();
+		// Set project context in content store and load content
+		contentActions.loadContent(selectedProject.id);
 		startPolling(); // Start real-time polling for the new project
 	}
 
@@ -384,7 +387,7 @@
 		// Set up event listener for content updates
 		contentUpdatesListener = (event: CustomEvent) => {
 			const { updates } = event.detail;
-			dataManager.handleContentUpdates(updates);
+			// Content store is automatically updated by ContentPollingService
 			
 			// Update thread replies if we have a selected thread message
 			if (threadViewRef) {
@@ -417,6 +420,9 @@
 		{commsViewMode}
 		{channelUnreadCount}
 		{dmUnreadCount}
+		{documentsUnreadCount}
+		{ticketsUnreadCount}
+		phasesUnreadCount={0}
 		on:modeChange={handleModeChange}
 	/>
 
@@ -426,7 +432,7 @@
 			<div class="communications-layout">
 				<!-- Column 1: Channels List (Fixed width) -->
 				<ChannelList 
-					{channels}
+					channels={enhancedChannels}
 					{selectedChannel}
 					on:channelSelect={handleChannelSelect}
 				/>
@@ -435,14 +441,13 @@
 				<div class="messages-viewer">
 					<ChannelMessageList 
 						{selectedChannel}
-						{channelMessages}
+						channelMessages={storeChannelMessages}
 						{selectedThreadMessage}
 						bind:newMessageContent
 						{formatMessageTime}
 						{isMessageFullyRead}
 						{isMessagePartiallyRead}
 						{toggleReadStatusTooltip}
-						{startReply}
 						on:messageSelect={(e) => onMessageSelect(e.detail)}
 						on:sendMessage={sendMessage}
 					/>
@@ -478,7 +483,7 @@
 				<div class="dm-right">
 					<DMMessageList 
 						{selectedDMAgent}
-						{dmMessages}
+						dmMessages={storeDMMessages}
 						{replyingToMessage}
 						bind:replyContent
 						bind:newDMContent
@@ -486,12 +491,18 @@
 						{isMessageFullyRead}
 						{isMessagePartiallyRead}
 						{toggleReadStatusTooltip}
-						{startReply}
+						agents={storeAgents}
 						on:sendReply={handleSendReply}
 						on:cancelReply={handleCancelReply}
 						on:sendDM={handleSendDM}
 					/>
 				</div>			</div>
+		{:else if commsViewMode === 'documents'}
+			<DocumentsSection {selectedProject} />
+		{:else if commsViewMode === 'tickets'}
+			<TicketsSection {selectedProject} />
+		{:else if commsViewMode === 'phases'}
+			<PhasesSection {selectedProject} />
 		{/if}
 	</div>
 </div>
@@ -500,10 +511,10 @@
 <!-- SendMessageDialog Component -->
 <SendMessageDialog 
 	{showSendMessageDialog}
-	{channels}
-	{agents}
-	{roleTypes}
-	{squads}
+	channels={storeChannels}
+	agents={storeAgents}
+	roleTypes={storeRoleTypes}
+	squads={storeSquads}
 	on:sendMessage={handleSendMessageDialogSend}
 	on:close={handleSendMessageDialogClose}
 />
