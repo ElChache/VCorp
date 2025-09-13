@@ -10,29 +10,29 @@
 	import DMAgentList from './DMAgentList.svelte';
 	import DMMessageList from './DMMessageList.svelte';
 	import ChannelMessageList from './ChannelMessageList.svelte';
+	import ThreadView from './ThreadView.svelte';
+	import SendMessageDialog from './SendMessageDialog.svelte';
+	import { toggleReadStatusTooltip } from '$lib/utils/tooltipManager';
+	import { 
+		isUnreadByHumanDirector, 
+		isMessageFullyRead, 
+		isMessagePartiallyRead, 
+		hasUnreadAssignmentForHumanDirector, 
+		markMessageAsReadWithoutRefresh, 
+		markMessageAsRead, 
+		formatMessageTime 
+	} from '$lib/utils/messageOperations';
+	import { DataManager, type DataManagerCallbacks } from '$lib/utils/dataManager';
 
 	// Props
 	export let selectedProject: any = null;
 
 	// Communications Center variables
 	let commsViewMode: 'communications' | 'direct-messages' = 'communications';
-	let selectedMessage: any = null;
-	let showReplyDialog = false;
 	let replyContent = '';
-	let replyToMessageId: number | null = null;
 
 	// Send Message variables
 	let showSendMessageDialog = false;
-	let newMessage = {
-		type: 'message',
-		title: '',
-		body: '',
-		channelId: null as number | null
-	};
-	let messageReadingAssignments: Array<{
-		assignedToType: 'role' | 'agent' | 'squad';
-		assignedTo: string;
-	}> = [];
 
 	// Communications variables
 	let selectedChannel: any = null;
@@ -40,15 +40,10 @@
 	let newMessageContent = '';
 	let replyingToMessage: any = null;
 	
-	// Thread variables for 3-column layout
+	// Thread variables for 3-column layout (now managed by ThreadView component)
 	let selectedThreadMessage: any = null;
-	let threadReplies: any[] = [];
 	let isThreadsColumnOpen: boolean = false;
-	let showAssignmentDialog = false;
-	let messageAssignments: Array<{
-		assignedToType: 'role' | 'agent' | 'squad';
-		assignedTo: string;
-	}> = [];
+	let threadViewRef: any;
 
 	// Direct Messages variables
 	let dmAgents: any[] = [];
@@ -76,6 +71,22 @@
 	let totalUnreadCount = 0;
 	let channelUnreadCount = 0;
 	let dmUnreadCount = 0;
+
+	// Create DataManager instance with callbacks
+	const dataManager = new DataManager({
+		updateChannelMessages: (messages) => { channelMessages = messages; },
+		updateDMMessages: (messages) => { dmMessages = messages; },
+		updateChannels: (channelList) => { channels = channelList; },
+		updateDMAgents: (agentList) => { dmAgents = agentList; },
+		updateAgents: (agentList) => { agents = agentList; },
+		updateRoleTypes: (roleTypeList) => { roleTypes = roleTypeList; },
+		updateSquads: (squadList) => { squads = squadList; },
+		updateUnreadCounts: (counts) => {
+			totalUnreadCount = counts.total;
+			channelUnreadCount = counts.channel;
+			dmUnreadCount = counts.dm;
+		}
+	});
 
 	// Handler for navigation mode changes
 	function handleModeChange(event: CustomEvent<'communications' | 'direct-messages'>) {
@@ -110,335 +121,8 @@
 		sendDMMessage();
 	}
 
-	// Helper function to check if a message is unread by human director
-	function isUnreadByHumanDirector(message: any): boolean {
-		if (!message.readingAssignments) return false;
-		
-		return message.readingAssignments.some((assignment: any) => {
-			// Check if this assignment is for human-director (including old 'director' assignments)
-			const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-			
-			if (!isForHumanDirector) return false;
-			
-			// Check if human-director has read this assignment (including old 'director' reads)
-			const hasRead = assignment.readBy ? assignment.readBy.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director') : 
-			                assignment.reads ? assignment.reads.some((read: any) => read.agentId === 'human-director' || read.agentId === 'director') : false;
-			return !hasRead;
-		});
-	}
 
-	// Helper function to check if a message is fully read by all assigned agents
-	function isMessageFullyRead(message: any): boolean {
-		if (!message.readingAssignments) return false;
-		
-		const assignments = message.readingAssignments;
-		
-		// Filter to only assignments that have targets/should be read
-		const assignmentsToCheck = assignments.filter((assignment: any) => {
-			// Old format: use totalTargets
-			if (assignment.totalTargets !== undefined) {
-				return assignment.totalTargets > 0;
-			}
-			// New format: assume all assignments should be checked (simplified)
-			return true;
-		});
-		
-		if (assignmentsToCheck.length === 0) return false;
-		
-		return assignmentsToCheck.every((assignment: any) => {
-			// Old format: use isFullyRead
-			if (assignment.isFullyRead !== undefined) {
-				return assignment.isFullyRead;
-			}
-			// New format: assignment is fully read if it has reads
-			return assignment.reads && assignment.reads.length > 0;
-		});
-	}
 
-	// Helper function to check if a message is partially read
-	function isMessagePartiallyRead(message: any): boolean {
-		if (!message.readingAssignments) return false;
-		
-		const assignments = message.readingAssignments;
-		
-		// Calculate read status for each assignment based on available data
-		const hasFullyReadAssignments = assignments.some((assignment: any) => {
-			// Check if assignment has the pre-calculated isFullyRead field (old format)
-			if (assignment.isFullyRead !== undefined) {
-				return assignment.isFullyRead;
-			}
-			// For new format, assignment is "fully read" if it has any reads (simplified logic)
-			return assignment.reads && assignment.reads.length > 0;
-		});
-		
-		const hasUnreadAssignments = assignments.some((assignment: any) => {
-			// Check if assignment has the pre-calculated isFullyRead field (old format)
-			if (assignment.isFullyRead !== undefined) {
-				return !assignment.isFullyRead;
-			}
-			// For new format, assignment is "unread" if it has no reads
-			return !assignment.reads || assignment.reads.length === 0;
-		});
-		
-		// Partially read = some assignments are fully read AND some are not fully read
-		return hasFullyReadAssignments && hasUnreadAssignments;
-	}
-
-	// Tooltip variables
-	let tooltip = null;
-	let tooltipTimeout = null;
-
-	// Global click handler to dismiss tooltip when clicking elsewhere
-	function handleGlobalClick(event: MouseEvent) {
-		if (tooltip && !tooltip.contains(event.target as Node)) {
-			// Clicked outside tooltip, hide it
-			document.body.removeChild(tooltip);
-			tooltip = null;
-			document.removeEventListener('click', handleGlobalClick);
-		}
-	}
-
-	// Toggle tooltip with agent read status
-	function toggleReadStatusTooltip(event: MouseEvent, message: any) {
-		// If tooltip is already open, close it
-		if (tooltip) {
-			document.body.removeChild(tooltip);
-			tooltip = null;
-			document.removeEventListener('click', handleGlobalClick);
-			return;
-		}
-
-		// Create tooltip content
-		const tooltipContent = createTooltipContent(message);
-		
-		// Create new tooltip
-		tooltip = document.createElement('div');
-		tooltip.className = 'read-status-tooltip';
-		tooltip.innerHTML = tooltipContent;
-		
-		document.body.appendChild(tooltip);
-		
-		// Position tooltip
-		const rect = (event.target as HTMLElement).getBoundingClientRect();
-		tooltip.style.position = 'fixed';
-		tooltip.style.left = `${rect.left + rect.width + 4}px`;
-		tooltip.style.top = `${rect.top - tooltip.offsetHeight / 2 + rect.height / 2}px`;
-		tooltip.style.zIndex = '1000';
-		tooltip.style.pointerEvents = 'auto';
-		
-		// Ensure tooltip doesn't go off-screen
-		const tooltipRect = tooltip.getBoundingClientRect();
-		if (tooltipRect.right > window.innerWidth) {
-			tooltip.style.left = `${rect.left - tooltip.offsetWidth - 4}px`;
-		}
-		if (tooltipRect.top < 0) {
-			tooltip.style.top = '8px';
-		}
-		
-		// Add global click handler to dismiss when clicking elsewhere
-		setTimeout(() => {
-			document.addEventListener('click', handleGlobalClick);
-		}, 0);
-	}
-
-	// Create tooltip content showing assignment read status
-	function createTooltipContent(message: any): string {
-		if (!message.readingAssignments) return '';
-		
-		let content = '<div class="tooltip-header">Read Status</div>';
-		content += '<div class="assignments-list">';
-		
-		message.readingAssignments.forEach((assignment: any) => {
-			const assignmentTarget = `${assignment.assignedToType}: ${assignment.assignedTo}`;
-			
-			// Determine read status based on available data format
-			let isRead = false;
-			let readDetails = '';
-			
-			if (assignment.isFullyRead !== undefined) {
-				// Old format: use pre-calculated isFullyRead
-				isRead = assignment.isFullyRead;
-				if (isRead && assignment.readBy && assignment.readBy.length > 0) {
-					const readInfo = assignment.readBy[0];
-					readDetails = ` (by ${readInfo.agentId})`;
-				}
-			} else if (assignment.reads) {
-				// New format: check reads array
-				isRead = assignment.reads.length > 0;
-				if (isRead) {
-					const readInfo = assignment.reads[0];
-					readDetails = ` (by ${readInfo.agentId})`;
-				}
-			}
-			
-			const icon = isRead ? '✅' : '❌';
-			const className = isRead ? 'assignment-read' : 'assignment-unread';
-			const statusText = isRead ? 'Read' : 'Unread';
-			
-			content += `<div class="assignment-status ${className}">
-				<span class="assignment-icon">${icon}</span>
-				<span class="assignment-target">${assignmentTarget}</span>
-				<span class="assignment-status-text">${statusText}${readDetails}</span>
-			</div>`;
-		});
-		
-		content += '</div>';
-		return content;
-	}
-
-	// Fetch current unread counts from the server
-	async function loadUnreadCounts() {
-		if (!selectedProject) return;
-
-		try {
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const data = await response.json();
-				calculateUnreadCountsFromData(data.updates);
-			}
-		} catch (error) {
-			console.error('Failed to load unread counts:', error);
-		}
-	}
-
-	// Calculate unread counts from content data
-	function calculateUnreadCountsFromData(updates: any) {
-		if (!updates) return;
-		
-		// Count unread channel messages (type "message" or "reply")
-		channelUnreadCount = updates.channelMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-		).length || 0;
-
-		// Count unread direct messages (type "message" or "reply")
-		const unreadDMs = updates.directMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-		) || [];
-		dmUnreadCount = unreadDMs.length;
-		
-		// Debug logging
-		console.log(`📊 DM Count Debug - Found ${updates.directMessages?.length || 0} total DMs, ${unreadDMs.length} unread:`, 
-			unreadDMs.map(dm => `ID:${dm.id} from:${dm.authorAgentId} type:${dm.type}`)
-		);
-
-		// Count unread documents  
-		const unreadDocs = updates.documents?.filter((doc: any) => 
-			isUnreadByHumanDirector(doc)
-		) || [];
-		const documentsUnreadCount = unreadDocs.length;
-		
-		// Total unread count (matching main page calculation)
-		totalUnreadCount = channelUnreadCount + dmUnreadCount + documentsUnreadCount;
-		
-		console.log(`📊 Total Unread Debug - Channels: ${channelUnreadCount}, DMs: ${dmUnreadCount}, Docs: ${documentsUnreadCount}, Total: ${totalUnreadCount}`);
-	}
-
-	// Update counts when new updates arrive
-	function updateUnreadCountsFromNewData(updates: any) {
-		if (!updates) return;
-
-		// Add new unread messages to existing counts
-		const newChannelUnread = updates.channelMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-		).length || 0;
-
-		const newDmUnread = updates.directMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-		).length || 0;
-
-		if (newChannelUnread > 0 || newDmUnread > 0) {
-			channelUnreadCount += newChannelUnread;
-			dmUnreadCount += newDmUnread;
-			totalUnreadCount = channelUnreadCount + dmUnreadCount;
-			
-			console.log(`📊 New unread messages - Channels: +${newChannelUnread}, DMs: +${newDmUnread}, Total: ${totalUnreadCount}`);
-		}
-	}
-
-	// Handle real-time content updates
-	async function handleContentUpdates(event: CustomEvent) {
-		const { updates } = event.detail;
-		
-		console.log('📬 Processing real-time content updates:', updates);
-
-		// Update unread counts with new messages
-		updateUnreadCountsFromNewData(updates);
-
-		// Refresh channel data when new channel messages arrive
-		if (updates.channelMessages?.length > 0) {
-			console.log(`🔄 Refreshing channels due to ${updates.channelMessages.length} new channel messages`);
-			// Reload channel list to update unread counts for all channels
-			await loadChannels();
-			
-			// Also refresh the currently selected channel messages if needed
-			if (selectedChannel) {
-				const relevantMessages = updates.channelMessages.filter(
-					(msg: any) => msg.channelId === selectedChannel.id
-				);
-				
-				if (relevantMessages.length > 0) {
-					console.log(`🔄 Refreshing ${selectedChannel.name} channel messages (${relevantMessages.length} updates detected)`);
-					// Reload all messages to get updated read statuses
-					loadChannelMessages(selectedChannel);
-				}
-			}
-		}
-
-		// Update direct messages if we have a selected DM agent
-		if (selectedDMAgent && updates.directMessages?.length > 0) {
-			const relevantDMs = updates.directMessages.filter(
-				(msg: any) => 
-					msg.authorAgentId === selectedDMAgent.id || 
-					(msg.readingAssignments?.some((assignment: any) => 
-						assignment.assignedToType === 'agent' && assignment.assignedTo === selectedDMAgent.id
-					))
-			);
-			
-			if (relevantDMs.length > 0) {
-				console.log(`🔄 Adding ${relevantDMs.length} new DMs with ${selectedDMAgent.id}`);
-				// Add new DMs to existing messages, avoiding duplicates
-				const existingIds = new Set(dmMessages.map(m => m.id));
-				const newDMs = relevantDMs.filter(msg => !existingIds.has(msg.id));
-				
-				if (newDMs.length > 0) {
-					dmMessages = [...dmMessages, ...newDMs].sort(
-						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-					);
-				}
-			}
-		}
-
-		// Update thread replies if we have a selected thread message and there are new replies
-		if (selectedThreadMessage && updates.replies?.length > 0) {
-			const relevantReplies = updates.replies.filter(
-				(reply: any) => reply.parentContentId === selectedThreadMessage.id
-			);
-			
-			if (relevantReplies.length > 0) {
-				console.log(`🔄 Adding ${relevantReplies.length} new replies to thread ${selectedThreadMessage.id}`);
-				// Add new replies to existing thread replies, avoiding duplicates
-				const existingIds = new Set(threadReplies.map(r => r.id));
-				const newReplies = relevantReplies.filter(reply => !existingIds.has(reply.id));
-				
-				if (newReplies.length > 0) {
-					threadReplies = [...threadReplies, ...newReplies].sort(
-						(a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-					);
-				}
-			}
-		}
-
-		// Update channel list with new unread counts
-		if (updates.channelMessages?.length > 0) {
-			loadChannels(); // Refresh channel list to update unread counts
-		}
-
-		// Update DM agent list with new message indicators
-		if (updates.directMessages?.length > 0) {
-			loadDMAgents(); // Refresh DM agents list
-		}
-	}
 
 	// Start polling when project changes
 	function startPolling() {
@@ -455,114 +139,13 @@
 	}
 
 	// Functions for loading channel messages
-	async function loadChannelMessages(channel) {
-		if (!channel) {
-			channelMessages = [];
-			return;
-		}
-
-		try {
-			console.log(`Loading messages for channel: ${channel.name} (ID: ${channel.id})`);
-			const response = await fetch(`/api/messages?projectId=${selectedProject.id}&channelId=${channel.id}`);
-			if (response.ok) {
-				channelMessages = await response.json();
-				console.log(`✅ Loaded ${channelMessages.length} messages for channel ${channel.name}`);
-				
-				// Automatically mark all messages as read (batch operation to avoid multiple refreshes)
-				const unreadMessages = channelMessages.filter(message => hasUnreadAssignmentForHumanDirector(message));
-				if (unreadMessages.length > 0) {
-					console.log(`📖 Auto-marking ${unreadMessages.length} unread messages as read for channel ${channel.name}`);
-					
-					// Mark all unread messages as read without UI refreshes
-					for (const message of unreadMessages) {
-						await markMessageAsReadWithoutRefresh(message);
-					}
-					
-					// Refresh channel list once after all messages are marked as read
-					await loadChannels();
-					console.log(`✅ Refreshed channel list after auto-reading ${unreadMessages.length} messages`);
-				}
-			} else {
-				console.error('Failed to load channel messages:', response.status);
-				channelMessages = [];
-			}
-		} catch (error) {
-			console.error('Error loading channel messages:', error);
-			channelMessages = [];
-		}
-	}
 
 	function onChannelSelect(channel) {
 		selectedChannel = channel;
-		loadChannelMessages(channel);
+		dataManager.setSelectedChannel(channel);
+		dataManager.loadChannelMessages(channel);
 	}
 
-	// Helper functions for messages
-	function formatMessageTime(timestamp) {
-		const date = new Date(timestamp);
-		const now = new Date();
-		const diffMs = now.getTime() - date.getTime();
-		const diffMins = Math.floor(diffMs / 60000);
-		
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
-		
-		const diffHours = Math.floor(diffMins / 60);
-		if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
-		
-		const diffDays = Math.floor(diffHours / 24);
-		if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
-		
-		return date.toLocaleDateString();
-	}
-
-	function hasUnreadAssignmentForHumanDirector(message) {
-		if (!message.readingAssignments) return false;
-		
-		return message.readingAssignments.some(assignment => {
-			// Check if this assignment is for human-director (including old 'director' assignments)
-			const isForHumanDirector = (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-			                          (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-			
-			if (!isForHumanDirector) return false;
-			
-			// Check if human-director has read this assignment (including old 'director' reads)
-			const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
-			                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
-			return !hasRead;
-		});
-	}
-
-	async function markMessageAsReadWithoutRefresh(message) {
-		if (!message.readingAssignments) return;
-		
-		try {
-			// Find the assignment(s) for human-director (including old 'director' assignments)
-			const humanDirectorAssignments = message.readingAssignments.filter(assignment => {
-				return (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-				       (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-			});
-			
-			// Mark each assignment as read
-			for (const assignment of humanDirectorAssignments) {
-				// Check if already read to avoid duplicate marking (handle both data formats, including old 'director' reads)
-				const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
-				                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
-				if (!hasRead) {
-					await fetch('/api/reading-assignments/mark-read', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							assignmentId: assignment.id,
-							agentId: 'human-director'
-						})
-					});
-				}
-			}
-		} catch (error) {
-			console.error('Failed to mark message as read:', error);
-		}
-	}
 
 	function startReply(message) {
 		replyingToMessage = message;
@@ -574,368 +157,21 @@
 		replyContent = '';
 	}
 
-	async function markMessageAsRead(message) {
-		if (!message.readingAssignments) return;
-		
-		try {
-			// Find the assignment(s) for human-director (including old 'director' assignments)
-			const humanDirectorAssignments = message.readingAssignments.filter(assignment => {
-				return (assignment.assignedToType === 'agent' && (assignment.assignedTo === 'human-director' || assignment.assignedTo === 'director')) ||
-				       (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director');
-			});
-			
-			// Mark each assignment as read
-			let markedAsRead = false;
-			for (const assignment of humanDirectorAssignments) {
-				// Check if already read to avoid duplicate marking (handle both data formats, including old 'director' reads)
-				const hasRead = assignment.readBy ? assignment.readBy.some(read => read.agentId === 'human-director' || read.agentId === 'director') : 
-				                assignment.reads ? assignment.reads.some(read => read.agentId === 'human-director' || read.agentId === 'director') : false;
-				if (!hasRead) {
-					await fetch('/api/reading-assignments/mark-read', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							assignmentId: assignment.id,
-							agentId: 'human-director'
-						})
-					});
-					markedAsRead = true;
-				}
-			}
-			
-			// Update unread counts if we marked something as read
-			if (markedAsRead && (message.type === 'message' || message.type === 'reply')) {
-				if (message.channelId) {
-					channelUnreadCount = Math.max(0, channelUnreadCount - 1);
-				} else {
-					dmUnreadCount = Math.max(0, dmUnreadCount - 1);
-				}
-				totalUnreadCount = channelUnreadCount + dmUnreadCount;
-				console.log(`📖 Marked message as read. Updated counts - Total: ${totalUnreadCount}, Channels: ${channelUnreadCount}, DMs: ${dmUnreadCount}`);
-			}
-			
-			// Refresh the content to reflect read status changes
-			if (selectedChannel) {
-				await loadChannelMessages(selectedChannel);
-				await loadChannels();
-			}
-			
-			// If we're in DM view, refresh DM data
-			if (selectedDMAgent) {
-				await loadDMMessages(selectedDMAgent.id);
-				await loadDMAgents();
-			}
-			
-			// Trigger a content polling refresh to update unread badges immediately
-			if (typeof window !== 'undefined' && window.dispatchEvent) {
-				window.dispatchEvent(new CustomEvent('refreshPolling'));
-			}
-		} catch (error) {
-			console.error('Failed to mark message as read:', error);
-		}
-	}
 
 
 
 
 
-	async function loadChannels() {
-		if (!selectedProject) {
-			channels = [];
-			return;
-		}
 
-		try {
-			const response = await fetch(`/api/channels?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				const channelsData = await response.json();
-				
-				// Load message counts for each channel
-				const channelsWithCounts = await Promise.all(
-					channelsData.map(async (channel) => {
-						try {
-							const msgResponse = await fetch(`/api/messages?projectId=${selectedProject.id}&channelId=${channel.id}`);
-							if (msgResponse.ok) {
-								const messages = await msgResponse.json();
-								
-								// Calculate unread messages for human-director only
-								const unreadCount = messages.filter(message => isUnreadByHumanDirector(message)).length;
-								
-								return {
-									...channel,
-									messageCount: messages.length,
-									unreadCount: unreadCount
-								};
-							}
-						} catch (error) {
-							console.error(`Failed to load messages for channel ${channel.id}:`, error);
-						}
-						return {
-							...channel,
-							messageCount: 0,
-							unreadCount: 0
-						};
-					})
-				);
-				
-				channels = channelsWithCounts;
-			} else {
-				console.error('Failed to load channels:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load channels:', error);
-		}
-	}
 
-	async function loadAgents() {
-		if (!selectedProject) {
-			agents = [];
-			return;
-		}
 
-		try {
-			const response = await fetch(`/api/agents?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				agents = await response.json();
-			} else {
-				console.error('Failed to load agents:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load agents:', error);
-		}
-	}
 
-	async function loadRoleTypes() {
-		if (!selectedProject) {
-			roleTypes = [];
-			return;
-		}
 
-		try {
-			const response = await fetch(`/api/projects/${selectedProject.id}/role-types`);
-			if (response.ok) {
-				roleTypes = await response.json();
-			} else {
-				console.error('Failed to load role types:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load role types:', error);
-		}
-	}
-
-	async function loadSquads() {
-		if (!selectedProject) {
-			squads = [];
-			return;
-		}
-
-		try {
-			const response = await fetch(`/api/squads?projectId=${selectedProject.id}`);
-			if (response.ok) {
-				squads = await response.json();
-			} else {
-				console.error('Failed to load squads:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load squads:', error);
-		}
-	}
-
-	async function loadDMAgents() {
-		if (!selectedProject) {
-			dmAgents = [];
-			return;
-		}
-
-		try {
-			// Get ALL messages from the beginning of time for agent discovery
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
-			if (response.ok) {
-				const data = await response.json();
-				const directMessages = data.updates.directMessages || [];
-				
-				// Find all agents that have DM conversations with human-director
-				const conversationAgents = new Set();
-				
-				directMessages.forEach(dm => {
-					// Case 1: Message FROM another agent TO human-director
-					if (dm.authorAgentId && dm.authorAgentId !== 'human-director') {
-						// Check if this message has reading assignment for human-director
-						const hasAssignmentToHuman = dm.readingAssignments?.some(a => 
-							(a.assignedToType === 'agent' && a.assignedTo === 'human-director') ||
-							(a.assignedToType === 'role' && a.assignedTo === 'Human Director')
-						);
-						if (hasAssignmentToHuman) {
-							conversationAgents.add(dm.authorAgentId);
-						}
-					}
-					
-					// Case 2: Message FROM human-director TO other agents
-					if (dm.authorAgentId === 'human-director' && dm.readingAssignments) {
-						dm.readingAssignments.forEach(assignment => {
-							// Direct agent assignment
-							if (assignment.assignedToType === 'agent' && assignment.assignedTo !== 'human-director') {
-								conversationAgents.add(assignment.assignedTo);
-							}
-							// Role assignment - use targetAgents to find actual agents
-							else if (assignment.assignedToType === 'role' && assignment.targetAgents) {
-								assignment.targetAgents.forEach(agentId => {
-									if (agentId !== 'human-director') {
-										conversationAgents.add(agentId);
-									}
-								});
-							}
-							// Squad assignment - use targetAgents to find actual agents
-							else if (assignment.assignedToType === 'squad' && assignment.targetAgents) {
-								assignment.targetAgents.forEach(agentId => {
-									if (agentId !== 'human-director') {
-										conversationAgents.add(agentId);
-									}
-								});
-							}
-						});
-					}
-				});
-
-				// Create agent objects for UI
-				dmAgents = Array.from(conversationAgents).map(agentId => {
-					// Find most recent message in this conversation
-					const conversationMessages = directMessages.filter(dm => 
-						dm.authorAgentId === agentId || 
-						(dm.authorAgentId === 'human-director' && 
-						 dm.readingAssignments?.some(a => 
-							(a.assignedToType === 'agent' && a.assignedTo === agentId) ||
-							(a.assignedToType === 'role' && a.targetAgents?.includes(agentId)) ||
-							(a.assignedToType === 'squad' && a.targetAgents?.includes(agentId))
-						))
-					);
-					
-					const recentMessage = conversationMessages
-						.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-
-					// Count unread messages from this agent to human-director
-					const unreadCount = directMessages.filter(dm => 
-						dm.authorAgentId === agentId && isUnreadByHumanDirector(dm)
-					).length;
-
-					// Determine role type from agent ID
-					let roleType = 'Unknown';
-					if (agentId.startsWith('pm_')) roleType = 'Product Manager';
-					else if (agentId.startsWith('be_')) roleType = 'Backend Developer';
-					else if (agentId.startsWith('fe_')) roleType = 'Frontend Developer';
-					else if (agentId.startsWith('ai_')) roleType = 'AI Developer';
-					else if (agentId.startsWith('ux_')) roleType = 'UX Expert';
-					else if (agentId.startsWith('design_')) roleType = 'Graphic Designer';
-					else if (agentId.startsWith('qa_')) roleType = 'Technical QA';
-					else if (agentId.startsWith('sa_')) roleType = 'System Architect';
-
-					return {
-						id: agentId,
-						roleType: roleType,
-						status: 'online',
-						lastMessageAt: recentMessage?.createdAt || null,
-						unreadCount: unreadCount
-					};
-				});
-				
-				// Sort by most recent message
-				dmAgents.sort((a, b) => {
-					if (!a.lastMessageAt && !b.lastMessageAt) return 0;
-					if (!a.lastMessageAt) return 1;
-					if (!b.lastMessageAt) return -1;
-					return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
-				});
-
-				console.log('📱 DM Agents Loaded:', {
-					totalDMs: directMessages.length,
-					conversationAgents: Array.from(conversationAgents),
-					loadedAgents: dmAgents.length
-				});
-				
-			} else {
-				console.error('Failed to load DM content:', response.status);
-			}
-		} catch (error) {
-			console.error('Failed to load DM agents:', error);
-		}
-	}
-
-	async function loadDMMessages(agentId) {
-		if (!selectedProject || !agentId) {
-			dmMessages = [];
-			return;
-		}
-
-		try {
-			// Get ALL messages from the beginning of time
-			const response = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
-			if (response.ok) {
-				const data = await response.json();
-				const allDMs = data.updates.directMessages || [];
-				
-				// Filter to show only conversation between human-director and the selected agent
-				dmMessages = allDMs.filter(msg => {
-					// Include if the message is from the selected agent
-					if (msg.authorAgentId === agentId) return true;
-					
-					// Include if the message is from human-director AND has a reading assignment for the selected agent
-					if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
-						return msg.readingAssignments.some(assignment => 
-							(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
-							(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
-							(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
-						);
-					}
-					
-					return false;
-				});
-				console.log(`📬 Loaded ${dmMessages.length} DM messages with ${agentId} (filtered from ${allDMs.length} total DMs)`);
-				
-				// Automatically mark all messages as read
-				let markedAnyAsRead = false;
-				for (const message of dmMessages) {
-					if (hasUnreadAssignmentForHumanDirector(message)) {
-						await markMessageAsRead(message);
-						markedAnyAsRead = true;
-					}
-				}
-				
-				// Reload messages if any were marked as read to get updated read status
-				if (markedAnyAsRead) {
-					const refreshResponse = await fetch(`/api/content/updates?projectId=${selectedProject.id}&since=2020-01-01T00:00:00Z`);
-					if (refreshResponse.ok) {
-						const refreshData = await refreshResponse.json();
-						const allRefreshDMs = refreshData.updates.directMessages || [];
-						
-						// Re-filter to get updated message data
-						dmMessages = allRefreshDMs.filter(msg => {
-							if (msg.authorAgentId === agentId) return true;
-							
-							if (msg.authorAgentId === 'human-director' && msg.readingAssignments) {
-								return msg.readingAssignments.some(assignment => 
-									(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
-									(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
-									(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
-								);
-							}
-							
-							return false;
-						});
-					}
-				}
-			} else {
-				console.error('Failed to load DM messages:', response.status);
-				dmMessages = [];
-			}
-		} catch (error) {
-			console.error('Error loading DM messages:', error);
-			dmMessages = [];
-		}
-	}
 
 	function onDMAgentSelect(agent) {
 		selectedDMAgent = agent;
-		loadDMMessages(agent.id);
+		dataManager.setSelectedDMAgent(agent);
+		dataManager.loadDMMessages(agent.id);
 	}
 
 	async function sendDMMessage() {
@@ -963,8 +199,8 @@
 				newDMContent = '';
 				// Add a small delay to ensure the message is saved before reloading
 				setTimeout(async () => {
-					await loadDMMessages(selectedDMAgent.id);
-					await loadDMAgents(); // Refresh agent list to update timestamps
+					await dataManager.loadDMMessages(selectedDMAgent.id);
+					await dataManager.loadDMAgents(); // Refresh agent list to update timestamps
 					// Polling service will automatically pick up new data
 				}, 100);
 			} else {
@@ -976,24 +212,11 @@
 	}
 
 
-	function openReplyDialog(message: any) {
-		selectedMessage = message;
-		replyToMessageId = message.messageId;
-		replyContent = '';
-		showReplyDialog = true;
-	}
-
-	function closeReplyDialog() {
-		showReplyDialog = false;
-		selectedMessage = null;
-		replyToMessageId = null;
-		replyContent = '';
-	}
 
 	async function sendReply() {
-		// Support thread replies (selectedThreadMessage) and legacy replies 
-		const messageId = selectedThreadMessage?.id || replyToMessageId || replyingToMessage?.id;
-		const message = selectedThreadMessage || selectedMessage || replyingToMessage;
+		// Support thread replies (selectedThreadMessage) and inline replies 
+		const messageId = selectedThreadMessage?.id || replyingToMessage?.id;
+		const message = selectedThreadMessage || replyingToMessage;
 		
 		if (!replyContent.trim() || !messageId || !selectedProject) return;
 
@@ -1019,17 +242,13 @@
 				// Handle thread reply
 				if (selectedThreadMessage) {
 					replyContent = '';
-					await loadThreadReplies(selectedThreadMessage); // Refresh thread replies
+					// ThreadView will handle reloading its own replies automatically
 				}
-				// Handle dialog reply
-				else if (replyToMessageId) {
-					closeReplyDialog();
-				} 
 				// Handle inline reply
 				else if (replyingToMessage) {
 					cancelReply(); // Clear inline reply state
 					if (selectedChannel) {
-						await loadChannelMessages(selectedChannel); // Refresh channel messages
+						await dataManager.loadChannelMessages(selectedChannel); // Refresh channel messages
 					}
 				}
 			} else {
@@ -1040,58 +259,31 @@
 		}
 	}
 
-	// Send Message Functions
-	function addReadingAssignment() {
-		messageReadingAssignments = [...messageReadingAssignments, {
-			assignedToType: 'role',
-			assignedTo: ''
-		}];
+
+	// Handler for SendMessageDialog component
+	function handleSendMessageDialogSend(event) {
+		const { newMessage, assignTo } = event.detail;
+		sendMessageFromDialog(newMessage, assignTo);
 	}
 
-	function removeReadingAssignment(index: number) {
-		messageReadingAssignments = messageReadingAssignments.filter((_, i) => i !== index);
-	}
-
-	function resetSendMessageDialog() {
+	function handleSendMessageDialogClose() {
 		showSendMessageDialog = false;
-		newMessage = {
-			type: 'message',
-			title: '',
-			body: '',
-			channelId: null
-		};
-		messageReadingAssignments = [];
 	}
 
-	async function sendMessage() {
-		// Handle both channel messaging (newMessageContent) and dialog messaging (newMessage.body)
-		const messageBody = newMessageContent || newMessage.body;
-		const channelId = selectedChannel?.id || newMessage.channelId;
-		
-		if (!messageBody.trim() || !selectedProject) return;
+	async function sendMessageFromDialog(newMessage, assignTo) {
+		if (!newMessage.body.trim() || !selectedProject) return;
 
 		try {
-			// Use unified /api/messages endpoint for both channel messages and DMs
-			const apiEndpoint = '/api/messages';
-			
-			// Convert messageReadingAssignments to assignTo format
-			const assignTo = messageReadingAssignments
-				.filter(assignment => assignment.assignedTo.trim())
-				.map(assignment => ({
-					type: assignment.assignedToType,
-					target: assignment.assignedTo
-				}));
-			
 			const requestBody = {
 				projectId: selectedProject.id,
 				authorAgentId: 'human-director',
 				title: newMessage.title || null,
-				body: messageBody,
-				channelId: channelId || null, // null for DMs
+				body: newMessage.body,
+				channelId: newMessage.channelId || null,
 				assignTo: assignTo.length > 0 ? assignTo : undefined
 			};
 
-			const response = await fetch(apiEndpoint, {
+			const response = await fetch('/api/messages', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(requestBody)
@@ -1102,110 +294,103 @@
 				return;
 			}
 
-			const createdMessage = await response.json();
-
-			// Reading assignments are now handled automatically by the /api/messages endpoint
-
-			// Clear the appropriate input field
-			if (newMessageContent) {
-				// Channel messaging - clear the channel input and reload channel messages
-				newMessageContent = '';
-				if (selectedChannel) {
-					await loadChannelMessages(selectedChannel);
-				}
-			} else {
-				// Dialog messaging - reset dialog and refresh DM data
-				resetSendMessageDialog();
+			// Close dialog and refresh data
+			showSendMessageDialog = false;
+			
+			// Add a small delay to ensure the message is saved before reloading
+			setTimeout(async () => {
+				await dataManager.loadDMAgents(); // Refresh agent list to show the new recipient
 				
-				// Add a small delay to ensure the message is saved before reloading
-				setTimeout(async () => {
-					await loadDMAgents(); // Refresh agent list to show the new recipient
-					
-					// If a DM agent was selected from the assignTo, refresh their conversation
-					const firstAssignment = assignTo[0];
-					if (firstAssignment && firstAssignment.type === 'agent') {
-						// Find the agent in the list and select them
-						const targetAgent = dmAgents.find(agent => agent.id === firstAssignment.target);
-						if (targetAgent) {
-							selectedDMAgent = targetAgent;
-							await loadDMMessages(targetAgent.id);
-						}
+				// If a DM agent was selected from the assignTo, refresh their conversation
+				const firstAssignment = assignTo[0];
+				if (firstAssignment && firstAssignment.type === 'agent') {
+					// Find the agent in the list and select them
+					const targetAgent = dmAgents.find(agent => agent.id === firstAssignment.target);
+					if (targetAgent) {
+						selectedDMAgent = targetAgent;
+						dataManager.setSelectedDMAgent(targetAgent);
+						await dataManager.loadDMMessages(targetAgent.id);
 					}
-					
-					// Polling service will automatically pick up new data
-				}, 100);
+				}
+			}, 100);
+		} catch (error) {
+			console.error('Failed to send message:', error);
+		}
+	}
+
+	async function sendMessage() {
+		// Handle channel messaging (newMessageContent)
+		if (!newMessageContent.trim() || !selectedProject) return;
+
+		try {
+			const requestBody = {
+				projectId: selectedProject.id,
+				authorAgentId: 'human-director',
+				body: newMessageContent,
+				channelId: selectedChannel?.id || null
+			};
+
+			const response = await fetch('/api/messages', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(requestBody)
+			});
+
+			if (!response.ok) {
+				console.error('Failed to create message:', response.status);
+				return;
+			}
+
+			// Clear the channel input and reload channel messages
+			newMessageContent = '';
+			if (selectedChannel) {
+				await dataManager.loadChannelMessages(selectedChannel);
 			}
 		} catch (error) {
 			console.error('Failed to send message:', error);
 		}
 	}
 
-	// Thread handling functions for 3-column layout
+	// Thread handling functions (now managed by ThreadView component)
 	function onMessageSelect(message: any) {
 		selectedThreadMessage = message;
 		isThreadsColumnOpen = true;
-		loadThreadReplies(message);
 	}
 
 	function closeThreadsColumn() {
 		isThreadsColumnOpen = false;
 		selectedThreadMessage = null;
-		threadReplies = [];
 	}
 
-	async function loadThreadReplies(message: any) {
-		if (!message?.id) {
-			threadReplies = [];
-			return;
-		}
 
-		try {
-			// Use dedicated thread endpoint to get ALL replies for this message
-			const response = await fetch(`/api/content/${message.id}/thread`);
-			if (response.ok) {
-				const data = await response.json();
-				// The thread API returns replies directly
-				threadReplies = data.replies || [];
-			}
-		} catch (err) {
-			console.error('Failed to load thread replies:', err);
-			threadReplies = [];
-		}
-	}
-
-	// Build flat comment list sorted by timestamp - all replies are to the selected message
-	function buildThreadTree(replies: any[]) {
-		return replies
-			.map((reply: any) => ({ ...reply, children: [] }))
-			.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-	}
-
-	$: threadTree = buildThreadTree(threadReplies);
-
-
-	function getMessageIcon(message: any): string {
-		if (message.isReply) return '↩️';
-		if (message.isDM) return '💬';
-		if (message.isDirectorChannel) return '📢';
-		if (message.type === 'document') return '📄';
-		return '💭';
-	}
 
 	// Load data when project changes
 	$: if (selectedProject) {
-		loadChannels();
-		loadAgents();
-		loadRoleTypes();
-		loadSquads();
-		loadDMAgents();
-		loadUnreadCounts(); // Load initial unread counts
+		// Set project context in DataManager
+		dataManager.setProject(selectedProject);
+		
+		// Load all data through DataManager
+		dataManager.loadChannels();
+		dataManager.loadAgents();
+		dataManager.loadRoleTypes();
+		dataManager.loadSquads();
+		dataManager.loadDMAgents();
+		dataManager.loadUnreadCounts();
 		startPolling(); // Start real-time polling for the new project
 	}
 
 	// Lifecycle management
 	onMount(() => {
 		// Set up event listener for content updates
-		contentUpdatesListener = (event: CustomEvent) => handleContentUpdates(event);
+		contentUpdatesListener = (event: CustomEvent) => {
+			const { updates } = event.detail;
+			dataManager.handleContentUpdates(updates);
+			
+			// Update thread replies if we have a selected thread message
+			if (threadViewRef) {
+				threadViewRef.updateThreadReplies(updates);
+			}
+		};
 		window.addEventListener('contentUpdates', contentUpdatesListener);
 		
 		// Start polling if we already have a selected project
@@ -1263,111 +448,20 @@
 					/>
 				</div>
 				
-				<!-- Column 3: Sliding Threads/Replies -->
-				<div class="threads-column" class:open={isThreadsColumnOpen}>
-					{#if selectedThreadMessage}
-						<div class="threads-header">
-							<h3>💬 Thread ({threadReplies.length})</h3>
-							<button class="close-threads-btn" on:click={closeThreadsColumn} title="Close thread">
-								×
-							</button>
-						</div>
-						
-						<div class="threads-container">
-							<div class="original-message">
-								<div class="message-header">
-									<span class="message-author">
-										{selectedThreadMessage.authorAgentId || 'System'}
-									</span>
-									<span class="message-time">{formatMessageTime(selectedThreadMessage.createdAt)}</span>
-									{#if selectedThreadMessage.readingAssignments && selectedThreadMessage.readingAssignments.length > 0}
-										<div class="read-status-icon-container" 
-											 on:click={(e) => toggleReadStatusTooltip(e, selectedThreadMessage)}>
-											<span class="read-status-icon" class:fully-read={isMessageFullyRead(selectedThreadMessage)} class:partially-read={isMessagePartiallyRead(selectedThreadMessage)}>
-												{#if isMessageFullyRead(selectedThreadMessage)}
-													✅
-												{:else if isMessagePartiallyRead(selectedThreadMessage)}
-													👀
-												{:else}
-													📩
-												{/if}
-											</span>
-										</div>
-									{/if}
-								</div>
-								<div class="message-content markdown-content">
-									{#if selectedThreadMessage.title && selectedThreadMessage.title !== selectedThreadMessage.body}
-										<strong>{selectedThreadMessage.title}</strong><br>
-									{/if}
-									{@html marked((selectedThreadMessage.body || '').replace(/\\n/g, '\n'))}
-								</div>
-							</div>
-							
-							{#if threadTree.length > 0}
-								{#each threadTree as reply}
-									<div class="thread-reply">
-										<div class="message-header">
-											<span class="message-author">
-												{reply.authorAgentId === 'human-director' ? 'Human Director' : reply.authorAgentId || 'System'}
-											</span>
-											<span class="message-time">{formatMessageTime(reply.createdAt)}</span>
-											{#if reply.readingAssignments && reply.readingAssignments.length > 0}
-												<div class="read-status-icon-container" 
-													 on:click={(e) => toggleReadStatusTooltip(e, reply)}>
-													<span class="read-status-icon" class:fully-read={isMessageFullyRead(reply)} class:partially-read={isMessagePartiallyRead(reply)}>
-														{#if isMessageFullyRead(reply)}
-															✅
-														{:else if isMessagePartiallyRead(reply)}
-															👀
-														{:else}
-															📩
-														{/if}
-													</span>
-												</div>
-											{/if}
-										</div>
-										<div class="message-content markdown-content">
-											{@html marked((reply.body || '').replace(/\\n/g, '\n'))}
-										</div>
-									</div>
-								{/each}
-							{:else}
-								<div class="no-replies">
-									<p>No replies yet. Start the discussion!</p>
-								</div>
-							{/if}
-						</div>
-
-						<!-- Add Reply Form -->
-						<div class="add-reply-form">
-							<textarea 
-								bind:value={replyContent} 
-								placeholder="Add a reply..."
-								rows="3"
-								class="reply-input"
-								on:keydown={(e) => {
-									if (e.key === 'Enter' && !e.shiftKey) {
-										e.preventDefault();
-										if (replyContent.trim()) {
-											sendReply();
-										}
-									}
-								}}
-							></textarea>
-							<button 
-								class="btn-primary btn-sm" 
-								on:click={sendReply}
-								disabled={!replyContent.trim()}
-							>
-								💬 Reply
-							</button>
-						</div>
-					{:else}
-						<div class="no-thread-selected">
-							<p>Select a message to view thread</p>
-						</div>
-					{/if}
-				</div>
+				<!-- Column 3: Sliding Threads/Replies (now handled by ThreadView component) -->
+				<ThreadView 
+					bind:this={threadViewRef}
+					{selectedProject}
+					{selectedThreadMessage}
+					{isThreadsColumnOpen}
+					bind:replyContent
+					{formatMessageTime}
+					{isMessageFullyRead}
+					{isMessagePartiallyRead}
+					{toggleReadStatusTooltip}
+					on:close={closeThreadsColumn}
+					on:sendReply={handleSendReply}
+				/>
 			</div>
 		{:else if commsViewMode === 'direct-messages'}
 			<div class="direct-messages-view">
@@ -1402,208 +496,18 @@
 	</div>
 </div>
 
-{#if showReplyDialog}
-	<div class="dialog-overlay" on:click={closeReplyDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<div class="dialog-header">
-				<h3>💬 Reply to Message</h3>
-				<button class="close-btn" on:click={closeReplyDialog}>×</button>
-			</div>
-			
-			{#if selectedMessage}
-				<div class="reply-context">
-					<div class="original-message">
-						<div class="message-meta">
-							<span class="message-icon">{getMessageIcon(selectedMessage)}</span>
-							<span class="message-author">
-								{selectedMessage.authorAgentId || 'System'}
-							</span>
-							<span class="message-time">{formatMessageTime(selectedMessage.createdAt)}</span>
-						</div>
-						<div class="message-preview">
-							{selectedMessage.body.substring(0, 100)}...
-						</div>
-					</div>
-				</div>
-			{/if}
-			
-			<div class="form-group">
-				<label for="reply-content">Your Reply:</label>
-				<textarea 
-					id="reply-content"
-					bind:value={replyContent}
-					placeholder="Type your reply..."
-					rows="4"
-				></textarea>
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={closeReplyDialog}>Cancel</button>
-				<button class="send-btn" on:click={sendReply} disabled={!replyContent.trim()}>
-					Send Reply
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
-{#if showSendMessageDialog}
-	<div class="dialog-overlay" on:click={() => showSendMessageDialog = false}>
-		<div class="dialog" on:click|stopPropagation>
-			<h3>Send Message</h3>
-			
-			<div class="form-group">
-				<label for="message-type">Type:</label>
-				<select id="message-type" bind:value={newMessage.type}>
-					<option value="message">Message</option>
-					<option value="document">Document</option>
-				</select>
-			</div>
+<!-- SendMessageDialog Component -->
+<SendMessageDialog 
+	{showSendMessageDialog}
+	{channels}
+	{agents}
+	{roleTypes}
+	{squads}
+	on:sendMessage={handleSendMessageDialogSend}
+	on:close={handleSendMessageDialogClose}
+/>
 
-			<div class="form-group">
-				<label for="message-title">Title (optional):</label>
-				<input 
-					id="message-title"
-					type="text" 
-					bind:value={newMessage.title} 
-					placeholder="Message title"
-				/>
-			</div>
-			
-			<div class="form-group">
-				<label for="message-body">Message:</label>
-				<textarea 
-					id="message-body"
-					bind:value={newMessage.body} 
-					placeholder="Type your message here..."
-					rows="6"
-				></textarea>
-			</div>
-			
-			<div class="form-group">
-				<label for="message-channel">Channel (optional):</label>
-				<select 
-					id="message-channel"
-					bind:value={newMessage.channelId}
-				>
-					<option value={null}>Direct Message</option>
-					{#each channels as channel}
-						<option value={channel.id}>{channel.name}</option>
-					{/each}
-				</select>
-			</div>
-
-			<div class="reading-assignments-section">
-				<div class="assignments-header">
-					<h4>📋 Reading Assignments</h4>
-					<button type="button" class="add-assignment-btn" on:click={addReadingAssignment}>
-						+ Add Assignment
-					</button>
-				</div>
-
-				{#each messageReadingAssignments as assignment, index}
-					<div class="assignment-row">
-						<select bind:value={assignment.assignedToType}>
-							<option value="role">Role</option>
-							<option value="agent">Agent</option>
-							<option value="squad">Squad</option>
-						</select>
-						
-						{#if assignment.assignedToType === 'role'}
-							<select bind:value={assignment.assignedTo}>
-								<option value="">Select a role type...</option>
-								{#each roleTypes as roleType}
-									<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
-								{/each}
-							</select>
-						{:else if assignment.assignedToType === 'agent'}
-							<select bind:value={assignment.assignedTo}>
-								<option value="">Select an agent...</option>
-								{#each agents as agent}
-									<option value={agent.id}>{agent.id} ({agent.roleType})</option>
-								{/each}
-							</select>
-						{:else if assignment.assignedToType === 'squad'}
-							<select bind:value={assignment.assignedTo}>
-								<option value="">Select a squad...</option>
-								{#each squads as squad}
-									<option value={squad.id}>{squad.name}</option>
-								{/each}
-							</select>
-						{/if}
-						
-						<button type="button" class="remove-btn" on:click={() => removeReadingAssignment(index)}>
-							Remove
-						</button>
-					</div>
-				{/each}
-			</div>
-			
-			<div class="dialog-buttons">
-				<button class="cancel-btn" on:click={() => showSendMessageDialog = false}>Cancel</button>
-				<button class="send-btn" on:click={sendMessage} disabled={!newMessage.body.trim()}>
-					Send Message
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
-
-<!-- Assignment Dialog for Channel Messaging -->
-{#if showAssignmentDialog}
-	<div class="dialog-overlay" on:click={closeAssignmentDialog}>
-		<div class="dialog" on:click|stopPropagation>
-			<div class="dialog-header">
-				<h3>Add Assignment</h3>
-				<button class="close-btn" on:click={closeAssignmentDialog}>×</button>
-			</div>
-			
-			<div class="assignment-options">
-				<div class="assignment-section">
-					<h4>👥 Roles</h4>
-					<div class="option-grid">
-						{#each roleTypes as roleType}
-							<button 
-								class="option-btn"
-								on:click={() => addMessageAssignment('role', roleType.roleType)}
-							>
-								{roleType.roleType} ({roleType.count})
-							</button>
-						{/each}
-					</div>
-				</div>
-				
-				<div class="assignment-section">
-					<h4>🤖 Agents</h4>
-					<div class="option-grid">
-						{#each agents as agent}
-							<button 
-								class="option-btn"
-								on:click={() => addMessageAssignment('agent', agent.id)}
-							>
-								{agent.id} ({agent.roleType})
-							</button>
-						{/each}
-					</div>
-				</div>
-				
-				<div class="assignment-section">
-					<h4>👥 Squads</h4>
-					<div class="option-grid">
-						{#each squads as squad}
-							<button 
-								class="option-btn"
-								on:click={() => addMessageAssignment('squad', squad.id)}
-							>
-								{squad.name}
-							</button>
-						{/each}
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
 
 <style>
 	.communications-section {
@@ -1736,113 +640,6 @@
 		cursor: not-allowed;
 	}
 
-	/* Assignment Dialog Styles */
-	.dialog-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-
-	.dialog {
-		background: white;
-		border-radius: 8px;
-		max-width: 500px;
-		width: 90%;
-		max-height: 80vh;
-		overflow-y: auto;
-		box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-	}
-
-	.dialog-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 20px;
-		border-bottom: 1px solid #e5e7eb;
-	}
-
-	.dialog-header h3 {
-		margin: 0;
-		font-size: 18px;
-		font-weight: 600;
-		color: #374151;
-	}
-
-	.close-btn {
-		background: none;
-		border: none;
-		font-size: 24px;
-		cursor: pointer;
-		color: #6b7280;
-		padding: 0;
-		width: 32px;
-		height: 32px;
-		border-radius: 4px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.close-btn:hover {
-		background: #f3f4f6;
-		color: #374151;
-	}
-
-	.assignment-options {
-		padding: 20px;
-	}
-
-	.assignment-section {
-		margin-bottom: 24px;
-	}
-
-	.assignment-section:last-child {
-		margin-bottom: 0;
-	}
-
-	.assignment-section h4 {
-		margin: 0 0 12px 0;
-		font-size: 14px;
-		font-weight: 600;
-		color: #374151;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-
-	.option-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-		gap: 8px;
-	}
-
-	.option-btn {
-		background: #f9fafb;
-		border: 1px solid #e5e7eb;
-		padding: 8px 12px;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 13px;
-		color: #374151;
-		transition: all 0.2s ease;
-		text-align: center;
-	}
-
-	.option-btn:hover {
-		background: #f3f4f6;
-		border-color: #d1d5db;
-	}
-
-	.option-btn:active {
-		background: #e5e7eb;
-		transform: translateY(1px);
-	}
 
 	/* Reply Input Interface Styles */
 	.reply-input-container {
@@ -1999,25 +796,6 @@
 		gap: 8px;
 	}
 
-	.channel-item {
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
-		padding: 12px;
-		cursor: pointer;
-		transition: all 0.2s;
-		background: white;
-	}
-
-	.channel-item:hover {
-		border-color: #007bff;
-		box-shadow: 0 2px 4px rgba(0,123,255,0.1);
-	}
-
-	.channel-item.selected {
-		border-color: #007bff;
-		background-color: #f8f9ff;
-		box-shadow: 0 2px 8px rgba(0,123,255,0.15);
-	}
 
 	.channel-header {
 		display: flex;
@@ -2089,200 +867,6 @@
 		gap: 1rem;
 	}
 
-	/* Messages in column 2 - flat style like documents */
-	.message {
-		padding: 0.5rem 0;
-		border-bottom: 2px solid #d1d5db;
-		margin-bottom: 0.25rem;
-		cursor: pointer;
-		transition: background-color 0.2s;
-		position: relative;
-	}
-
-	.message:hover {
-		background-color: rgba(59, 130, 246, 0.05);
-	}
-
-	.message.selected {
-		background-color: rgba(59, 130, 246, 0.1);
-		border-left: 4px solid #3b82f6;
-		padding-left: calc(0.5rem - 4px);
-	}
-
-	.message:last-child {
-		border-bottom: 2px solid #d1d5db;
-	}
-
-	.message-indicator {
-		position: absolute;
-		top: 8px;
-		right: 8px;
-		font-size: 0.75rem;
-		color: #6b7280;
-	}
-
-	.replies-count {
-		background: #e5e7eb;
-		padding: 2px 6px;
-		border-radius: 12px;
-		font-weight: 500;
-	}
-
-	/* Column 3: Sliding Threads Column */
-	.threads-column {
-		position: absolute;
-		top: 0;
-		right: 0;
-		width: 600px; /* Wider for better content viewing */
-		height: 100%; /* Full height of parent layout */
-		background: #f9fafb;
-		border-left: 1px solid #e5e7eb;
-		box-shadow: -4px 0 12px rgba(0, 0, 0, 0.1);
-		display: flex;
-		flex-direction: column;
-		transform: translateX(100%);
-		transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-		z-index: 10;
-		overflow: hidden; /* Prevent content overflow */
-	}
-
-	.threads-column.open {
-		transform: translateX(0); /* Slides out completely to right edge, overlapping messages */
-	}
-
-	.threads-header {
-		padding: 1rem 0.5rem 1rem 1rem; /* Less padding on right to move X closer to edge */
-		border-bottom: 1px solid #e5e7eb;
-		background: white;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-	}
-
-	.threads-header h3 {
-		margin: 0;
-		font-size: 1rem;
-		font-weight: 600;
-		color: #374151;
-	}
-
-	.close-threads-btn {
-		background: none;
-		border: none;
-		font-size: 24px;
-		color: #6b7280;
-		cursor: pointer;
-		width: 32px;
-		height: 32px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 6px;
-		transition: all 0.2s;
-		line-height: 1;
-	}
-
-	.close-threads-btn:hover {
-		background-color: #f3f4f6;
-		color: #374151;
-	}
-
-	.threads-container {
-		flex: 1;
-		overflow-y: auto;
-		padding: 1rem;
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		min-height: 0; /* Force flex item to respect container height and enable scrolling */
-	}
-
-	.no-thread-selected, .no-replies {
-		text-align: center;
-		padding: 2rem 1rem;
-		color: #6b7280;
-		font-style: italic;
-	}
-
-	.original-message {
-		background: white;
-		border: 2px solid #3b82f6;
-		border-radius: 8px;
-		padding: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.thread-reply {
-		background: white;
-		border: 1px solid #e5e7eb;
-		border-radius: 8px;
-		padding: 1rem;
-		margin-left: 1rem;
-	}
-
-	/* Message components */
-	.message-header {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-bottom: 0.125rem;
-	}
-
-	.message-author {
-		font-weight: 700;
-		color: #1f2937;
-		font-size: 0.8rem;
-	}
-
-	.message-time {
-		font-size: 0.7rem;
-		color: #6b7280;
-	}
-
-	.message-content {
-		font-size: 0.85rem;
-		line-height: 1.4;
-		color: #374151;
-		margin: 0;
-	}
-
-	.message-actions {
-		display: flex;
-		gap: 0.5rem;
-		margin-top: 0.5rem;
-	}
-
-	/* Add Reply Form */
-	.add-reply-form {
-		padding: 1rem;
-		border-top: 1px solid #e5e7eb;
-		background: white;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.reply-input {
-		resize: vertical;
-		min-height: 60px;
-		padding: 0.75rem;
-		border: 1px solid #d1d5db;
-		border-radius: 6px;
-		font-size: 0.875rem;
-		font-family: inherit;
-	}
-
-	.reply-input:focus {
-		outline: 2px solid #3b82f6;
-		outline-offset: -1px;
-		border-color: #3b82f6;
-	}
-
-	.reply-input::placeholder {
-		color: #9ca3af;
-	}
-
 	.communications-placeholder {
 		padding: 40px;
 		text-align: center;
@@ -2336,28 +920,6 @@
 		gap: 8px;
 	}
 
-	.channel-item {
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		padding: 12px;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		transition: all 0.2s ease;
-		cursor: pointer;
-		user-select: none;
-	}
-
-	.channel-item:hover {
-		border-color: #007acc;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-	}
-
-	.channel-item.active {
-		border-color: #007acc;
-		background: #f0f8ff;
-	}
 
 	.channel-header {
 		display: flex;
@@ -2439,94 +1001,6 @@
 		padding: 0;
 	}
 	
-	.message {
-		background: transparent;
-		border: none;
-		border-radius: 0;
-		padding: 6px 16px;
-		box-shadow: none;
-		transition: background-color 0.1s ease;
-		margin-bottom: 4px;
-		border-bottom: 1px solid #f3f4f6;
-	}
-
-	.message:last-child {
-		border-bottom: none;
-	}
-	
-	.message:hover {
-		background: #f8f9fa;
-	}
-
-	.message.reply {
-		margin-left: 24px;
-		border-left: 2px solid #e5e7eb;
-		padding-left: 12px;
-	}
-
-	.message-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		margin-bottom: 1px;
-		font-size: 12px;
-		gap: 8px;
-	}
-
-	.message-author {
-		font-weight: 600;
-		color: #007acc;
-	}
-	
-	.message-time {
-		color: #999;
-	}
-	
-	.message-content {
-		font-size: 14px;
-		line-height: 1.3;
-		color: #333;
-		margin-bottom: 1px;
-	}
-
-	.message-actions {
-		margin-top: 1px;
-		display: flex;
-		gap: 4px;
-		align-items: center;
-	}
-
-	.reply-btn {
-		background: transparent;
-		border: none;
-		color: #64748b;
-		padding: 2px 4px;
-		border-radius: 3px;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.1s ease;
-		text-decoration: none;
-		opacity: 0.7;
-	}
-
-	.reply-btn:hover {
-		background: #e2e8f0;
-		color: #334155;
-		opacity: 1;
-	}
-
-
-	.no-messages {
-		text-align: center;
-		padding: 40px;
-		color: #6b7280;
-	}
-
-	.no-messages p {
-		margin: 8px 0;
-		font-size: 14px;
-	}
-
 	/* Message input styles */
 	.message-input-container {
 		border-top: 1px solid #e5e5e5;
@@ -2746,15 +1220,6 @@
 		background: #e5e7eb;
 	}
 
-	.btn-small.btn-primary {
-		background: #2563eb;
-		color: white;
-		border-color: #2563eb;
-	}
-
-	.btn-small.btn-primary:hover {
-		background: #1d4ed8;
-	}
 
 	.message-content {
 		margin-top: 8px;
@@ -3167,87 +1632,6 @@
 		flex-direction: column;
 	}
 
-	/* DM Agent List Styles */
-	.dm-agents-panel {
-		background: #f9f9f9;
-		border: 1px solid #e5e5e5;
-		border-radius: 6px;
-		padding: 16px;
-	}
-
-	.dm-agents-panel h3 {
-		margin: 0 0 12px 0;
-		color: #333;
-	}
-
-	.dm-agents-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 12px;
-	}
-
-	.dm-agents-header h3 {
-		margin: 0;
-	}
-
-	.dm-agent-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.dm-agent-item {
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		padding: 12px;
-		transition: all 0.2s ease;
-		cursor: pointer;
-		user-select: none;
-	}
-
-	.dm-agent-item:hover {
-		border-color: #007acc;
-		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-	}
-
-	.dm-agent-item.active {
-		border-color: #007acc;
-		background: #f0f8ff;
-	}
-
-	.dm-agent-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 4px;
-	}
-
-	.dm-agent-name {
-		font-weight: 500;
-		color: #333;
-	}
-
-	.dm-agent-role {
-		font-size: 12px;
-		color: #666;
-		background: #f3f4f6;
-		padding: 2px 6px;
-		border-radius: 10px;
-	}
-
-	.dm-agent-details {
-		display: flex;
-		gap: 8px;
-		font-size: 12px;
-		color: #666;
-	}
-
-	.dm-last-message {
-		font-size: 12px;
-		color: #666;
-	}
 
 	.no-dm-agents {
 		text-align: center;
@@ -3490,504 +1874,4 @@
 	}
 
 	/* Dialog styles */
-	.dialog-overlay {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		background: rgba(0, 0, 0, 0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-
-	.dialog {
-		background: white;
-		border-radius: 8px;
-		padding: 24px;
-		max-width: 500px;
-		width: 90%;
-		max-height: 80vh;
-		overflow-y: auto;
-		box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-	}
-
-	.dialog-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 20px;
-	}
-
-	.dialog h3 {
-		margin: 0 0 20px 0;
-		font-size: 18px;
-		font-weight: 600;
-		color: #374151;
-	}
-
-	.close-btn {
-		background: none;
-		border: none;
-		font-size: 24px;
-		cursor: pointer;
-		color: #6b7280;
-		padding: 0;
-		width: 24px;
-		height: 24px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.close-btn:hover {
-		color: #374151;
-	}
-
-	.form-group {
-		margin-bottom: 16px;
-	}
-
-	.form-group label {
-		display: block;
-		margin-bottom: 6px;
-		font-weight: 500;
-		color: #374151;
-		font-size: 14px;
-	}
-
-	.form-group input,
-	.form-group textarea,
-	.form-group select {
-		width: 100%;
-		border: 1px solid #d1d5db;
-		border-radius: 6px;
-		padding: 8px 12px;
-		font-size: 14px;
-		font-family: inherit;
-		transition: border-color 0.2s ease;
-	}
-
-	.form-group input:focus,
-	.form-group textarea:focus,
-	.form-group select:focus {
-		outline: none;
-		border-color: #2563eb;
-		box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-	}
-
-	.form-group textarea {
-		resize: vertical;
-		min-height: 80px;
-	}
-
-	.reply-context {
-		margin-bottom: 16px;
-		padding: 12px;
-		background: #f9fafb;
-		border-radius: 6px;
-		border: 1px solid #e5e7eb;
-	}
-
-	.original-message .message-meta {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 8px;
-		font-size: 14px;
-		color: #6b7280;
-	}
-
-	.message-preview {
-		color: #374151;
-		font-style: italic;
-	}
-
-	.reading-assignments-section {
-		margin-bottom: 16px;
-	}
-
-	.assignments-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 12px;
-	}
-
-	.assignments-header h4 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #374151;
-	}
-
-	.add-assignment-btn {
-		background: #f3f4f6;
-		color: #374151;
-		border: 1px solid #d1d5db;
-		padding: 6px 12px;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 12px;
-		font-weight: 500;
-		transition: all 0.2s ease;
-	}
-
-	.add-assignment-btn:hover {
-		background: #e5e7eb;
-	}
-
-	.assignment-row {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		margin-bottom: 8px;
-	}
-
-	.assignment-row select {
-		width: 120px;
-	}
-
-	.assignment-row input {
-		flex: 1;
-	}
-
-	.remove-btn {
-		background: #fecaca;
-		color: #dc2626;
-		border: 1px solid #fca5a5;
-		padding: 6px 12px;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 12px;
-		font-weight: 500;
-		transition: all 0.2s ease;
-	}
-
-	.remove-btn:hover {
-		background: #fca5a5;
-	}
-
-	.dialog-buttons {
-		display: flex;
-		gap: 12px;
-		justify-content: flex-end;
-		margin-top: 20px;
-	}
-
-	.cancel-btn {
-		background: #f3f4f6;
-		color: #374151;
-		border: 1px solid #d1d5db;
-		padding: 10px 16px;
-		border-radius: 6px;
-		cursor: pointer;
-		font-weight: 500;
-		transition: all 0.2s ease;
-	}
-
-	.cancel-btn:hover {
-		background: #e5e7eb;
-	}
-
-	/* Simple Reading Assignments */
-	.reading-assignments-simple {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 4px;
-		font-size: 12px;
-	}
-
-	.assignment-tag {
-		font-weight: 500;
-	}
-
-	.assignment-tag.read {
-		color: #22c55e;
-	}
-
-	.assignment-tag.partial {
-		color: #f59e0b;
-	}
-
-	.assignment-tag.unread {
-		color: #ef4444;
-	}
-
-	/* FROM/TO styling */
-	.message-from, .message-to {
-		font-size: 12px;
-		margin-right: 12px;
-	}
-
-	.message-from strong, .message-to strong {
-		color: #6b7280;
-		font-weight: 600;
-		margin-right: 4px;
-	}
-
-	.assignment-name.read {
-		color: #22c55e;
-		font-weight: 500;
-	}
-
-	.assignment-name.partial {
-		color: #f59e0b;
-		font-weight: 500;
-	}
-
-	.assignment-name.unread {
-		color: #ef4444;
-		font-weight: 500;
-	}
-
-	/* Markdown Content Styling */
-	.markdown-content {
-		line-height: 1.6;
-	}
-
-	.markdown-content h1,
-	.markdown-content h2,
-	.markdown-content h3,
-	.markdown-content h4,
-	.markdown-content h5,
-	.markdown-content h6 {
-		margin: 1.5em 0 0.5em 0;
-		font-weight: 600;
-		color: #111827;
-	}
-
-	.markdown-content h1 {
-		font-size: 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
-		padding-bottom: 0.5rem;
-	}
-
-	.markdown-content h2 {
-		font-size: 1.25rem;
-	}
-
-	.markdown-content h3 {
-		font-size: 1.125rem;
-	}
-
-	.markdown-content h4 {
-		font-size: 1rem;
-	}
-
-	.markdown-content p {
-		margin: 1em 0;
-	}
-
-	.markdown-content ul,
-	.markdown-content ol {
-		margin: 1em 0;
-		padding-left: 2em;
-	}
-
-	.markdown-content li {
-		margin: 0.25em 0;
-	}
-
-	.markdown-content blockquote {
-		margin: 1em 0;
-		padding: 0.5em 1em;
-		border-left: 4px solid #d1d5db;
-		background: #f9fafb;
-		color: #6b7280;
-	}
-
-	.markdown-content code {
-		background: #f3f4f6;
-		padding: 0.125em 0.25em;
-		border-radius: 0.25rem;
-		font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-		font-size: 0.875em;
-		color: #dc2626;
-	}
-
-	.markdown-content pre {
-		background: #1f2937;
-		color: #f9fafb;
-		padding: 1rem;
-		border-radius: 0.5rem;
-		overflow-x: auto;
-		margin: 1em 0;
-	}
-
-	.markdown-content pre code {
-		background: none;
-		padding: 0;
-		color: inherit;
-		font-size: 0.875rem;
-	}
-
-	.markdown-content table {
-		border-collapse: collapse;
-		width: 100%;
-		margin: 1em 0;
-	}
-
-	.markdown-content th,
-	.markdown-content td {
-		border: 1px solid #d1d5db;
-		padding: 0.5em;
-		text-align: left;
-	}
-
-	.markdown-content th {
-		background: #f9fafb;
-		font-weight: 600;
-	}
-
-	.markdown-content a {
-		color: #2563eb;
-		text-decoration: underline;
-	}
-
-	.markdown-content a:hover {
-		color: #1d4ed8;
-	}
-
-	.markdown-content strong {
-		font-weight: 600;
-	}
-
-	.markdown-content em {
-		font-style: italic;
-	}
-
-	.markdown-content hr {
-		border: none;
-		border-top: 1px solid #e5e7eb;
-		margin: 2em 0;
-	}
-
-	/* Read status icon */
-	.read-status-icon-container {
-		display: inline-flex;
-		align-items: center;
-		margin-right: 8px;
-		padding: 4px;
-		cursor: pointer;
-		border-radius: 6px;
-		transition: background-color 0.2s ease;
-		min-width: 32px;
-		min-height: 24px;
-		justify-content: center;
-	}
-	
-	.read-status-icon-container:hover {
-		background-color: rgba(0, 0, 0, 0.05);
-	}
-	
-	.read-status-icon {
-		font-size: 16px;
-		transition: all 0.2s ease;
-		user-select: none;
-	}
-	
-	.read-status-icon-container:hover .read-status-icon {
-		transform: scale(1.1);
-	}
-
-	/* Tooltip styles */
-	:global(.read-status-tooltip) {
-		background: #1f2937;
-		color: white;
-		padding: 8px 12px;
-		border-radius: 6px;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-		font-size: 12px;
-		max-width: 300px;
-		min-width: 200px;
-		pointer-events: auto;
-		user-select: none;
-	}
-	
-	
-	:global(.read-status-tooltip .tooltip-header) {
-		font-weight: 600;
-		margin-bottom: 6px;
-		color: #f3f4f6;
-		font-size: 13px;
-	}
-	
-	:global(.read-status-tooltip .agents-list) {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-	
-	:global(.read-status-tooltip .agent-status) {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 2px 0;
-	}
-	
-	:global(.read-status-tooltip .agent-icon) {
-		width: 16px;
-		font-size: 11px;
-	}
-	
-	:global(.read-status-tooltip .agent-name) {
-		font-weight: 500;
-		flex-grow: 1;
-	}
-	
-	:global(.read-status-tooltip .read-time) {
-		font-size: 10px;
-		color: #9ca3af;
-	}
-	
-	:global(.read-status-tooltip .agent-read) {
-		color: #10b981;
-	}
-	
-	:global(.read-status-tooltip .agent-unread) {
-		color: #f59e0b;
-	}
-
-	/* Assignment status styles */
-	:global(.read-status-tooltip .assignments-list) {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	
-	:global(.read-status-tooltip .assignment-status) {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 3px 0;
-		font-size: 12px;
-	}
-	
-	:global(.read-status-tooltip .assignment-icon) {
-		width: 16px;
-		font-size: 12px;
-	}
-	
-	:global(.read-status-tooltip .assignment-target) {
-		font-weight: 500;
-		color: #f3f4f6;
-		min-width: 120px;
-	}
-	
-	:global(.read-status-tooltip .assignment-status-text) {
-		font-size: 11px;
-		color: #9ca3af;
-	}
-	
-	:global(.read-status-tooltip .assignment-read) {
-		color: #10b981;
-	}
-	
-	:global(.read-status-tooltip .assignment-unread) {
-		color: #f59e0b;
-	}
 </style>
