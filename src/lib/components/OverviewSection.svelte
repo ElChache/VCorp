@@ -50,6 +50,23 @@
 			alert('Failed to stop monitoring service');
 		}
 	}
+
+	function formatUptime(uptimeMs: number): string {
+		const seconds = Math.floor(uptimeMs / 1000);
+		const minutes = Math.floor(seconds / 60);
+		const hours = Math.floor(minutes / 60);
+		const days = Math.floor(hours / 24);
+
+		if (days > 0) {
+			return `${days}d ${hours % 24}h ${minutes % 60}m`;
+		} else if (hours > 0) {
+			return `${hours}h ${minutes % 60}m`;
+		} else if (minutes > 0) {
+			return `${minutes}m ${seconds % 60}s`;
+		} else {
+			return `${seconds}s`;
+		}
+	}
 </script>
 
 <h2>{selectedProject.name}</h2>
@@ -77,29 +94,45 @@
 	{#if monitoringStatus?.stats}
 		<div class="monitoring-stats">
 			<div class="stat-item">
-				<span class="stat-label">Total Checks:</span>
+				<span class="stat-label">Monitoring Cycles:</span>
 				<span class="stat-value">{monitoringStatus.stats.totalChecks}</span>
 			</div>
 			<div class="stat-item">
-				<span class="stat-label">Status Updates:</span>
+				<span class="stat-label">Agent Updates:</span>
 				<span class="stat-value">{monitoringStatus.stats.statusUpdates}</span>
 			</div>
 			<div class="stat-item">
-				<span class="stat-label">Notifications Sent:</span>
+				<span class="stat-label">Messages Notified:</span>
 				<span class="stat-value">{monitoringStatus.stats.notificationsSent}</span>
 			</div>
 			<div class="stat-item">
-				<span class="stat-label">Gentle Pokes:</span>
-				<span class="stat-value">{monitoringStatus.stats.gentlePokes || 0}</span>
+				<span class="stat-label">Reminders Sent:</span>
+				<span class="stat-value">{monitoringStatus.stats.remindersSent || 0}</span>
 			</div>
 			<div class="stat-item">
-				<span class="stat-label">Errors:</span>
-				<span class="stat-value">{monitoringStatus.stats.errors}</span>
+				<span class="stat-label">Terminal Logs:</span>
+				<span class="stat-value">{monitoringStatus.stats.terminalLogsCaptured || 0}</span>
 			</div>
+			<div class="stat-item">
+				<span class="stat-label">System Errors:</span>
+				<span class="stat-value" class:error-count={monitoringStatus.stats.errors > 0}>{monitoringStatus.stats.errors}</span>
+			</div>
+			{#if monitoringStatus.stats.startTime}
+				<div class="stat-item">
+					<span class="stat-label">Running Since:</span>
+					<span class="stat-value time-value">{new Date(monitoringStatus.stats.startTime).toLocaleTimeString()}</span>
+				</div>
+			{/if}
 			{#if monitoringStatus.stats.lastCheck}
 				<div class="stat-item">
-					<span class="stat-label">Last Check:</span>
-					<span class="stat-value">{new Date(monitoringStatus.stats.lastCheck).toLocaleTimeString()}</span>
+					<span class="stat-label">Last Activity:</span>
+					<span class="stat-value time-value">{new Date(monitoringStatus.stats.lastCheck).toLocaleTimeString()}</span>
+				</div>
+			{/if}
+			{#if monitoringStatus.stats.uptime}
+				<div class="stat-item">
+					<span class="stat-label">Uptime:</span>
+					<span class="stat-value uptime-value">{formatUptime(monitoringStatus.stats.uptime)}</span>
 				</div>
 			{/if}
 		</div>
@@ -226,5 +259,19 @@
 		font-size: 16px;
 		font-weight: bold;
 		color: #333;
+	}
+
+	.stat-value.error-count {
+		color: #dc3545;
+	}
+
+	.stat-value.time-value {
+		font-size: 14px;
+		color: #495057;
+	}
+
+	.stat-value.uptime-value {
+		color: #28a745;
+		font-weight: 600;
 	}
 </style>

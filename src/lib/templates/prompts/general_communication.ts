@@ -1,6 +1,7 @@
 export const general_communication = {
   name: "General Communication Instructions", 
   type: "communication",
+  slug: "general-communication",
   content: `# VCorp Communication System
 
 🚨 **CRITICAL**: ALL communication MUST use VCorp commands. Text output is NOT visible to humans or other agents. ONLY VCorp commands create visible messages.

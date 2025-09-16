@@ -1,6 +1,7 @@
 export const phase_creator = {
   name: 'Phase Creator',
   type: 'specialized_capability',
+  slug: 'phase-creator',
   content: `# Phase Creation Authority
 
 You have the authority to create development phases for this project. Use this power responsibly to structure and coordinate team workflows.

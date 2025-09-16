@@ -1,6 +1,7 @@
 export const ticketing_system = {
   name: "Ticketing System Instructions",
-  type: "ticketing_system", 
+  type: "ticketing_system",
+  slug: "ticketing-system",
   content: `# Ticketing System
 
 ## Overview

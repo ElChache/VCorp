@@ -1,7 +1,138 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, desc, sql, like } from 'drizzle-orm';
+
+// GET /api/tickets - List tickets with filters
+export async function GET({ url }) {
+	try {
+		const projectId = url.searchParams.get('projectId');
+		const agentId = url.searchParams.get('agentId');
+		const assignedTo = url.searchParams.get('assignedTo');
+		const status = url.searchParams.get('status');
+		const priority = url.searchParams.get('priority');
+		const search = url.searchParams.get('search');
+		const since = url.searchParams.get('since');
+		const limit = parseInt(url.searchParams.get('limit') || '50');
+		const offset = parseInt(url.searchParams.get('offset') || '0');
+
+		// Validate projectId if provided
+		if (projectId) {
+			const parsedProjectId = parseInt(projectId);
+			if (isNaN(parsedProjectId) || parsedProjectId <= 0) {
+				return json({ 
+					error: 'Invalid projectId: must be a positive integer'
+				}, { status: 400 });
+			}
+		}
+
+		// Build query conditions
+		let conditions = [eq(content.type, 'ticket')];
+
+		if (projectId) {
+			conditions.push(eq(content.projectId, parseInt(projectId)));
+		}
+
+		if (status) {
+			conditions.push(eq(content.status, status));
+		}
+
+		if (priority) {
+			conditions.push(eq(content.priority, priority));
+		}
+
+		if (since) {
+			conditions.push(sql`${content.createdAt} > ${since}`);
+		}
+
+		if (search) {
+			const searchPattern = `%${search}%`;
+			conditions.push(
+				or(
+					like(content.title, searchPattern),
+					like(content.body, searchPattern)
+				)
+			);
+		}
+
+		// Handle assignedTo filter - check both direct assignment and reading assignments
+		if (assignedTo) {
+			// Get tickets that are either:
+			// 1. Directly assigned to this agent (claimedByAgent)
+			// 2. Have reading assignments for this agent
+			const assignedTicketsSubquery = db
+				.select({ contentId: readingAssignments.contentId })
+				.from(readingAssignments)
+				.where(
+					or(
+						and(
+							eq(readingAssignments.assignedToType, 'agent'),
+							eq(readingAssignments.assignedTo, assignedTo)
+						),
+						// Also check if agent's role is assigned
+						and(
+							eq(readingAssignments.assignedToType, 'role'),
+							sql`${readingAssignments.assignedTo} = (
+								SELECT ${agents.roleType}
+								FROM ${agents}
+								WHERE ${agents.id} = ${assignedTo}
+								LIMIT 1
+							)`
+						)
+					)
+				);
+
+			conditions.push(
+				or(
+					eq(content.claimedByAgent, assignedTo),
+					sql`${content.id} IN (${assignedTicketsSubquery})`
+				)
+			);
+		}
+
+		// Query tickets
+		const tickets = await db
+			.select({
+				id: content.id,
+				projectId: content.projectId,
+				type: content.type,
+				title: content.title,
+				body: content.body,
+				status: content.status,
+				priority: content.priority,
+				assignedToRoleType: content.assignedToRoleType,
+				claimedByAgent: content.claimedByAgent,
+				authorAgentId: content.authorAgentId,
+				createdAt: content.createdAt,
+				updatedAt: content.updatedAt
+			})
+			.from(content)
+			.where(and(...conditions))
+			.orderBy(desc(content.createdAt))
+			.limit(limit)
+			.offset(offset);
+
+		// Get total count
+		const [countResult] = await db
+			.select({ count: sql`count(*)` })
+			.from(content)
+			.where(and(...conditions));
+
+		return json({
+			tickets,
+			total: Number(countResult.count),
+			limit,
+			offset
+		});
+
+	} catch (error) {
+		console.error('Failed to fetch tickets:', error);
+		return json({ 
+			error: 'Failed to fetch tickets',
+			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+		}, { status: 500 });
+	}
+}
 
 // POST /api/tickets - Create a work ticket
 export async function POST({ request }) {

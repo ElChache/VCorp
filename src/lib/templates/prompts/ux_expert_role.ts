@@ -1,6 +1,7 @@
 export const ux_expert_role = {
   name: "UX Expert Role",
-  type: "role_description", 
+  type: "role_description",
+  slug: "ux-expert-role",
   content: `# UX Expert
 
 ## Your Role

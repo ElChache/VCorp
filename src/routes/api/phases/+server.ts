@@ -1,12 +1,15 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 // GET /api/phases - Get phases for a project
 export async function GET({ url }) {
 	try {
 		const projectId = url.searchParams.get('projectId');
+		const agentId = url.searchParams.get('agentId');
+		const limit = parseInt(url.searchParams.get('limit') || '50');
+		const offset = parseInt(url.searchParams.get('offset') || '0');
 		
 		if (!projectId) {
 			return json({ 
@@ -22,7 +25,7 @@ export async function GET({ url }) {
 		}
 
 		// Get phases for the project
-		const phases = await db
+		let phasesQuery = db
 			.select({
 				id: content.id,
 				type: content.type,
@@ -41,7 +44,11 @@ export async function GET({ url }) {
 				eq(content.projectId, parsedProjectId),
 				eq(content.type, 'phase')
 			))
-			.orderBy(content.createdAt);
+			.orderBy(content.createdAt)
+			.limit(limit)
+			.offset(offset);
+		
+		const phases = await phasesQuery;
 
 		// For each phase, get the reading assignments
 		const phasesWithAssignments = await Promise.all(
@@ -81,8 +88,49 @@ export async function GET({ url }) {
 				};
 			})
 		);
+		
+		// Filter by agent if provided
+		let filteredPhases = phasesWithAssignments;
+		if (agentId) {
+			// Get the agent's role for role-based filtering
+			const [agent] = await db
+				.select({ roleType: agents.roleType })
+				.from(agents)
+				.where(eq(agents.id, agentId))
+				.limit(1);
+			
+			// Filter phases to only those assigned to this agent's role or this agent specifically
+			filteredPhases = phasesWithAssignments.filter(phase => {
+				// Check if phase is assigned to agent's role
+				if (agent?.roleType && phase.assignedToRoleType === agent.roleType) {
+					return true;
+				}
+				
+				// Check if phase has reading assignment for this agent
+				const hasAssignment = phase.readingAssignments?.some(assignment => 
+					(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
+					(assignment.assignedToType === 'role' && agent?.roleType && assignment.assignedTo === agent.roleType)
+				);
+				
+				return hasAssignment;
+			});
+		}
+		
+		// Get total count for pagination
+		const [countResult] = await db
+			.select({ count: sql`count(*)` })
+			.from(content)
+			.where(and(
+				eq(content.projectId, parsedProjectId),
+				eq(content.type, 'phase')
+			));
 
-		return json(phasesWithAssignments);
+		return json({
+			phases: filteredPhases,
+			total: agentId ? filteredPhases.length : Number(countResult.count),
+			limit,
+			offset
+		});
 	} catch (error) {
 		console.error('Failed to fetch phases:', error);
 		return json({ 

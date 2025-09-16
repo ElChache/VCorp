@@ -1,6 +1,7 @@
 export const lead_developer_role = {
   name: "Lead Developer Role",
   type: "role_description",
+  slug: "lead-developer-role",
   content: `# Lead Developer
 
 ## Your Role

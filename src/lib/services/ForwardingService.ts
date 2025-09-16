@@ -18,7 +18,7 @@ export async function checkForwardingStatus(projectId: number): Promise<boolean>
 			return data.enabled || false;
 		}
 	} catch (error) {
-		console.error('Failed to check forwarding status:', error);
+		// Silently fail to reduce log spam during development
 	}
 	return false;
 }

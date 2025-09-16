@@ -28,6 +28,7 @@ export const roleTemplates = pgTable('role_templates', {
 export const promptTemplates = pgTable('prompt_templates', {
 	id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
 	name: text('name').notNull(),
+	slug: text('slug').notNull().unique(), // Auto-generated from filename: 'worktree_workflow', 'visual_testing_instructions'
 	type: text('type').notNull(), // 'system_intro', 'communication', 'worktree_workflow', 'company_workflow'
 	content: text('content').notNull(),
 	premade: text('premade'), // null for normal prompts, 'channel-instructions' for dynamic channel prompts
@@ -89,6 +90,7 @@ export const prompts = pgTable('prompts', {
 	projectId: integer('project_id').notNull().references(() => projects.id),
 	templateId: integer('template_id').references(() => promptTemplates.id), // null for custom prompts
 	name: text('name').notNull(),
+	slug: text('slug').notNull(), // Inherited from template or custom: 'worktree_workflow', 'visual_testing_instructions'
 	type: text('type').notNull(), // 'system_intro', 'communication', etc.
 	content: text('content').notNull(),
 	premade: text('premade'), // null for normal prompts, inherited from template or custom

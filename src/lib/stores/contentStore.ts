@@ -14,7 +14,8 @@ import {
 	isContentUnreadByHumanDirector,
 	getHumanDirectorAssignments,
 	isMessageFromHumanDirector,
-	getHumanDirectorAgentId
+	getHumanDirectorAgentId,
+	isAssignmentForHumanDirector
 } from '$lib/utils/humanDirectorClientHelpers';
 
 // ==================== Core State ====================
@@ -500,25 +501,67 @@ export const allReadingAssignments = derived(contentStore, $store => {
 	return assignments;
 });
 
-// Reading assignments for human-director
-export const humanDirectorReadingAssignments = derived(allReadingAssignments, $assignments => 
-	$assignments.filter(assignment => {
-		return getHumanDirectorAssignments({ readingAssignments: [assignment] }).length > 0;
-	})
+// ==================== Unread Count System ====================
+// Centralized unread badge logic
+
+// All unread content for human director (simple rule: has unread assignment)
+export const humanDirectorUnreadContent = derived(allContent, $content => 
+	$content.filter(content => isContentUnreadByHumanDirector(content))
 );
 
-// Unread assignments for human-director
-export const humanDirectorUnreadAssignments = derived(humanDirectorReadingAssignments, $assignments => {
-	const unreadAssignments = $assignments.filter(assignment => {
-		const isUnread = isContentUnreadByHumanDirector({ readingAssignments: [assignment] });
-		return isUnread;
+// Channel messages that are unread
+export const unreadChannelMessages = derived(channelMessages, $messages => 
+	$messages.filter(msg => isContentUnreadByHumanDirector(msg))
+);
+
+// Direct messages that are unread  
+export const unreadDirectMessages = derived(directMessages, $messages =>
+	$messages.filter(msg => isContentUnreadByHumanDirector(msg))
+);
+
+// Documents that are unread
+export const unreadDocuments = derived(documents, $docs =>
+	$docs.filter(doc => isContentUnreadByHumanDirector(doc))
+);
+
+// Tickets that are unread
+export const unreadTickets = derived(tickets, $tickets =>
+	$tickets.filter(ticket => isContentUnreadByHumanDirector(ticket))
+);
+
+// Phases that are unread
+export const unreadPhases = derived(phases, $phases =>
+	$phases.filter(phase => isContentUnreadByHumanDirector(phase))
+);
+
+// Centralized badge counts
+export const channelUnreadCount = derived(unreadChannelMessages, $messages => $messages.length);
+export const dmUnreadCount = derived(unreadDirectMessages, $messages => $messages.length);
+export const documentsUnreadCount = derived(unreadDocuments, $docs => $docs.length);
+export const ticketsUnreadCount = derived(unreadTickets, $tickets => $tickets.length);
+export const phasesUnreadCount = derived(unreadPhases, $phases => $phases.length);
+
+// Total unread count (sum of all types)
+export const totalUnreadCount = derived(
+	[channelUnreadCount, dmUnreadCount, documentsUnreadCount, ticketsUnreadCount, phasesUnreadCount],
+	([$channels, $dms, $docs, $tickets, $phases]) => $channels + $dms + $docs + $tickets + $phases
+);
+
+// Legacy assignments (keeping for compatibility but using simpler logic)
+export const humanDirectorUnreadAssignments = derived(humanDirectorUnreadContent, $content => {
+	const assignments: any[] = [];
+	$content.forEach(content => {
+		if (content.readingAssignments) {
+			content.readingAssignments.forEach(assignment => {
+				if (isAssignmentForHumanDirector(assignment)) {
+					assignments.push({
+						...assignment,
+						contentId: content.id,
+						content: content
+					});
+				}
+			});
+		}
 	});
-	
-	console.log('🔄 humanDirectorUnreadAssignments recalculated:', {
-		totalAssignments: $assignments.length,
-		unreadCount: unreadAssignments.length,
-		unreadAssignments: unreadAssignments.map(a => ({ id: a.id, contentId: a.contentId }))
-	});
-	
-	return unreadAssignments;
+	return assignments;
 });

@@ -1,3 +1,0 @@
-#!/bin/bash
-# VCorp agent wrapper - auto-generated for it_alice_3206
-exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=7 --agent=it_alice_3206 --role=it-administrator "$@"

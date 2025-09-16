@@ -1,6 +1,7 @@
 export const phase_workflow = {
   name: "Phase Workflow Instructions",
   type: "phase_workflow",
+  slug: "phase-workflow",
   content: `# Phase Workflow Instructions for AI Agents
 
 ## CRITICAL RESPONSIBILITY

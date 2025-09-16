@@ -1,6 +1,7 @@
 export const executive_to_human_comms = {
   name: "Executive to Human Communication Instructions",
   type: "executive_communication",
+  slug: "executive-to-human-comms",
   content: `# Executive to Human Communication Protocol
 
 ## Overview

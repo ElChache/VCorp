@@ -73,24 +73,44 @@ export async function POST() {
 		// Create all prompt templates from core templates
 		const createdPromptTemplates: Record<string, any> = {};
 		for (const [key, promptTemplate] of Object.entries(CORE_PROMPT_TEMPLATES)) {
-			console.log(`📄 Creating prompt template: ${promptTemplate.name}`);
+			console.log(`📄 Creating prompt template: ${promptTemplate.name} (slug: ${key})`);
 			
-			// First check if it already exists
-			const [existing] = await db
-				.select()
-				.from(promptTemplates)
-				.where(eq(promptTemplates.name, promptTemplate.name))
-				.limit(1);
+			// First check if it already exists (check by slug now)
+			let existing = null;
+			try {
+				[existing] = await db
+					.select()
+					.from(promptTemplates)
+					.where(eq(promptTemplates.slug, key))
+					.limit(1);
+			} catch (error) {
+				console.log(`No existing record found for slug: ${key}, will create new one`);
+				existing = null;
+			}
 				
 			if (existing) {
-				createdPromptTemplates[key] = existing;
-				console.log(`♻️ Using existing prompt template: ${existing.name} (ID: ${existing.id})`);
+				// Update existing to ensure content is current
+				const [updated] = await db
+					.update(promptTemplates)
+					.set({
+						name: promptTemplate.name,
+						type: promptTemplate.type,
+						content: promptTemplate.content,
+						premade: promptTemplate.premade,
+						isGlobal: promptTemplate.isGlobal || false,
+					})
+					.where(eq(promptTemplates.id, existing.id))
+					.returning();
+				
+				createdPromptTemplates[key] = updated;
+				console.log(`🔄 Updated existing prompt template: ${updated.name} (slug: ${key}, ID: ${updated.id})`);
 			} else {
 				// Create new one if it doesn't exist
 				const [created] = await db
 					.insert(promptTemplates)
 					.values({
 						name: promptTemplate.name,
+						slug: key, // Use the key as the slug
 						type: promptTemplate.type,
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
@@ -101,7 +121,7 @@ export async function POST() {
 				
 				if (created) {
 					createdPromptTemplates[key] = created;
-					console.log(`✅ Created prompt template: ${created.name} (ID: ${created.id})`);
+					console.log(`✅ Created prompt template: ${created.name} (slug: ${key}, ID: ${created.id})`);
 				}
 			}
 		}
@@ -212,28 +232,28 @@ export async function POST() {
 		// Define the composition mappings - now only role-specific prompts
 		// Global prompts are handled via squad assignments
 		const rolePromptMappings = [
-			// product-manager - Role description + phase creation ability
-			{ role: 'product-manager', prompts: ['product-manager', 'phase_creator'] },
-			// backend-developer - Only role description
-			{ role: 'backend-developer', prompts: ['backend-developer'] },
-			// frontend-developer - Only role description
-			{ role: 'frontend-developer', prompts: ['frontend-developer'] },
-			// lead-developer - Role description + Lead workflow
-			{ role: 'lead-developer', prompts: ['lead-developer', 'leads_worktree_workflow'] },
-			// ai-developer - Only role description
-			{ role: 'ai-developer', prompts: ['ai-developer'] },
-			// ux-expert - Only role description
-			{ role: 'ux-expert', prompts: ['ux-expert'] },
-			// graphic-designer - Only role description
-			{ role: 'graphic-designer', prompts: ['graphic-designer'] },
-			// technical-qa - Only role description
-			{ role: 'technical-qa', prompts: ['technical-qa'] },
-			// director-assistant - Role description + communication prompts + workflow prompts
-			{ role: 'director-assistant', prompts: ['director-assistant', 'core_team_to_human_comms', 'executive_to_human_comms', 'phase_workflow', 'ticketing_system'] },
-			// system-architect - Role description + Lead workflow + phase creation ability
-			{ role: 'system-architect', prompts: ['system-architect', 'leads_worktree_workflow', 'phase_creator'] },
-			// it-administrator - Role description + git workflow (to monitor developer compliance)
-			{ role: 'it-administrator', prompts: ['it-administrator', 'worktree_workflow'] }
+			// product-manager - Role + workspace + phase creation ability
+			{ role: 'product-manager', prompts: ['product-manager', 'agent_workspace', 'phase_creator'] },
+			// backend-developer - Role + workspace + git workflow
+			{ role: 'backend-developer', prompts: ['backend-developer', 'agent_workspace', 'worktree_workflow'] },
+			// frontend-developer - Role + workspace + git workflow
+			{ role: 'frontend-developer', prompts: ['frontend-developer', 'agent_workspace', 'worktree_workflow'] },
+			// lead-developer - Role + workspace + lead workflow
+			{ role: 'lead-developer', prompts: ['lead-developer', 'agent_workspace', 'leads_worktree_workflow'] },
+			// ai-developer - Role + workspace + git workflow
+			{ role: 'ai-developer', prompts: ['ai-developer', 'agent_workspace', 'worktree_workflow'] },
+			// ux-expert - Role + workspace
+			{ role: 'ux-expert', prompts: ['ux-expert', 'agent_workspace'] },
+			// graphic-designer - Role + workspace
+			{ role: 'graphic-designer', prompts: ['graphic-designer', 'agent_workspace'] },
+			// technical-qa - Role + workspace
+			{ role: 'technical-qa', prompts: ['technical-qa', 'agent_workspace'] },
+			// director-assistant - Role + workspace + communication prompts + workflow prompts
+			{ role: 'director-assistant', prompts: ['director-assistant', 'agent_workspace', 'core_team_to_human_comms', 'executive_to_human_comms', 'phase_workflow', 'ticketing_system'] },
+			// system-architect - Role + workspace + lead workflow + phase creation
+			{ role: 'system-architect', prompts: ['system-architect', 'agent_workspace', 'leads_worktree_workflow', 'phase_creator'] },
+			// it-administrator - Role + workspace + git workflow (to monitor compliance)
+			{ role: 'it-administrator', prompts: ['it-administrator', 'agent_workspace', 'worktree_workflow'] }
 		];
 
 		for (const mapping of rolePromptMappings) {

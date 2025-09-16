@@ -1,7 +1,112 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { content, readingAssignments, agents } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { content, readingAssignments, agents, projects } from '$lib/db/schema';
+import { eq, and, or, gte, desc, sql } from 'drizzle-orm';
+import { promises as fs } from 'fs';
+import { join, dirname } from 'path';
+
+// GET /api/documents - List documents for a project with query options
+export async function GET({ url }) {
+	try {
+		const projectId = parseInt(url.searchParams.get('projectId') || '');
+		const authorId = url.searchParams.get('authorId');
+		const search = url.searchParams.get('search');
+		const since = url.searchParams.get('since');
+		const limit = parseInt(url.searchParams.get('limit') || '50');
+		const offset = parseInt(url.searchParams.get('offset') || '0');
+		
+		if (isNaN(projectId)) {
+			return json({ error: 'Invalid project ID' }, { status: 400 });
+		}
+
+		if (limit > 100) {
+			return json({ error: 'Limit cannot exceed 100' }, { status: 400 });
+		}
+
+		// Build base query conditions
+		const conditions = [
+			eq(content.projectId, projectId),
+			eq(content.type, 'document')
+		];
+
+		// Add author filter
+		if (authorId) {
+			conditions.push(eq(content.authorAgentId, authorId));
+		}
+
+		// Add date filter
+		if (since) {
+			const sinceDate = new Date(since);
+			if (!isNaN(sinceDate.getTime())) {
+				conditions.push(gte(content.createdAt, sinceDate));
+			}
+		}
+
+		// Build query
+		let query = db
+			.select({
+				id: content.id,
+				title: content.title,
+				body: search ? content.body : sql`LEFT(${content.body}, 200) as body`, // Truncate body unless searching
+				documentSlug: content.documentSlug,
+				authorAgentId: content.authorAgentId,
+				createdAt: content.createdAt,
+				updatedAt: content.updatedAt
+			})
+			.from(content)
+			.where(and(...conditions))
+			.orderBy(desc(content.updatedAt))
+			.limit(limit)
+			.offset(offset);
+
+		// Add search filter if provided
+		if (search) {
+			const searchConditions = [
+				...conditions,
+				or(
+					sql`${content.title} ILIKE ${'%' + search + '%'}`,
+					sql`${content.body} ILIKE ${'%' + search + '%'}`
+				)
+			];
+			
+			query = db
+				.select({
+					id: content.id,
+					title: content.title,
+					body: content.body,
+					documentSlug: content.documentSlug,
+					authorAgentId: content.authorAgentId,
+					createdAt: content.createdAt,
+					updatedAt: content.updatedAt
+				})
+				.from(content)
+				.where(and(...searchConditions))
+				.orderBy(desc(content.updatedAt))
+				.limit(limit)
+				.offset(offset);
+		}
+
+		const documents = await query;
+
+		return json({
+			documents,
+			pagination: {
+				limit,
+				offset,
+				total: documents.length,
+				hasMore: documents.length === limit
+			},
+			filters: {
+				authorId: authorId || null,
+				search: search || null,
+				since: since || null
+			}
+		});
+	} catch (error) {
+		console.error('Failed to fetch documents:', error);
+		return json({ error: 'Failed to fetch documents' }, { status: 500 });
+	}
+}
 
 // POST /api/documents - Create a new document
 export async function POST({ request }) {
@@ -176,6 +281,88 @@ export async function POST({ request }) {
 				target: assignment.target,
 				assignmentId: createdAssignments[index][0].id
 			}));
+		}
+
+		// Create file for the document based on slug presence
+		try {
+			// Get project path
+			const [project] = await db
+				.select({ path: projects.path })
+				.from(projects)
+				.where(eq(projects.id, parsedProjectId))
+				.limit(1);
+
+			if (project?.path) {
+				let filePath: string;
+				let fileContent = `# ${newDocument.title}\n\n${newDocument.body}`;
+
+				if (newDocument.documentSlug) {
+					// Document with slug goes to /docs/
+					filePath = join(project.path, 'docs', `${newDocument.documentSlug}.md`);
+				} else {
+					// Document without slug goes to agent's current worktree
+					if (newDocument.authorAgentId) {
+						// Get agent's current worktree
+						const [agent] = await db
+							.select({ worktreePath: agents.worktreePath })
+							.from(agents)
+							.where(eq(agents.id, newDocument.authorAgentId))
+							.limit(1);
+						
+						if (agent?.worktreePath) {
+							// Generate a filename from title or use timestamp
+							const safeTitle = newDocument.title
+								.toLowerCase()
+								.replace(/[^a-z0-9]+/g, '-')
+								.replace(/^-+|-+$/g, '')
+								.substring(0, 50);
+							const filename = safeTitle || `document-${Date.now()}`;
+							
+							// Use the agent's worktree path
+							filePath = join(
+								agent.worktreePath,
+								'docs', 
+								`${filename}.md`
+							);
+						} else {
+							// Fallback to agent workspace if no worktree
+							const safeTitle = newDocument.title
+								.toLowerCase()
+								.replace(/[^a-z0-9]+/g, '-')
+								.replace(/^-+|-+$/g, '')
+								.substring(0, 50);
+							const filename = safeTitle || `document-${Date.now()}`;
+							
+							filePath = join(
+								project.path, 
+								'agent_workspaces', 
+								newDocument.authorAgentId, 
+								'docs', 
+								`${filename}.md`
+							);
+						}
+					} else {
+						// No author and no slug - skip file creation
+						console.log('Document has no slug and no author, skipping file creation');
+						filePath = null;
+					}
+				}
+
+				if (filePath) {
+					// Ensure directory exists
+					await fs.mkdir(dirname(filePath), { recursive: true });
+					
+					// Write the file
+					await fs.writeFile(filePath, fileContent);
+					console.log(`📄 Created file for document: ${filePath}`);
+				}
+			} else {
+				console.warn(`Project ${parsedProjectId} has no local path, skipping file creation`);
+			}
+		} catch (fileError) {
+			// Log error but don't fail the API request
+			console.error('Failed to create file for document:', fileError);
+			// Continue - file creation is best effort
 		}
 
 		return json({

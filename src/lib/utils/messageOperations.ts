@@ -1,107 +1,63 @@
 /**
  * Message Operations Utilities
- * Extracted from CommunicationsSection.svelte
- * Handles message read status, marking as read, and related operations
+ * Simplified logic for read status and message operations
  */
 
 import { 
 	isContentUnreadByHumanDirector, 
 	getHumanDirectorAssignments, 
 	isReadByHumanDirector,
-	getHumanDirectorAgentId
+	getHumanDirectorAgentId,
+	isAssignmentForHumanDirector
 } from './humanDirectorClientHelpers';
 import { contentActions } from '../stores/contentStore';
-
-// Helper function to check if a message is unread by human director
-export function isUnreadByHumanDirector(message: any): boolean {
-	return isContentUnreadByHumanDirector(message);
-}
 
 // Helper function to check if a message is fully read by all assigned agents
 export function isMessageFullyRead(message: any): boolean {
 	if (!message.readingAssignments) return false;
 	
-	const assignments = message.readingAssignments;
-	
-	// Filter to only assignments that have targets/should be read
-	const assignmentsToCheck = assignments.filter((assignment: any) => {
-		// Old format: use totalTargets
-		if (assignment.totalTargets !== undefined) {
-			return assignment.totalTargets > 0;
-		}
-		// New format: assume all assignments should be checked (simplified)
-		return true;
-	});
-	
-	if (assignmentsToCheck.length === 0) return false;
-	
-	return assignmentsToCheck.every((assignment: any) => {
-		// Old format: use isFullyRead
-		if (assignment.isFullyRead !== undefined) {
-			return assignment.isFullyRead;
-		}
-		// New format: assignment is fully read if it has reads
+	// Simple logic: all assignments have reads
+	return message.readingAssignments.every((assignment: any) => {
 		return assignment.reads && assignment.reads.length > 0;
 	});
 }
 
-// Helper function to check if a message is partially read
+// Helper function to check if a message is partially read  
 export function isMessagePartiallyRead(message: any): boolean {
 	if (!message.readingAssignments) return false;
 	
 	const assignments = message.readingAssignments;
 	
-	// Calculate read status for each assignment based on available data
-	const hasFullyReadAssignments = assignments.some((assignment: any) => {
-		// Check if assignment has the pre-calculated isFullyRead field (old format)
-		if (assignment.isFullyRead !== undefined) {
-			return assignment.isFullyRead;
-		}
-		// For new format, assignment is "fully read" if it has any reads (simplified logic)
-		return assignment.reads && assignment.reads.length > 0;
-	});
+	// Simple logic: some assignments have reads, some don't
+	const hasReadAssignments = assignments.some((assignment: any) => 
+		assignment.reads && assignment.reads.length > 0
+	);
+	const hasUnreadAssignments = assignments.some((assignment: any) => 
+		!assignment.reads || assignment.reads.length === 0
+	);
 	
-	const hasUnreadAssignments = assignments.some((assignment: any) => {
-		// Check if assignment has the pre-calculated isFullyRead field (old format)
-		if (assignment.isFullyRead !== undefined) {
-			return !assignment.isFullyRead;
-		}
-		// For new format, assignment is "unread" if it has no reads
-		return !assignment.reads || assignment.reads.length === 0;
-	});
-	
-	// Partially read = some assignments are fully read AND some are not fully read
-	return hasFullyReadAssignments && hasUnreadAssignments;
+	return hasReadAssignments && hasUnreadAssignments;
 }
 
-// Check if a message has unread assignment for human director
-export function hasUnreadAssignmentForHumanDirector(message: any): boolean {
-	return isContentUnreadByHumanDirector(message);
-}
-
-// Mark message as read without refreshing UI
-export async function markMessageAsReadWithoutRefresh(message: any, projectId?: number): Promise<void> {
+// Mark message as read without refreshing UI - simplified
+export async function markMessageAsReadWithoutRefresh(message: any): Promise<void> {
 	if (!message.readingAssignments) return;
 	
 	try {
-		// Get current human director ID from store
 		const humanDirectorId = getHumanDirectorAgentId();
 		if (!humanDirectorId) {
 			console.warn('No human director found in store');
 			return;
 		}
 		
-		// Find the assignment(s) for human-director
+		// Find assignments for human director
 		const humanDirectorAssignments = getHumanDirectorAssignments(message);
 		
-		// Mark each assignment as read
+		// Mark each unread assignment as read
 		for (const assignment of humanDirectorAssignments) {
-			// Check if already read to avoid duplicate marking
-			const hasRead = assignment.readBy ? assignment.readBy.some((read: any) => 
+			const hasRead = assignment.reads?.some((read: any) => 
 				isReadByHumanDirector(read)
-			) : assignment.reads ? assignment.reads.some((read: any) => 
-				isReadByHumanDirector(read)
-			) : false;
+			) || false;
 			
 			if (!hasRead) {
 				await fetch('/api/reading-assignments/mark-read', {
@@ -119,82 +75,43 @@ export async function markMessageAsReadWithoutRefresh(message: any, projectId?: 
 	}
 }
 
-// Mark message as read and update counts/UI
-export async function markMessageAsRead(
-	message: any,
-	callbacks: {
-		updateCounts?: (channelDecrement: number, dmDecrement: number) => void;
-		refreshChannel?: () => Promise<void>;
-		refreshDM?: () => Promise<void>;
-		triggerPolling?: () => void;
-	} = {}
-): Promise<void> {
+// Mark message as read - simplified, relies on store reactivity
+export async function markMessageAsRead(message: any): Promise<void> {
 	if (!message.readingAssignments) return;
 	
 	try {
-		// Get current human director ID from store
 		const humanDirectorId = getHumanDirectorAgentId();
 		if (!humanDirectorId) {
 			console.warn('No human director found in store');
 			return;
 		}
 		
-		// Find the assignment(s) for human-director
+		// Find assignments for human director
 		const humanDirectorAssignments = getHumanDirectorAssignments(message);
 		
-		// Mark each assignment as read with optimistic updates
-		let markedAsRead = false;
-		const apiCalls: Promise<Response>[] = [];
-		
+		// Mark each unread assignment as read
 		for (const assignment of humanDirectorAssignments) {
-			// Check if already read to avoid duplicate marking
-			const hasRead = assignment.readBy ? assignment.readBy.some((read: any) => 
+			const hasRead = assignment.reads?.some((read: any) => 
 				isReadByHumanDirector(read)
-			) : assignment.reads ? assignment.reads.some((read: any) => 
-				isReadByHumanDirector(read)
-			) : false;
+			) || false;
 			
 			if (!hasRead) {
 				// Optimistically update the store immediately
 				contentActions.optimisticallyMarkAsRead(message.id, assignment.id, humanDirectorId);
-				markedAsRead = true;
 				
-				// Queue the API call
-				const apiCall = fetch('/api/reading-assignments/mark-read', {
+				// Make API call (fire and forget)
+				fetch('/api/reading-assignments/mark-read', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({
 						assignmentId: assignment.id,
 						agentId: humanDirectorId
 					})
+				}).catch(error => {
+					console.error('Failed to mark message as read on server:', error);
 				});
-				
-				apiCalls.push(apiCall);
 			}
 		}
-		
-		// Update unread counts if we marked something as read
-		if (markedAsRead && (message.type === 'message' || message.type === 'reply')) {
-			const channelDecrement = message.channelId ? 1 : 0;
-			const dmDecrement = !message.channelId ? 1 : 0;
-			
-			if (callbacks.updateCounts) {
-				callbacks.updateCounts(channelDecrement, dmDecrement);
-			}
-			
-			console.log(`📖 Marked message as read optimistically. Decrements - Channel: ${channelDecrement}, DM: ${dmDecrement}`);
-		}
-		
-		// Execute all API calls in parallel (fire and forget for now)
-		if (apiCalls.length > 0) {
-			Promise.all(apiCalls).catch(error => {
-				console.error('Failed to mark message as read on server:', error);
-				// TODO: Implement rollback logic if needed
-			});
-		}
-		
-		// Note: We no longer need to refresh components since they're now reactive to the store changes
-		// The optimistic update already triggered all reactive updates
 		
 	} catch (error) {
 		console.error('Failed to mark message as read:', error);

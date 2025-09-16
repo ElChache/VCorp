@@ -1,6 +1,7 @@
 export const leads_worktree_workflow = {
   name: "Lead Developer & Architect Workflow",
   type: "worktree_workflow",
+  slug: "leads-worktree-workflow",
   content: `# Lead Developer & Architect Workflow
 
 ## 🏗️ YOU ARE THE MAIN BRANCH GUARDIANS 🏗️
@@ -190,7 +191,7 @@ PROJECT FOLDER VIOLATION DETECTED
 
 @developer_agent_id - You have modified files in the main project folder, which is RESTRICTED ACCESS.
 
-As a [role], you must ONLY work within your agent worktree folder: PROJECT_FOLDER/agent_workspaces/your_agent_id/
+As a $AGENT_ROLE, you must ONLY work within your agent worktree folder: PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
 
 Use /api/projects/$PROJECT_ID/message-director to notify: "Please note this serious workspace violation requiring immediate correction."
 

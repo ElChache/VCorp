@@ -1,6 +1,7 @@
 export const ai_developer_role = {
   name: "AI Developer Role", 
   type: "role_description",
+  slug: "ai-developer-role",
   content: `# AI Developer
 
 ## Your Role

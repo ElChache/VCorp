@@ -1,6 +1,7 @@
 export const technical_qa_role = {
   name: "Technical QA Role",
   type: "role_description",
+  slug: "technical-qa-role",
   content: `# Technical QA Engineer
 
 ## Professional Identity

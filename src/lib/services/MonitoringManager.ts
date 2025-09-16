@@ -1,9 +1,10 @@
 import { execSync, spawn } from 'child_process';
 import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename, extname } from 'path';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments, readingAssignmentReads, projects, scheduledReminders } from '$lib/db/schema';
 import { eq, and, or, notExists } from 'drizzle-orm';
+import chokidar from 'chokidar';
 
 import { checkForwardingStatus } from '$lib/services/ForwardingService';
 import { CONFIG } from '$lib/config';
@@ -15,6 +16,9 @@ interface MonitoringStats {
 	gentlePokes: number;
 	remindersSent: number;
 	terminalLogsCaptured: number;
+	filesSynced: number;
+	documentsCreated: number;
+	ticketsCreated: number;
 	errors: number;
 	startTime: Date;
 	lastCheck: Date | null;
@@ -59,6 +63,7 @@ interface ScheduledReminderResult {
 class MonitoringManager {
 	private static instance: MonitoringManager | null = null;
 	private intervalId: NodeJS.Timeout | null = null;
+	private fileWatcher: any | null = null;
 	private _isRunning = false;
 	
 	private stats: MonitoringStats = {
@@ -68,11 +73,17 @@ class MonitoringManager {
 		gentlePokes: 0,
 		remindersSent: 0,
 		terminalLogsCaptured: 0,
+		filesSynced: 0,
+		documentsCreated: 0,
+		ticketsCreated: 0,
 		errors: 0,
 		startTime: new Date(),
 		lastCheck: null,
 		uptime: 0
 	};
+
+	// Track file modification times to avoid sync loops
+	private fileModificationTimes: Map<string, number> = new Map();
 
 	// Track when agents went idle for gentle poking
 	private agentIdleTimes: Map<string, Date> = new Map();
@@ -224,6 +235,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 		console.log('═══════════════════════════════════════');
 		console.log('📊 Agent Status Monitoring: ENABLED');
 		console.log('📬 Unread Notifications: ENABLED');
+		console.log('📁 Document/Ticket File Sync: ENABLED');
 		console.log(`⏱️  Check Interval: ${this.INTERVAL_MS / 1000}s`);
 		console.log('═══════════════════════════════════════');
 
@@ -235,6 +247,9 @@ This is just a gentle reminder - no action needed if you're already working! �
 			gentlePokes: 0,
 			remindersSent: 0,
 			terminalLogsCaptured: 0,
+			filesSynced: 0,
+			documentsCreated: 0,
+			ticketsCreated: 0,
 			errors: 0,
 			startTime: new Date(),
 			lastCheck: null,
@@ -245,6 +260,9 @@ This is just a gentle reminder - no action needed if you're already working! �
 		this.intervalId = setInterval(async () => {
 			await this.runMonitoringCycle();
 		}, this.INTERVAL_MS);
+
+		// Start file watcher for document/ticket sync
+		await this.initializeFileWatcher();
 
 		// Initial run
 		await this.runMonitoringCycle();
@@ -261,6 +279,12 @@ This is just a gentle reminder - no action needed if you're already working! �
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
 			this.intervalId = null;
+		}
+
+		// Stop file watcher
+		if (this.fileWatcher) {
+			this.fileWatcher.close();
+			this.fileWatcher = null;
 		}
 
 		this.stats.uptime = Date.now() - this.stats.startTime.getTime();
@@ -788,10 +812,95 @@ This is just a gentle reminder - no action needed if you're already working! �
 		}
 	}
 
+	private async getUnreadDirectorMessagesForAgent(agentId: string, projectId: number): Promise<any[]> {
+		// Get agent info for role-based assignments
+		const agentInfo = await db
+			.select({
+				id: agents.id,
+				roleType: agents.roleType,
+				squadId: agents.squadId
+			})
+			.from(agents)
+			.where(eq(agents.id, agentId))
+			.limit(1);
+		
+		if (!agentInfo[0]) return [];
+		
+		const agent = agentInfo[0];
+		const assignmentConditions = [
+			and(
+				eq(readingAssignments.assignedToType, 'agent'),
+				eq(readingAssignments.assignedTo, agent.id)
+			),
+			and(
+				eq(readingAssignments.assignedToType, 'role'),
+				eq(readingAssignments.assignedTo, agent.roleType)
+			)
+		];
+
+		if (agent.squadId) {
+			assignmentConditions.push(
+				and(
+					eq(readingAssignments.assignedToType, 'squad'),
+					eq(readingAssignments.assignedTo, agent.squadId)
+				)
+			);
+		}
+
+		// Get unread messages from human directors only
+		const unreadDirectorMessages = await db
+			.select({
+				id: content.id,
+				authorAgentId: content.authorAgentId,
+				authorIsHumanDirector: agents.isHumanDirector
+			})
+			.from(readingAssignments)
+			.innerJoin(content, eq(readingAssignments.contentId, content.id))
+			.leftJoin(agents, eq(content.authorAgentId, agents.id))
+			.where(and(
+				eq(content.projectId, projectId),
+				or(...assignmentConditions),
+				eq(agents.isHumanDirector, true), // Only messages from human directors
+				notExists(
+					db.select()
+						.from(readingAssignmentReads)
+						.where(and(
+							eq(readingAssignmentReads.readingAssignmentId, readingAssignments.id),
+							eq(readingAssignmentReads.agentId, agentId)
+						))
+				)
+			));
+
+		return unreadDirectorMessages;
+	}
+
 	private async checkHumanDirectorEscalations(): Promise<void> {
 		const now = new Date();
 		
 		for (const [agentId, state] of this.humanDirectorEscalationState.entries()) {
+			// First, verify that there are actually unread director messages for this agent
+			const agentData = await db
+				.select({ projectId: agents.projectId })
+				.from(agents)
+				.where(eq(agents.id, agentId))
+				.limit(1);
+				
+			if (!agentData[0]) {
+				// Agent doesn't exist, clear escalation
+				this.humanDirectorEscalationState.delete(agentId);
+				continue;
+			}
+			
+			// Check if there are actually unread director messages
+			const unreadDirectorMessages = await this.getUnreadDirectorMessagesForAgent(agentId, agentData[0].projectId);
+			
+			if (unreadDirectorMessages.length === 0) {
+				// No unread director messages, clear escalation tracking
+				this.humanDirectorEscalationState.delete(agentId);
+				console.log(`✅ Cleared escalation tracking for agent ${agentId} - no unread director messages`);
+				continue;
+			}
+			
 			const timeSinceFirstNotification = now.getTime() - state.firstNotificationTime.getTime();
 			const timeSinceLastEscalation = now.getTime() - state.lastEscalationTime.getTime();
 			
@@ -816,24 +925,23 @@ This is just a gentle reminder - no action needed if you're already working! �
 			
 			if (!agent[0] || !agent[0].tmuxSession) return;
 
-			const urgencyLevel = escalationCount > 3 ? 'CRITICAL' : 'HIGH';
-			const escalationTemplate = `[AUTO] 🚨🚨 ESCALATION ${urgencyLevel} PRIORITY 🚨🚨
-${'🔴'.repeat(50)}
-⚠️  This is an automated ESCALATION - DO NOT REPLY ⚠️
-${'🔴'.repeat(50)}
+			const escalationTemplate = `[AUTO] 📥 URGENT: Human Director Message Requires Response
+═══════════════════════════════════════════════════════════════════════
+⚠️  This is an automated reminder - DO NOT REPLY ⚠️
+═══════════════════════════════════════════════════════════════════════
 
-🚨 ESCALATION #${escalationCount}: HUMAN DIRECTOR still waiting for response! 🚨
+The Human Director has been waiting ${Math.floor((Date.now() - this.humanDirectorEscalationState.get(agentId)!.firstNotificationTime.getTime()) / 60000)} minutes for a response.
 
-⏰ Response overdue by ${Math.floor((Date.now() - this.humanDirectorEscalationState.get(agentId)!.firstNotificationTime.getTime()) / 60000)} minutes
+📋 Please check your messages when possible:
+vcorp inbox
 
-🔥 IMMEDIATE ACTION REQUIRED:
-inbox
+${escalationCount > 2 ? '💡 This is reminder #' + escalationCount + ' - the director may need a timely response.' : ''}
 
-${escalationCount > 2 ? '⚠️ CRITICAL: Multiple escalations sent. Please respond ASAP!' : ''}
+Professional response appreciated when convenient.
 
-${'🔴'.repeat(50)}
-🚨 VCorp ESCALATION System - Response Required 🚨
-${'🔴'.repeat(50)}`;
+═══════════════════════════════════════════════════════════════════════
+🤖 VCorp Monitoring System - Director Message Pending
+═══════════════════════════════════════════════════════════════════════`;
 
 			await this.sendTmuxMessage(agent[0].tmuxSession, escalationTemplate);
 			console.log(`📢 Sent escalation #${escalationCount} to agent ${agentId}`);
@@ -1603,7 +1711,7 @@ Status: ${phase.status}`;
 	}
 
 	private logStats(): void {
-		const { totalChecks, statusUpdates, notificationsSent, gentlePokes, terminalLogsCaptured, errors, uptime } = this.getStats();
+		const { totalChecks, statusUpdates, notificationsSent, gentlePokes, terminalLogsCaptured, filesSynced, documentsCreated, ticketsCreated, errors, uptime } = this.getStats();
 		const uptimeMinutes = Math.floor(uptime / 60000);
 		const uptimeSeconds = Math.floor((uptime % 60000) / 1000);
 
@@ -1615,8 +1723,330 @@ Status: ${phase.status}`;
 		console.log(`📬 Notifications Sent: ${notificationsSent}`);
 		console.log(`👋 Gentle Pokes: ${gentlePokes}`);
 		console.log(`📄 Terminal Logs Captured: ${terminalLogsCaptured}`);
+		console.log(`📁 Files Synced: ${filesSynced}`);
+		console.log(`📝 Documents Created: ${documentsCreated}`);
+		console.log(`🎫 Tickets Created: ${ticketsCreated}`);
 		console.log(`❌ Errors: ${errors}`);
 		console.log('═══════════════════════════════════');
+	}
+
+	// =============================================================================
+	// FILE SYNC METHODS - Document and Ticket File Watching
+	// =============================================================================
+
+	private async initializeFileWatcher(): Promise<void> {
+		try {
+			console.log('🔍 DEBUG: Starting file watcher initialization...');
+			
+			// Watch for .md files in docs/, tickets/, and agent workspace directories
+			const watchPaths = [
+				'docs/',
+				'tickets/', 
+				'agent_workspaces/'
+			];
+			
+			console.log('🔍 DEBUG: Watch paths:', watchPaths);
+			console.log('🔍 DEBUG: Current working directory:', process.cwd());
+			
+			this.fileWatcher = chokidar.watch(watchPaths, {
+				ignored: /(^|[\/\\])\../, // ignore dotfiles
+				persistent: true,
+				ignoreInitial: false, // Process existing files on startup
+				usePolling: true, // Force polling mode to ensure detection
+				interval: 1000, // 1-second polling interval
+				binaryInterval: 3000,
+				depth: 99 // Allow deep directory watching
+			});
+
+			console.log('🔍 DEBUG: Chokidar watcher created, setting up event handlers...');
+
+			this.fileWatcher
+				.on('ready', () => {
+					console.log('🔍 DEBUG: File watcher is ready and watching for changes');
+				})
+				.on('add', (path: string) => {
+					console.log('🔍 DEBUG: File ADD event:', path);
+					this.handleFileAdd(path);
+				})
+				.on('change', (path: string) => {
+					console.log('🔍 DEBUG: File CHANGE event:', path);
+					this.handleFileChange(path);
+				})
+				.on('unlink', (path: string) => {
+					console.log('🔍 DEBUG: File DELETE event:', path);
+					this.handleFileDelete(path);
+				})
+				.on('error', (error: Error) => {
+					console.error('📁 File watcher error:', error);
+					this.stats.errors++;
+				})
+				.on('raw', (event, path, details) => {
+					console.log('🔍 DEBUG: Raw event:', event, 'path:', path, 'details:', details);
+				});
+
+			console.log('📁 File watcher initialized with enhanced debugging');
+		} catch (error) {
+			console.error('Failed to initialize file watcher:', error);
+			this.stats.errors++;
+		}
+	}
+
+	private async handleFileAdd(filePath: string): Promise<void> {
+		try {
+			console.log(`🔍 DEBUG: Entering handleFileAdd for: ${filePath}`);
+			
+			// Only process .md files
+			if (!filePath.endsWith('.md')) {
+				console.log(`🔍 DEBUG: Skipping non-markdown file: ${filePath}`);
+				return;
+			}
+			
+			const fileType = this.getFileType(filePath);
+			const slug = this.getSlugFromPath(filePath);
+			const authorId = this.getAuthorFromPath(filePath);
+			
+			console.log(`🔍 DEBUG: File details - type: ${fileType}, slug: ${slug}, author: ${authorId || 'none'}`);
+			
+			// Check if document/ticket already exists in DB
+			console.log(`🔍 DEBUG: Checking for existing content with slug: ${slug}`);
+			const existingContent = await this.findContentBySlug(slug, fileType);
+			
+			if (existingContent) {
+				console.log(`🔍 DEBUG: Found existing content, syncing DB to file`);
+				// File was created but content already exists - sync from DB to file
+				await this.syncDbToFile(existingContent, filePath);
+				console.log(`📁 Synced existing ${fileType} "${slug}" from DB to new file`);
+			} else {
+				console.log(`🔍 DEBUG: No existing content found, creating new from file`);
+				// New file - create document/ticket in DB
+				await this.syncFileToDb(filePath, fileType, slug);
+				console.log(`📁 Created new ${fileType} "${slug}" from file`);
+				
+				if (fileType === 'document') this.stats.documentsCreated++;
+				if (fileType === 'ticket') this.stats.ticketsCreated++;
+			}
+			
+			this.stats.filesSynced++;
+			console.log(`🔍 DEBUG: Successfully handled file add. Stats updated.`);
+		} catch (error) {
+			console.error(`❌ CRITICAL ERROR in handleFileAdd for ${filePath}:`, error);
+			console.error('Stack trace:', error instanceof Error ? error.stack : error);
+			this.stats.errors++;
+		}
+	}
+
+	private async handleFileChange(filePath: string): Promise<void> {
+		try {
+			// Only process .md files
+			if (!filePath.endsWith('.md')) {
+				return;
+			}
+			
+			// Check if this change was caused by us (to avoid sync loops)
+			const stat = await fs.stat(filePath);
+			const lastModTime = stat.mtime.getTime();
+			const trackedModTime = this.fileModificationTimes.get(filePath);
+			
+			if (trackedModTime && Math.abs(lastModTime - trackedModTime) < 1000) {
+				// This change was made by us within the last second, ignore
+				return;
+			}
+
+			console.log(`📁 File changed: ${filePath}`);
+			
+			const fileType = this.getFileType(filePath);
+			const slug = this.getSlugFromPath(filePath);
+			
+			// Sync file changes to DB
+			await this.syncFileToDb(filePath, fileType, slug);
+			this.stats.filesSynced++;
+			
+		} catch (error) {
+			console.error(`Failed to handle file change: ${filePath}`, error);
+			this.stats.errors++;
+		}
+	}
+
+	private async handleFileDelete(filePath: string): Promise<void> {
+		try {
+			// Only process .md files
+			if (!filePath.endsWith('.md')) {
+				return;
+			}
+			
+			console.log(`📁 File deleted: ${filePath}`);
+			
+			const fileType = this.getFileType(filePath);
+			const slug = this.getSlugFromPath(filePath);
+			
+			// Soft delete the content in DB
+			const existingContent = await this.findContentBySlug(slug, fileType);
+			if (existingContent) {
+				await db
+					.update(content)
+					.set({
+						title: `[DELETED] ${existingContent.title}`,
+						body: `[This ${fileType} file was deleted]`,
+						updatedAt: new Date()
+					})
+					.where(eq(content.id, existingContent.id));
+				
+				console.log(`📁 Soft deleted ${fileType} "${slug}" in database`);
+			}
+			
+		} catch (error) {
+			console.error(`Failed to handle file delete: ${filePath}`, error);
+			this.stats.errors++;
+		}
+	}
+
+	private async syncFileToDb(filePath: string, fileType: 'document' | 'ticket', slug: string): Promise<void> {
+		try {
+			// Read file contents
+			const fileContent = await fs.readFile(filePath, 'utf8');
+			
+			// Extract title from first line or filename
+			const lines = fileContent.split('\n');
+			let title = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+			let body = fileContent;
+			
+			// If first line looks like a title (starts with #), extract it
+			if (lines[0] && lines[0].startsWith('# ')) {
+				title = lines[0].replace(/^# /, '');
+				body = lines.slice(1).join('\n').trim();
+			}
+
+			// Find existing content or create new
+			const existingContent = await this.findContentBySlug(slug, fileType);
+			
+			if (existingContent) {
+				// Update existing content
+				await db
+					.update(content)
+					.set({
+						title,
+						body,
+						updatedAt: new Date()
+					})
+					.where(eq(content.id, existingContent.id));
+				
+				console.log(`📁 Updated ${fileType} "${slug}" in database`);
+			} else {
+				// Create new content - need to determine projectId and author
+				const projectId = await this.getCurrentProjectId();
+				const authorAgentId = this.getAuthorFromPath(filePath);
+				
+				await db
+					.insert(content)
+					.values({
+						projectId,
+						type: fileType,
+						title,
+						body,
+						documentSlug: slug,
+						authorAgentId,
+						createdAt: new Date(),
+						updatedAt: new Date()
+					});
+				
+				const authorText = authorAgentId ? ` by agent ${authorAgentId}` : ' (no specific author)';
+				console.log(`📁 Created new ${fileType} "${slug}" in database${authorText}`);
+			}
+		} catch (error) {
+			console.error(`Failed to sync file to DB: ${filePath}`, error);
+			throw error;
+		}
+	}
+
+	private async syncDbToFile(dbContent: any, filePath: string): Promise<void> {
+		try {
+			// Create file content with title as first line
+			const fileContent = `# ${dbContent.title}\n\n${dbContent.body}`;
+			
+			// Track this modification to avoid sync loops
+			await fs.writeFile(filePath, fileContent);
+			const stat = await fs.stat(filePath);
+			this.fileModificationTimes.set(filePath, stat.mtime.getTime());
+			
+			console.log(`📁 Synced DB content to file: ${filePath}`);
+		} catch (error) {
+			console.error(`Failed to sync DB to file: ${filePath}`, error);
+			throw error;
+		}
+	}
+
+	private getFileType(filePath: string): 'document' | 'ticket' {
+		return filePath.includes('/tickets/') ? 'ticket' : 'document';
+	}
+
+	private getSlugFromPath(filePath: string): string {
+		const fileName = basename(filePath, extname(filePath));
+		const baseSlug = fileName.toLowerCase().replace(/\s+/g, '-');
+		
+		// Public documents (root /docs, /tickets) use simple slugs for phase integration
+		if (this.isPublicDocument(filePath)) {
+			return baseSlug;
+		}
+		
+		// Private documents (agent workspaces) use namespaced slugs to avoid collisions
+		const authorId = this.getAuthorFromPath(filePath);
+		if (authorId) {
+			return `${authorId}-${baseSlug}`;
+		}
+		
+		// Fallback to simple slug
+		return baseSlug;
+	}
+
+	private getAuthorFromPath(filePath: string): string | null {
+		// Check if file is in agent workspace: agent_workspaces/AGENT_ID/docs/...
+		const workspaceMatch = filePath.match(/agent_workspaces\/([^\/]+)\//);
+		if (workspaceMatch) {
+			return workspaceMatch[1]; // Return the agent ID
+		}
+		
+		// Files in root docs/ or tickets/ have no specific author
+		return null;
+	}
+
+	private isPublicDocument(filePath: string): boolean {
+		// Public documents are in root /docs or /tickets folders
+		// These need well-known slugs for phase integration
+		return filePath.startsWith('docs/') || filePath.startsWith('tickets/');
+	}
+
+	private isPrivateDocument(filePath: string): boolean {
+		// Private documents are in agent workspaces
+		// Collisions are acceptable since they're private to the agent
+		return filePath.includes('agent_workspaces/');
+	}
+
+	private async findContentBySlug(slug: string, type: 'document' | 'ticket'): Promise<any> {
+		const results = await db
+			.select()
+			.from(content)
+			.where(and(
+				eq(content.documentSlug, slug),
+				eq(content.type, type)
+			))
+			.limit(1);
+			
+		return results[0] || null;
+	}
+
+	private async getCurrentProjectId(): Promise<number> {
+		// For now, use the first active project
+		const activeProjects = await db
+			.select({ id: projects.id })
+			.from(projects)
+			.where(eq(projects.status, 'active'))
+			.limit(1);
+		
+		if (activeProjects.length === 0) {
+			throw new Error('No active projects found');
+		}
+		
+		return activeProjects[0].id;
 	}
 }
 

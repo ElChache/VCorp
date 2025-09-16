@@ -160,8 +160,17 @@ Each role has carefully crafted prompts that emphasize:
 - `GET /api/projects` - List all projects with status information
 - `GET /api/projects/{id}/role-types` - Available role types (excludes Human Director)
 - `GET /api/agents?projectId={id}` - Project agents with role and status information
+- `POST /api/agents/launch` - Launch an agent with tmux session
 - `POST /api/templates/seed` - Initialize system templates
 - `DELETE /api/templates/reset` - Reset all templates
+
+### Document Management APIs
+- `GET /api/documents?projectId={id}` - List documents with filtering and search
+- `POST /api/documents` - Create document (triggers file creation)
+- `GET /api/documents/{id}` - Get document by ID
+- `PUT /api/documents/{id}` - Update document (syncs to file)
+- `DELETE /api/documents/{id}` - Soft or hard delete document
+- `GET /api/documents/by-slug?projectId={id}&slug={slug}` - Get document by slug
 
 ### Terminal Logging APIs
 - `POST /api/terminal-logs` - List available terminal logs for a project
@@ -466,13 +475,145 @@ curl -X POST http://localhost:5173/api/send-message \
 3. Test message flow: Send messages and verify assignment creation
 4. Monitor real-time updates: Check polling responses for proper content grouping
 
+## File-Based Document & Ticket Management
+
+VCorp features a **2-way file sync system** that allows agents to work with documents and tickets as regular files while maintaining database integration for collaboration features.
+
+### 🔄 **2-Way Sync Architecture**
+
+The monitoring service (`MonitoringManager`) watches for file changes and syncs automatically:
+
+#### **FILE → DATABASE Sync**
+- Create/edit files directly → Automatically syncs to database
+- File watcher detects changes within seconds
+- Extracts title from first `# Title` line
+- Maintains author and timestamp metadata
+
+#### **DATABASE → FILE Sync**  
+- Create documents via `vcorp document` command → Creates file
+- Update via API or web UI → Updates file if exists
+- Maintains markdown format with title as first line
+
+### 📁 **File Organization & Slug Logic**
+
+Documents are organized based on whether they have a slug:
+
+```
+docs/                           # Public documents (WITH slug)
+├── api-spec.md                # slug: "api-spec"  
+├── requirements.md             # slug: "requirements"
+└── architecture.md             # slug: "architecture"
+
+agent_workspaces/
+└── pm_001/
+    └── docs/                   # Private documents (NO slug)
+        ├── meeting-notes.md    # slug: "pm_001-meeting-notes" (namespaced)
+        └── personal-todo.md    # slug: "pm_001-personal-todo" (namespaced)
+```
+
+**Slug Rules:**
+- **WITH slug** (via `--slug=name`): File goes to `docs/{slug}.md` - Public, shared documents
+- **NO slug**: File goes to `agent_workspaces/{AGENT_ID}/docs/` - Private agent documents
+- Agent workspace files get **namespaced slugs**: `{agent_id}-{filename}`
+
+### 🎯 **Agent Workflow**
+
+```bash
+# Create public document with slug
+vcorp document "API Spec" "REST API documentation" --slug=api-spec
+# → Creates: docs/api-spec.md
+
+# Create private document (no slug)  
+vcorp document "Meeting Notes" "Team standup notes"
+# → Creates: agent_workspaces/YOUR_ID/docs/meeting-notes.md
+
+# Edit files directly - changes sync to DB
+vim docs/api-spec.md
+# → Updates sync to database automatically
+
+# Files created directly also sync
+echo "# New Doc" > docs/new-feature.md
+# → Creates document in DB with slug "new-feature"
+```
+
+### ⚙️ **Monitoring Service**
+
+The file sync requires the monitoring service to be running:
+
+```bash
+# Start monitoring (includes file watcher)
+curl -X POST http://localhost:5173/api/monitoring/start
+
+# Check status
+curl -X GET http://localhost:5173/api/monitoring/status
+```
+
+**Important:** File watcher only monitors paths relative to where the dev server runs. Files must be within the project's configured path.
+
+### 🛠️ **Update Commands**
+```bash
+# Update from file (like document creation)
+vcorp update document api-spec --file=docs/updated-api.md
+
+# Update with inline content + metadata  
+vcorp update ticket user-login-bug "Fixed the issue" --status=resolved --priority=low
+
+# Delete with confirmation
+vcorp delete document 123        # Soft delete
+vcorp delete ticket 456 --hard   # Permanent delete
+```
+
+## Agent Launching & Workspace Setup
+
+### 🚀 **Launching Agents**
+
+Agents are launched via the web UI or API, which:
+1. Creates a tmux session for the agent
+2. Sets up agent-specific environment variables
+3. Creates agent workspace at `agent_workspaces/{AGENT_ID}/`
+4. Creates agent-specific `bin/` directory with personalized `vcorp` script
+5. Sets PATH to use agent's own `vcorp` command
+
+### 📂 **Agent Workspace Structure**
+
+Each agent gets their own workspace:
+```
+agent_workspaces/
+└── pm_001/
+    ├── bin/
+    │   └── vcorp              # Agent-specific vcorp wrapper
+    ├── docs/                  # Private documents
+    ├── tickets/               # Agent's tickets
+    └── pm_3424_requirements/  # Git worktree for task
+        ├── src/               # Full project checkout
+        ├── docs/              # Task-specific docs
+        └── ...
+```
+
+### 🔧 **Agent Environment**
+
+Each agent session has these environment variables:
+- `$AGENT_ID` - Unique agent identifier
+- `$AGENT_ROLE` - Agent's role type  
+- `$PROJECT_ID` - Current project ID
+- `$PATH` - Includes agent's `bin/` directory first
+
+This allows each agent to use `vcorp` naturally without conflicts.
+
 ## VCorp Command System
 
 VCorp provides a comprehensive command-line interface for agents to interact with the system. All commands are accessible via the `vcorp` command once agents are launched.
 
-### 📚 **Help System**
+### Help System
 
-**Contextual Help - Discover & Learn:**
+**All commands support `--help` for detailed usage information, even without required parameters:**
+```bash
+vcorp-admin messages --help     # Works without project/agent/role parameters
+vcorp-admin documents --help    # Shows complete usage and examples
+vcorp-admin tickets --help      # Explains role-based filtering
+```
+
+**Help Topics:**
 ```bash
 vcorp help                    # Master index of all help topics
 vcorp help role              # Your role description and responsibilities  
@@ -482,15 +623,54 @@ vcorp help workspace         # File permissions and workspace boundaries
 vcorp help commands          # Complete VCorp command reference
 ```
 
-### 💬 **Communication Commands**
+### Content Discovery Commands
+
+**Messages - View assigned messages by default:**
+```bash
+vcorp messages                      # YOUR assigned messages only
+vcorp messages --all                # ALL project messages
+vcorp messages --channel=85         # Messages in specific channel
+vcorp messages --dm                 # Direct messages only
+vcorp messages search "query"       # Search YOUR messages
+vcorp messages --all search "query" # Search ALL messages
+vcorp messages --start=21 --end=40  # Pagination support
+```
+
+**Documents - Always shows ALL project documents:**
+```bash
+vcorp documents                     # ALL project documents (no filtering)
+vcorp documents search "api"        # Search in titles and content
+vcorp document show api-spec        # View specific document by slug
+vcorp documents --start=21 --end=40 # Pagination support
+```
+
+**Tickets - Role-aware filtering:**
+```bash
+vcorp tickets                       # Your assigned tickets (managers see all)
+vcorp tickets --all                 # Force showing all tickets
+vcorp tickets --status=open         # Filter by status
+vcorp tickets --priority=high       # Filter by priority
+vcorp tickets search "bug"          # Search tickets
+vcorp tickets --start=21 --end=40   # Pagination support
+```
+
+**Phases - Shows assigned phases by default:**
+```bash
+vcorp phases                        # Your role's phases
+vcorp phases --all                  # All project phases
+vcorp phases --status=active        # Filter by status
+vcorp phases --start=21 --end=40    # Pagination support
+```
+
+### Communication Commands
 
 **Send Messages:**
 ```bash
 vcorp reply MESSAGE_ID CONTENT                    # Reply to any message/content
-vcorp message CHANNEL_ID CONTENT [--assign-*]    # Send message to channel
-vcorp dm CONTENT --to=AGENTS [--to-role=ROLES]   # Send direct message
-vcorp director CONTENT                           # Message Human Director  
-vcorp it CONTENT                                 # Message IT Administrator
+vcorp message CHANNEL_ID CONTENT [--assign-*]     # Send message to channel
+vcorp dm CONTENT --to=AGENTS [--to-role=ROLES]    # Send direct message
+vcorp director CONTENT                            # Message Human Director  
+vcorp it CONTENT                                  # Message IT Administrator
 ```
 
 **Assignment Options:**
@@ -500,14 +680,23 @@ vcorp it CONTENT                                 # Message IT Administrator
 --assign-squad=squad1,squad2     # Assign to squads
 ```
 
-### 📄 **Content Creation**
+### Content Creation
 
 ```bash
 vcorp document TITLE CONTENT [--assign-*]       # Create project documents
 vcorp ticket TITLE DESCRIPTION [--assign-*]     # Create work tickets
 ```
 
-### 🔍 **Information Commands**
+### Content Management
+
+```bash
+vcorp update document ID "New content"          # Update document
+vcorp update ticket ID --status=resolved        # Update ticket status
+vcorp delete document ID                        # Soft delete
+vcorp delete ticket ID --hard                   # Permanent delete
+```
+
+### Information Commands
 
 **Check Status & Assignments:**
 ```bash
@@ -538,7 +727,26 @@ vcorp permissions --workspace # Show workspace path only
 vcorp permissions --level    # Show permission level only
 ```
 
-### 🏗️ **Command Examples**
+### Key Behaviors and Defaults
+
+**Role-Based Filtering:**
+- **Individual Contributors**: See only assigned content by default (messages, tickets, phases)
+- **Managers** (product-manager, lead-developer, system-architect, it-administrator, director-assistant): 
+  - Tickets and phases show ALL by default
+  - Messages still show assigned only (use --all for everything)
+- **Documents**: ALWAYS shows ALL documents for everyone (full transparency)
+
+**Pagination:**
+- Default range: 1-20 items
+- Use `--start=N --end=M` to navigate
+- Example: `vcorp messages --start=21 --end=40`
+
+**Search Functionality:**
+- Messages and tickets search respect role filtering
+- Use `--all` with search to search everything
+- Documents search always searches all documents
+
+### Command Examples
 
 **Daily Workflow:**
 ```bash
@@ -585,11 +793,12 @@ vcorp document "User Requirements" "Complete user story documentation" --assign-
 vcorp ticket "Fix login bug" "Users cannot authenticate with special characters" --assign-role=backend-developer
 ```
 
-### 🎯 **Command Patterns**
+### Command Patterns
 
 **All commands support:**
-- `--help` flag for detailed usage information
+- `--help` flag for detailed usage information (works without parameters)
 - `--json` flag for raw API responses (where applicable)
+- Pagination with `--start` and `--end` parameters
 - Consistent error handling and validation
 - Agent authentication via environment variables
 
@@ -598,13 +807,13 @@ vcorp ticket "Fix login bug" "Users cannot authenticate with special characters"
 - `$AGENT_ROLE` - Your role type  
 - `$PROJECT_ID` - Your project ID
 
-### 💡 **Tips for Success**
+### Tips for Success
 
 1. **Use `vcorp inbox` constantly** - Check every few minutes for new assignments
-2. **Start with `vcorp help`** - Discover all available help topics
-3. **Use reply commands from inbox** - Easiest way to respond in context
-4. **Check `vcorp phase`** - Understand your current work priorities
-5. **Use `--help` on any command** - Get detailed usage information
+2. **Use `--help` liberally** - Every command has comprehensive help
+3. **Understand defaults** - Know what you see by default vs using `--all`
+4. **Use pagination** - Navigate large result sets with `--start` and `--end`
+5. **Check `vcorp phase`** - Understand your current work priorities
 
 ## Developing
 

@@ -1,6 +1,7 @@
 export const product_manager_role = {
   name: "Product Manager Role",
-  type: "role_description", 
+  type: "role_description",
+  slug: "product-manager-role",
   content: `# Product Manager
 
 ## Your Role

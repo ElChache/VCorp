@@ -1,14 +1,20 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, channels, channelRoleAssignments, roles } from '$lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, or, desc, sql, like } from 'drizzle-orm';
 
-// GET /api/messages - Get messages for a channel or DMs
+// GET /api/messages - Get messages with various filters
 export async function GET({ url }) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const channelId = url.searchParams.get('channelId');
 		const isDM = url.searchParams.get('isDM') === 'true';
+		const agentId = url.searchParams.get('agentId');
+		const search = url.searchParams.get('search');
+		const since = url.searchParams.get('since');
+		const limit = parseInt(url.searchParams.get('limit') || '50');
+		const offset = parseInt(url.searchParams.get('offset') || '0');
+		const listAll = url.searchParams.get('all') === 'true';
 		
 		if (!projectId) {
 			return json({ 
@@ -23,14 +29,18 @@ export async function GET({ url }) {
 			}, { status: 400 });
 		}
 
-		let whereCondition;
+		// Build query conditions
+		let conditions = [
+			eq(content.projectId, parsedProjectId),
+			eq(content.type, 'message')
+		];
 		
-		if (isDM) {
+		// Handle different modes: list all, DM, or channel specific
+		if (listAll) {
+			// List all messages mode - no additional channel filters
+		} else if (isDM) {
 			// Get DM messages (channelId = null)
-			whereCondition = and(
-				eq(content.projectId, parsedProjectId),
-				isNull(content.channelId)
-			);
+			conditions.push(isNull(content.channelId));
 		} else if (channelId) {
 			// Get channel messages
 			const parsedChannelId = parseInt(channelId);
@@ -39,19 +49,33 @@ export async function GET({ url }) {
 					error: 'Invalid channelId: must be a positive integer'
 				}, { status: 400 });
 			}
-			
-			whereCondition = and(
-				eq(content.projectId, parsedProjectId),
-				eq(content.channelId, parsedChannelId)
-			);
-		} else {
+			conditions.push(eq(content.channelId, parsedChannelId));
+		} else if (!search && !agentId) {
 			return json({ 
-				error: 'Must specify either channelId or isDM=true'
+				error: 'Must specify either channelId, isDM=true, all=true, search, or agentId'
 			}, { status: 400 });
 		}
+		
+		// Add search filter
+		if (search) {
+			const searchPattern = `%${search}%`;
+			conditions.push(
+				or(
+					like(content.title, searchPattern),
+					like(content.body, searchPattern)
+				)
+			);
+		}
+		
+		// Add time filter
+		if (since) {
+			conditions.push(sql`${content.createdAt} > ${since}`);
+		}
+		
+		let whereCondition = and(...conditions);
 
 		// Get messages
-		const messages = await db
+		let messages = await db
 			.select({
 				id: content.id,
 				type: content.type,
@@ -62,7 +86,7 @@ export async function GET({ url }) {
 				channelId: content.channelId,
 				createdAt: content.createdAt,
 				updatedAt: content.updatedAt,
-				// Ticket-specific fields
+				// Ticket-specific fields (not applicable for messages but included for consistency)
 				status: content.status,
 				priority: content.priority,
 				assignedToRoleType: content.assignedToRoleType,
@@ -70,7 +94,51 @@ export async function GET({ url }) {
 			})
 			.from(content)
 			.where(whereCondition)
-			.orderBy(content.createdAt);
+			.orderBy(desc(content.createdAt))
+			.limit(limit)
+			.offset(offset);
+			
+		// Filter by agentId if provided (messages where agent is recipient or sender)
+		if (agentId && !listAll) {
+			// If we have messages to filter
+			if (messages.length > 0) {
+				// Get the agent's role for role-based filtering
+				const [agent] = await db
+					.select({ roleType: agents.roleType })
+					.from(agents)
+					.where(eq(agents.id, agentId))
+					.limit(1);
+				
+				const messageIds = messages.map(m => m.id);
+				
+				// Get messages where agent is assigned to read
+				const assignedMessageIds = await db
+					.select({ contentId: readingAssignments.contentId })
+					.from(readingAssignments)
+					.where(
+						and(
+							sql`${readingAssignments.contentId} IN (${sql.join(messageIds.map(id => sql`${id}`), sql`, `)})`,
+							or(
+								and(
+									eq(readingAssignments.assignedToType, 'agent'),
+									eq(readingAssignments.assignedTo, agentId)
+								),
+								agent?.roleType ? and(
+									eq(readingAssignments.assignedToType, 'role'),
+									eq(readingAssignments.assignedTo, agent.roleType)
+								) : sql`false`
+							)
+						)
+					);
+				
+				const assignedIds = new Set(assignedMessageIds.map(a => a.contentId));
+				
+				// Include messages where agent is author or is assigned to read
+				messages = messages.filter(msg => 
+					msg.authorAgentId === agentId || assignedIds.has(msg.id)
+				);
+			}
+		}
 
 		// For each message, get the reading assignments
 		const messagesWithAssignments = await Promise.all(
@@ -111,7 +179,31 @@ export async function GET({ url }) {
 			})
 		);
 
-		return json(messagesWithAssignments);
+		// Get total count for pagination
+		const totalConditions = [...conditions];
+		if (agentId && !listAll) {
+			// For agent-specific queries, we need to count differently
+			// This is a simplified count - ideally we'd do the full filter
+			// For now, return the filtered message count
+			return json({
+				messages: messagesWithAssignments,
+				total: messages.length,
+				limit,
+				offset
+			});
+		}
+		
+		const [countResult] = await db
+			.select({ count: sql`count(*)` })
+			.from(content)
+			.where(and(...totalConditions));
+		
+		return json({
+			messages: messagesWithAssignments,
+			total: Number(countResult.count),
+			limit,
+			offset
+		});
 	} catch (error) {
 		console.error('Failed to fetch messages:', error);
 		return json({ 

@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { spawn, execSync } from 'child_process';
 import { mkdir, writeFile } from 'fs/promises';
 import { db } from '$lib/db/index';
-import { agents, projects, roleTemplates, roles } from '$lib/db/schema';
+import { agents, projects, roleTemplates, roles, prompts, rolePromptOrders } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { resolveAgentPermissions, validatePermissionRules, type AgentPermissions } from '$lib/templates/permissions';
 import { generateStartupPrompt } from '$lib/utils/agentStartup';
@@ -275,7 +275,9 @@ export async function POST({ request }) {
 				ENABLE_BACKGROUND_TASKS: '1',
 				AGENT_ID: agentId,
 				AGENT_ROLE: roleType,
-				PROJECT_ID: projectId.toString()
+				PROJECT_ID: projectId.toString(),
+				// Add agent's bin directory to PATH
+				PATH: `${workingDirectory}/agent_workspaces/${agentId}/bin:${process.env.PATH}`
 			}
 		});
 
@@ -319,22 +321,52 @@ export async function POST({ request }) {
 		// Stage 3: Create VCorp command wrapper after startup prompt
 		setTimeout(async () => {
 			console.log(`🔧 Creating VCorp command wrapper...`);
+			
+			// Query prompts available to this agent role
+			console.log(`🔍 Querying available prompts for role: ${roleType}...`);
+			const availablePrompts = await db
+				.select({
+					slug: prompts.slug
+				})
+				.from(rolePromptOrders)
+				.innerJoin(prompts, eq(rolePromptOrders.promptId, prompts.id))
+				.where(eq(rolePromptOrders.roleId, projectRole.id))
+				.orderBy(rolePromptOrders.orderIndex);
+			
+			const promptSlugs = availablePrompts.map(p => p.slug).join(',');
+			console.log(`📄 Available prompt slugs: ${promptSlugs}`);
+			
 			const vcorpWrapper = `#!/bin/bash
 # VCorp agent wrapper - auto-generated for ${agentId}
+# Available prompt slugs: ${promptSlugs}
+AVAILABLE_PROMPTS="${promptSlugs}"
+export AVAILABLE_PROMPTS
 exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=${projectId} --agent=${agentId} --role=${roleType} "$@"
 `;
 			
-			// Create the vcorp wrapper script in the bin folder
-			const vcorpScript = `/Users/davidcerezo/Projects/vcorp/bin/vcorp_${agentId}`;
-			await writeFile(vcorpScript, vcorpWrapper);
+			// Create agent-specific bin directory
+			const agentBinDir = `${workingDirectory}/agent_workspaces/${agentId}/bin`;
+			await mkdir(agentBinDir, { recursive: true });
+			
+			// Create the vcorp wrapper script directly in agent's bin folder
+			const agentVcorpScript = `${agentBinDir}/vcorp`;
+			await writeFile(agentVcorpScript, vcorpWrapper);
 			
 			// Make it executable
-			spawn('chmod', ['+x', vcorpScript], {
+			spawn('chmod', ['+x', agentVcorpScript], {
 				detached: true,
 				stdio: 'ignore'
 			});
 			
-			// Create a generic 'vcorp' symlink for this agent (last one wins)
+			// Also create a copy in the main bin folder for backwards compatibility
+			const mainBinScript = `/Users/davidcerezo/Projects/vcorp/bin/vcorp_${agentId}`;
+			await writeFile(mainBinScript, vcorpWrapper);
+			spawn('chmod', ['+x', mainBinScript], {
+				detached: true,
+				stdio: 'ignore'
+			});
+			
+			// Update the global symlink (for manual testing, last one wins)
 			spawn('ln', ['-sf', `vcorp_${agentId}`, '/Users/davidcerezo/Projects/vcorp/bin/vcorp'], {
 				detached: true,
 				stdio: 'ignore'

@@ -2,7 +2,28 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { marked } from 'marked';
 	import { contentPollingService, contentPollingStore } from '$lib/services/ContentPollingService';
-	import { contentStore, channels, agents, roleTypes, squads, channelMessages, directMessages, tickets, messagesForChannel, dmConversationWith, isLoading, error, contentActions, humanDirectorUnreadAssignments } from '$lib/stores/contentStore';
+	import { 
+		contentStore, 
+		channels, 
+		agents, 
+		roleTypes, 
+		squads, 
+		channelMessages, 
+		directMessages, 
+		tickets, 
+		messagesForChannel, 
+		dmConversationWith, 
+		isLoading, 
+		error, 
+		contentActions, 
+		humanDirectorUnreadAssignments,
+		channelUnreadCount,
+		dmUnreadCount,
+		documentsUnreadCount,
+		ticketsUnreadCount,
+		phasesUnreadCount,
+		totalUnreadCount
+	} from '$lib/stores/contentStore';
 	import CommunicationsNavigation from './CommunicationsNavigation.svelte';
 	import ChannelItem from './ChannelItem.svelte';
 	import DMAgentItem from './DMAgentItem.svelte';
@@ -18,14 +39,10 @@
 	import PhasesSection from './PhasesSection.svelte';
 	import DMOversightSection from './DMOversightSection.svelte';
 	import { toggleReadStatusTooltip } from '$lib/utils/tooltipManager';
-	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
+	import { getHumanDirectorAgentId, isMessageFromHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 	import { 
-		isUnreadByHumanDirector, 
 		isMessageFullyRead, 
 		isMessagePartiallyRead, 
-		hasUnreadAssignmentForHumanDirector, 
-		markMessageAsReadWithoutRefresh, 
-		markMessageAsRead, 
 		formatMessageTime 
 	} from '$lib/utils/messageOperations';
 
@@ -77,22 +94,16 @@
 	let channelMessagesLoaded = false;
 	$: finalChannelMessages = channelMessagesLoaded ? paginatedChannelMessages : storeChannelMessages;
 	
-	// Enhance channels with message counts using all channel messages data
+	// Enhance channels with message counts - simplified
 	$: allChannelMessages = $channelMessages;
 	$: enhancedChannels = storeChannels.map(channel => {
-		// Filter messages for this specific channel
 		const channelMessages = allChannelMessages.filter(msg => msg.channelId === channel.id);
 		const messageCount = channelMessages.length;
 		
-		// Calculate unread count for human-director
-		const unreadCount = channelMessages.filter(msg => 
-			hasUnreadAssignmentForHumanDirector(msg)
-		).length;
-		
+		// Individual channel unread count will be handled by the ChannelList component if needed
 		return {
 			...channel,
-			messageCount,
-			unreadCount
+			messageCount
 		};
 	});
 	// Create reactive DM messages store for selected agent
@@ -107,26 +118,17 @@
 	$: storeIsLoading = $isLoading;
 	$: storeError = $error;
 	
-	// Enhanced DM agents list with unread counts and sorting by most recent message
+	// Enhanced DM agents list - simplified, using centralized unread logic
 	$: dmAgents = (() => {
 		const allDirectMessages = $directMessages || [];
-		const unreadAssignments = $humanDirectorUnreadAssignments || [];
 		const baseAgents = storeAgents.filter(agent => !agent.isHumanDirector);
 		
 		// Create enhanced agent objects with DM stats
 		const enhancedAgents = baseAgents.map(agent => {
-			// Get all DM messages for this agent (both sent and received)
+			// Get all DM messages for this agent
 			const agentDMs = allDirectMessages.filter(dm => 
 				dm.authorAgentId === agent.id
 			);
-			
-			// Count unread messages FROM this agent to human director using proper unread assignments
-			const unreadCount = unreadAssignments.filter(assignment => 
-				assignment.content && 
-				assignment.content.authorAgentId === agent.id &&
-				assignment.content.channelId === null && // DM only
-				assignment.content.type === 'message'
-			).length;
 			
 			// Find most recent message timestamp for sorting
 			const lastMessage = agentDMs.length > 0 ? 
@@ -136,7 +138,6 @@
 			
 			return {
 				...agent,
-				unreadCount,
 				lastMessageAt: lastMessage?.createdAt || null,
 				lastMessage: lastMessage?.body || null
 			};
@@ -164,20 +165,13 @@
 	let contentUpdatesListener: any = null;
 	$: pollingState = $contentPollingStore;
 
-	// Unread message counts for badges - calculated reactively
-	$: channelUnreadCount = allChannelMessages.filter(msg => 
-		(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-	).length;
-	
-	$: dmUnreadCount = storeDirectMessages.filter(msg => 
-		(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
-	).length;
-	
-	// TODO: Implement documents and tickets unread counts when those systems are added
-	let documentsUnreadCount = 0;
-	let ticketsUnreadCount = 0;
-	
-	$: totalUnreadCount = channelUnreadCount + dmUnreadCount + documentsUnreadCount + ticketsUnreadCount;
+	// Use centralized unread counts from store
+	$: storeChanelUnreadCount = $channelUnreadCount;
+	$: storeDmUnreadCount = $dmUnreadCount;
+	$: storeDocumentsUnreadCount = $documentsUnreadCount;
+	$: storeTicketsUnreadCount = $ticketsUnreadCount;
+	$: storePhasesUnreadCount = $phasesUnreadCount;
+	$: storeTotalUnreadCount = $totalUnreadCount;
 
 	// Content store provides centralized data management
 
@@ -572,11 +566,11 @@
 
 	<CommunicationsNavigation 
 		{commsViewMode}
-		{channelUnreadCount}
-		{dmUnreadCount}
-		{documentsUnreadCount}
-		{ticketsUnreadCount}
-		phasesUnreadCount={0}
+		channelUnreadCount={storeChanelUnreadCount}
+		dmUnreadCount={storeDmUnreadCount}
+		documentsUnreadCount={storeDocumentsUnreadCount}
+		ticketsUnreadCount={storeTicketsUnreadCount}
+		phasesUnreadCount={storePhasesUnreadCount}
 		on:modeChange={handleModeChange}
 	/>
 

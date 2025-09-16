@@ -1,6 +1,7 @@
 export const backend_role = {
   name: "Backend Developer Role",
   type: "role_description",
+  slug: "backend-role",
   content: `# Backend Developer
 
 ## Your Role

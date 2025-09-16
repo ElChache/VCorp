@@ -66,6 +66,7 @@ export async function POST({ request }) {
 					projectId: newProject.id,
 					templateId: promptTemplate.id,
 					name: promptTemplate.name,
+					slug: promptTemplate.slug, // Include slug from template
 					type: promptTemplate.type,
 					content: promptTemplate.content,
 					premade: promptTemplate.premade,
@@ -216,6 +217,7 @@ export async function POST({ request }) {
 						projectId: newProject.id,
 						templateId: null, // This is a generated prompt, not from template
 						name: `${channelTemplate.name} Channel Instructions`,
+						slug: `${channelTemplate.name}_channel_instructions`, // Generate slug for dynamic prompts
 						type: "channel_instructions",
 						content: `Instructions for the ${channelTemplate.name} channel will be generated dynamically.`,
 						premade: "channel-specific-instructions",

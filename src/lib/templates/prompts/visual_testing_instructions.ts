@@ -1,6 +1,7 @@
 export const visual_testing_instructions = {
   name: 'Visual Testing Instructions',
   type: 'squad_workflow',
+  slug: 'visual-testing-instructions',
   content: `# Visual Testing Instructions
 
 ## Core Concept
@@ -8,7 +9,7 @@ You have "eyes" - take screenshots to visually verify your work. Transform from 
 
 ## Screenshot Command
 \`\`\`javascript
-await page.screenshot({ path: \`/tmp/screenshot_\${agentId}_\${Date.now()}.png\` });
+await page.screenshot({ path: \`/tmp/screenshot_\${$AGENT_ID}_\${Date.now()}.png\` });
 \`\`\`
 
 ## When to Take Screenshots
@@ -23,14 +24,14 @@ await page.screenshot({ path: \`/tmp/screenshot_\${agentId}_\${Date.now()}.png\`
 await page.goto('http://localhost:3000');
 
 // 2. Take screenshot to document state
-await page.screenshot({ path: \`/tmp/screenshot_\${agentId}_\${Date.now()}.png\` });
+await page.screenshot({ path: \`/tmp/screenshot_\${$AGENT_ID}_\${Date.now()}.png\` });
 
 // 3. Make changes/interact with elements
 await page.click('button');
 await page.fill('input', 'test data');
 
 // 4. Take screenshot after changes
-await page.screenshot({ path: \`/tmp/screenshot_\${agentId}_\${Date.now()}.png\` });
+await page.screenshot({ path: \`/tmp/screenshot_\${$AGENT_ID}_\${Date.now()}.png\` });
 \`\`\`
 
 ## Requirements

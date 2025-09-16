@@ -19,8 +19,18 @@ export const standardDeveloperPermissions: AgentPermissions = {
     // Read-only access to main project for reference
     "Read(./project/**)",
     
+    // Full access to shared docs folder (public documents)
+    "Write(./docs/**)",
+    "Edit(./docs/**)",
+    "Read(./docs/**)",
+    
+    // Read-only access to tickets (viewing only for developers)
+    "Read(./tickets/**)",
+    
     // Directory navigation
     "Bash(cd:./agent_workspaces/{AGENT_ID}/**)",
+    "Bash(cd:./docs/**)",
+    "Bash(cd:./tickets/**)",
     
     // Complete git workflow for worktrees
     "Bash(git worktree:*)",     // Create/manage worktrees
@@ -252,9 +262,21 @@ export const managementPermissions: AgentPermissions = {
     "Read(./project/**)",
     "Read(./agent_workspaces/**)",
     
+    // Full access to shared docs folder (management needs to create/edit docs)
+    "Write(./docs/**)",
+    "Edit(./docs/**)",
+    "Read(./docs/**)",
+    
+    // Full access to tickets folder (management privilege for ticket management)
+    "Write(./tickets/**)",
+    "Edit(./tickets/**)",
+    "Read(./tickets/**)",
+    
     // Navigation permissions
     "Bash(cd:./agent_workspaces/{AGENT_ID}/**)",
     "Bash(cd:./project/**)",
+    "Bash(cd:./docs/**)",
+    "Bash(cd:./tickets/**)",
     
     // Git operations for oversight and coordination (read-only focus)
     "Bash(git status:*)",           // Check status
@@ -404,10 +426,18 @@ export function resolveAgentPermissions(permissions: AgentPermissions, agentId: 
   return {
     ...permissions,
     allow: permissions.allow.map(rule => 
-      rule.replace('{AGENT_ID}', agentId).replace('./project/', `${projectPath}/project/`).replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
+      rule.replace('{AGENT_ID}', agentId)
+          .replace('./project/', `${projectPath}/project/`)
+          .replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
+          .replace('./docs/', `${projectPath}/docs/`)
+          .replace('./tickets/', `${projectPath}/tickets/`)
     ),
     deny: permissions.deny.map(rule => 
-      rule.replace('{AGENT_ID}', agentId).replace('./project/', `${projectPath}/project/`).replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
+      rule.replace('{AGENT_ID}', agentId)
+          .replace('./project/', `${projectPath}/project/`)
+          .replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
+          .replace('./docs/', `${projectPath}/docs/`)
+          .replace('./tickets/', `${projectPath}/tickets/`)
     )
   };
 }

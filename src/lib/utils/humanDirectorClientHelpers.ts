@@ -35,32 +35,14 @@ export function getHumanDirectorAgentId(): string | null {
 }
 
 /**
- * Check if an agent ID represents a legacy human director identifier
- */
-export function isLegacyHumanDirectorId(agentId: string): boolean {
-	return agentId === 'human-director' || agentId === 'director';
-}
-
-/**
- * Check if an assignment is for the human director (including legacy IDs)
- * This checks both legacy IDs and actual agent IDs via the store
+ * Check if an assignment is for the human director
+ * Only checks for actual agent IDs with isHumanDirector === true
  */
 export function isAssignmentForHumanDirector(assignment: any): boolean {
 	if (!assignment) return false;
 	
-	// Check for role-based assignment
-	if (assignment.assignedToType === 'role' && assignment.assignedTo === 'Human Director') {
-		return true;
-	}
-	
-	// Check for agent-based assignment
+	// Only check for agent-based assignment with actual human director agent
 	if (assignment.assignedToType === 'agent') {
-		// Legacy IDs
-		if (isLegacyHumanDirectorId(assignment.assignedTo)) {
-			return true;
-		}
-		
-		// Check if the assigned agent is the human director via store lookup
 		return isHumanDirectorAgent(assignment.assignedTo);
 	}
 	
@@ -68,22 +50,18 @@ export function isAssignmentForHumanDirector(assignment: any): boolean {
 }
 
 /**
- * Check if a read record is from the human director (including legacy IDs)
+ * Check if a read record is from the human director
+ * Only checks for actual agent IDs with isHumanDirector === true
  */
 export function isReadByHumanDirector(read: any): boolean {
 	if (!read) return false;
 	
-	// Legacy IDs
-	if (isLegacyHumanDirectorId(read.agentId)) {
-		return true;
-	}
-	
-	// Check via store lookup
 	return isHumanDirectorAgent(read.agentId);
 }
 
 /**
  * Check if content has been read by the human director
+ * Simple logic: has assignment for human director AND that assignment has been read
  */
 export function isContentReadByHumanDirector(content: any): boolean {
 	if (!content?.readingAssignments) return false;
@@ -91,14 +69,14 @@ export function isContentReadByHumanDirector(content: any): boolean {
 	return content.readingAssignments.some((assignment: any) => {
 		if (!isAssignmentForHumanDirector(assignment)) return false;
 		
-		// Check both readBy and reads arrays (different API responses may use either)
-		const reads = assignment.readBy || assignment.reads || [];
+		const reads = assignment.reads || [];
 		return reads.some((read: any) => isReadByHumanDirector(read));
 	});
 }
 
 /**
  * Check if content is unread by the human director
+ * Simple logic: has assignment for human director AND that assignment has NOT been read
  */
 export function isContentUnreadByHumanDirector(content: any): boolean {
 	if (!content?.readingAssignments) return false;
@@ -107,8 +85,7 @@ export function isContentUnreadByHumanDirector(content: any): boolean {
 	return content.readingAssignments.some((assignment: any) => {
 		if (!isAssignmentForHumanDirector(assignment)) return false;
 		
-		// Check both readBy and reads arrays
-		const reads = assignment.readBy || assignment.reads || [];
+		const reads = assignment.reads || [];
 		return !reads.some((read: any) => isReadByHumanDirector(read));
 	});
 }
@@ -119,12 +96,6 @@ export function isContentUnreadByHumanDirector(content: any): boolean {
 export function isMessageFromHumanDirector(message: any): boolean {
 	if (!message?.authorAgentId) return false;
 	
-	// Legacy check
-	if (isLegacyHumanDirectorId(message.authorAgentId)) {
-		return true;
-	}
-	
-	// Store lookup
 	return isHumanDirectorAgent(message.authorAgentId);
 }
 

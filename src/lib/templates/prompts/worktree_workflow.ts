@@ -1,6 +1,7 @@
 export const worktree_workflow = {
   name: "Developer Contribution Guidelines",
   type: "worktree_workflow",
+  slug: "worktree-workflow",
   content: `# VCorp Developer Contribution Guidelines
 
 ## 🚨 CRITICAL RULE: NEVER WORK OUTSIDE YOUR DESIGNATED WORKSPACE 🚨
@@ -14,7 +15,7 @@ PROJECT_FOLDER/
 ├── project/                    # Main branch (NEVER touch directly)
 ├── agent_workspaces/           # Your work area
 │   ├── $AGENT_ID/            # YOUR assigned folder only
-│   │   └── {role}_{task_id}_{description}/  # Task-specific worktrees
+│   │   └── $AGENT_ROLE_{task_id}_{description}/  # Task-specific worktrees
 │   └── other_agents/          # DO NOT ENTER other agent folders
 \`\`\`
 
@@ -26,7 +27,7 @@ PROJECT_FOLDER/
 - Each task gets its own worktree folder within your workspace
 
 ### 2. Branch Naming Convention (MANDATORY)
-**Pattern:** \`{role}_{task_id}_{description}\`
+**Pattern:** \`$AGENT_ROLE_{task_id}_{description}\`
 
 **Examples:**
 - \`be_3422_auth_system\` (Backend Developer, Task 3422, Auth System)
@@ -47,10 +48,10 @@ PROJECT_FOLDER/
 cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
 
 # Create worktree for your task
-git worktree add {role}_{task_id}_{description}
+git worktree add $AGENT_ROLE_{task_id}_{description}
 
 # Navigate into your task folder
-cd {role}_{task_id}_{description}
+cd $AGENT_ROLE_{task_id}_{description}
 
 # Start development
 \`\`\`
@@ -58,7 +59,7 @@ cd {role}_{task_id}_{description}
 **Working in your worktree:**
 \`\`\`bash
 # Always work within your task-specific folder
-cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/{role}_{task_id}_{description}/
+cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/$AGENT_ROLE_{task_id}_{description}/
 
 # Make your changes
 # Commit regularly with clear messages
@@ -66,7 +67,7 @@ git add .
 git commit -m "Clear description of changes"
 
 # Push your branch
-git push origin {role}_{task_id}_{description}
+git push origin $AGENT_ROLE_{task_id}_{description}
 \`\`\`
 
 ### 4. Code Integration
@@ -92,11 +93,11 @@ git rebase origin/main
 cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
 
 # Remove completed worktree
-git worktree remove {role}_{task_id}_{description}
+git worktree remove $AGENT_ROLE_{task_id}_{description}
 
 # Delete merged branch
-git branch -d {role}_{task_id}_{description}
-git push origin --delete {role}_{task_id}_{description}
+git branch -d $AGENT_ROLE_{task_id}_{description}
+git push origin --delete $AGENT_ROLE_{task_id}_{description}
 \`\`\`
 
 ## 🚫 FORBIDDEN ACTIONS
@@ -118,7 +119,7 @@ git push origin --delete {role}_{task_id}_{description}
 
 ✅ Work only in \`PROJECT_FOLDER/agent_workspaces/$AGENT_ID/\`
 ✅ Create separate worktree for each task
-✅ Use proper branch naming: \`{role}_{task_id}_{description}\`
+✅ Use proper branch naming: \`$AGENT_ROLE_{task_id}_{description}\`
 ✅ Commit frequently with clear messages
 ✅ Test your changes before pushing
 ✅ Create pull requests for all changes
@@ -129,7 +130,7 @@ git push origin --delete {role}_{task_id}_{description}
 
 **Within your worktree:**
 \`\`\`
-{role}_{task_id}_{description}/
+$AGENT_ROLE_{task_id}_{description}/
 ├── src/                    # Source code changes
 ├── tests/                  # Your test files
 ├── docs/                   # Documentation updates

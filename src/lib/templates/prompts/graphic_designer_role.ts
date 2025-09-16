@@ -1,6 +1,7 @@
 export const graphic_designer_role = {
   name: "Graphic Designer Role",
   type: "role_description",
+  slug: "graphic-designer-role",
   content: `# Graphic Designer
 
 ## Professional Identity

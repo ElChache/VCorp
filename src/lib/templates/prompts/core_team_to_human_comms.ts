@@ -1,6 +1,7 @@
 export const core_team_to_human_comms = {
   name: "Core Team to Human Communication Instructions",
   type: "team_communication",
+  slug: "core-team-to-human-comms",
   content: `# Core Team to Human Communication Protocol
 
 ## IMPORTANT: Limited Communication Scope
