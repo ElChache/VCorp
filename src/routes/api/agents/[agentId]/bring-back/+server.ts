@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { spawn, execSync } from 'child_process';
 import { db } from '$lib/db/index';
-import { agents } from '$lib/db/schema';
+import { agents, projects } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { generateWelcomeBackPrompt } from '$lib/utils/agentStartup';
 
 export async function POST({ params, request }) {
 	try {
@@ -36,9 +37,25 @@ export async function POST({ params, request }) {
 
 		console.log(`🔍 Bringing back agent: ${agent.id}`);
 
-		// Generate new session name and ensure workspace exists
-		const newSessionName = `agent_${agentId}_${Date.now()}`;
-		const workspacePath = `${process.cwd()}/agent_workspaces/${agentId}`;
+		// Get the project to fetch its path (same as launch endpoint)
+		console.log(`🔍 Fetching project ${projectId} details...`);
+		const [project] = await db
+			.select()
+			.from(projects)
+			.where(eq(projects.id, parseInt(projectId)))
+			.limit(1);
+
+		if (!project) {
+			console.log(`❌ Project ${projectId} not found`);
+			return json({ error: 'Project not found' }, { status: 404 });
+		}
+
+		console.log(`✅ Project found: ${project.name}, path: ${project.path || 'not specified'}`);
+		const workingDirectory = project.path?.trim() || process.cwd();
+
+		// Generate new session name and ensure workspace exists  
+		const newSessionName = `vcorp-${agentId}`;
+		const workspacePath = `${workingDirectory}/agent_workspaces/${agentId}/`;
 
 		console.log(`🔧 Creating new session: ${newSessionName}`);
 		console.log(`📁 Workspace: ${workspacePath}`);
@@ -68,65 +85,70 @@ export async function POST({ params, request }) {
 			return json({ error: 'Failed to update agent in database' }, { status: 500 });
 		}
 
-		// Build the startup prompt - agent is coming back to existing work
-		const comebackStartupPrompt = `You are a development agent in a coordinated multi-agent software project.
-
-🔄 WELCOME BACK! You're returning to your existing work.
-
-Environment Variables Available:
-- \$AGENT_ID = "${agentId}" (your unique agent identifier)
-- \$AGENT_ROLE = "${agent.roleType}" (your role type)  
-- \$PROJECT_ID = "${projectId}" (your project ID for all API calls)
-
-IMPORTANT: You have existing work waiting for you!
-
-Step 1 - Register your return:
-curl -X POST http://localhost:5173/api/agents/register -H "Content-Type: application/json" -d '{"agentId": "${agentId}"}'
-
-Step 2 - Check your inbox for assignments:
-curl -X GET "http://localhost:5173/api/inbox?agentId=${agentId}"
-
-Step 3 - Check for active phase:
-curl -X GET "http://localhost:5173/api/roles/${encodeURIComponent(agent.roleType)}/current-phase?projectId=${projectId}"
-
-You likely have tickets in progress and other assignments. Continue where you left off!
-
-Help guide: http://localhost:5173/api/agents/${agentId}/help`;
+		// Generate friendly welcome back prompt using shared function
+		const startupPrompt = generateWelcomeBackPrompt(agentId, agent.roleType, projectId.toString());
 
 		// Start new tmux session with Claude
 		console.log(`🚀 Starting new tmux session for returning agent...`);
 		
-		const tmuxCommand = [
-			'tmux', 'new-session', '-d', '-s', newSessionName, '-c', workspacePath,
-			'bash', '-c', `
-				export AGENT_ID="${agentId}"
-				export AGENT_ROLE="${agent.roleType}"
-				export PROJECT_ID="${projectId}"
-				echo "🔄 Welcome back, Agent ${agentId}! $(date)"
-				echo "📁 Workspace: ${workspacePath}"
-				echo "🔗 Session: ${newSessionName}"
-				echo ""
-				echo "Connecting to Claude..."
-				npx @anthropic/claude@latest --model claude-3-5-${agent.model}-20241022 --prompt '${comebackStartupPrompt.replace(/'/g, "'\"'\"'")}'
-			`
-		];
+		// Launch tmux session with Claude (same as launch endpoint)
+		console.log(`📂 Starting Claude in directory: ${workingDirectory}`);
+		const tmuxProcess = spawn('tmux', [
+			'new-session', '-d', '-s', newSessionName, '-c', workingDirectory,
+			'claude', `--model=${agent.model}`, '--dangerously-skip-permissions'
+		], {
+			detached: true,
+			stdio: ['ignore', 'pipe', 'pipe'],
+			env: { 
+				...process.env, 
+				ENABLE_BACKGROUND_TASKS: '1',
+				AGENT_ID: agentId,
+				AGENT_ROLE: agent.roleType,
+				PROJECT_ID: projectId.toString()
+			}
+		});
 
-		console.log(`🔧 Tmux command: ${tmuxCommand.join(' ')}`);
+		console.log(`⏳ Waiting for tmux session to start...`);
+		// Wait a moment for tmux to start
+		await new Promise(resolve => setTimeout(resolve, 2000));
 
-		// Execute tmux command
+		// Verify tmux session was created
 		try {
-			execSync(tmuxCommand.join(' '), { stdio: 'inherit' });
-			console.log(`✅ Successfully brought agent back with new session`);
+			execSync(`tmux has-session -t "${newSessionName}"`, { stdio: 'ignore' });
+			console.log(`✅ Tmux session ${newSessionName} created successfully`);
 		} catch (error) {
-			console.error('❌ Failed to start tmux session:', error.message);
+			console.log(`❌ Failed to create tmux session ${newSessionName}:`, error);
 			// Update agent status to error
 			await db
 				.update(agents)
 				.set({ status: 'error' })
 				.where(eq(agents.id, agentId));
 			
-			return json({ error: 'Failed to bring agent back' }, { status: 500 });
+			return json({ error: 'Failed to create tmux session' }, { status: 500 });
 		}
+
+		// Send the startup prompt to the agent (two-stage approach like launch endpoint)
+		console.log(`💬 Sending startup prompt to agent (two-stage)...`);
+		
+		// Stage 1: Send the prompt text
+		spawn('tmux', [
+			'send-keys', '-t', newSessionName,
+			startupPrompt
+		], {
+			detached: true,
+			stdio: 'ignore'
+		});
+
+		// Stage 2: Send Enter key after a brief delay
+		setTimeout(() => {
+			spawn('tmux', [
+				'send-keys', '-t', newSessionName,
+				'Enter'
+			], {
+				detached: true,
+				stdio: 'ignore'
+			});
+		}, 500);
 
 		console.log(`🎉 Agent ${agentId} successfully brought back with session ${newSessionName}`);
 		return json({ 

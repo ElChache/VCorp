@@ -20,6 +20,7 @@ export const roleTemplates = pgTable('role_templates', {
 	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role template
 	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role template
 	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for roles that can create development phases
+	permissions: text('permissions'), // JSON string of Claude Code permission rules
 	version: integer('version').notNull().default(1),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -78,6 +79,7 @@ export const roles = pgTable('roles', {
 	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role instances
 	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role instances
 	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for role instances that can create development phases
+	permissions: text('permissions'), // JSON string of Claude Code permission rules (inherits from template)
 	isActive: boolean('is_active').notNull().default(true),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -145,9 +147,9 @@ export const content = pgTable('content', {
 	authorAgentId: text('author_agent_id'), // Can be agent ID or 'human-director'
 	squadId: text('squad_id').references(() => squads.id), // Squad context for content
 	
-	// Ticket-specific fields (optional)
-	status: text('status'), // 'open', 'in_progress', 'blocked', 'ready_for_review', 'reviewing', 'review_passed', 'needs_attention', 'resolved', 'closed' - only for tickets
-	priority: text('priority'), // 'low', 'medium', 'high', 'critical' - only for tickets
+	// Content priority and status fields
+	status: text('status'), // 'open', 'in_progress', 'blocked', 'ready_for_review', 'reviewing', 'review_passed', 'needs_attention', 'resolved', 'closed' - for tickets
+	priority: text('priority').default('medium'), // 'low', 'medium', 'high' - for all content types to control notification urgency
 	assignedToRoleType: text('assigned_to_role_type'), // Generic role type: 'backend_developer' - for ticket assignment
 	claimedByAgent: text('claimed_by_agent').references(() => agents.id), // Agent who picked it up
 	
@@ -218,7 +220,10 @@ export const squadRoleAssignmentTemplates = pgTable('squad_role_assignment_templ
 	squadTemplateId: text('squad_template_id').notNull().references(() => squadTemplates.id),
 	roleTemplateId: integer('role_template_id').notNull().references(() => roleTemplates.id),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+}, (table) => ({
+	// Ensure unique squad-role combinations
+	uniqueSquadRole: unique().on(table.squadTemplateId, table.roleTemplateId)
+}));
 
 // Squad-Prompt Assignment Templates (defines which prompts should be assigned to squad templates)
 export const squadPromptAssignmentTemplates = pgTable('squad_prompt_assignment_templates', {

@@ -1,25 +1,35 @@
 import { json } from '@sveltejs/kit';
-import { db } from '$lib/db/index';
-import { agents, roles, prompts, rolePromptOrders, squads, squadPromptAssignments } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import pg from 'pg';
+
+const { Pool } = pg;
 
 // GET /api/agents/[agentId]/prompts - Get all prompts for this agent
 export async function GET({ params }) {
+	const pool = new Pool({
+		host: 'localhost',
+		port: 5433,
+		user: 'postgres',
+		password: 'password',
+		database: 'vcorp',
+		ssl: false,
+	});
+
 	try {
 		const agentId = params.agentId;
 
 		// Get agent with role and squad information
-		const [agent] = await db
-			.select({
-				id: agents.id,
-				roleId: agents.roleId,
-				squadId: agents.squadId,
-				projectId: agents.projectId,
-				roleType: agents.roleType
-			})
-			.from(agents)
-			.where(eq(agents.id, agentId))
-			.limit(1);
+		const agentResult = await pool.query(`
+			SELECT 
+				id, 
+				role_id as "roleId", 
+				squad_id as "squadId", 
+				project_id as "projectId", 
+				role_type as "roleType"
+			FROM agents 
+			WHERE id = $1
+		`, [agentId]);
+
+		const agent = agentResult.rows[0];
 
 		if (!agent) {
 			return json({ error: 'Agent not found' }, { status: 404 });
@@ -31,38 +41,44 @@ export async function GET({ params }) {
 		let agentPrompts = [];
 		
 		if (agent.roleId) {
+			console.log('Getting role-specific prompts for roleId:', agent.roleId);
 			// Get role-specific prompts in order
-			agentPrompts = await db
-				.select({
-					id: prompts.id,
-					name: prompts.name,
-					type: prompts.type,
-					content: prompts.content,
-					orderIndex: rolePromptOrders.orderIndex,
-					source: rolePromptOrders.source,
-					isGlobal: prompts.isGlobal
-				})
-				.from(rolePromptOrders)
-				.innerJoin(prompts, eq(rolePromptOrders.promptId, prompts.id))
-				.where(eq(rolePromptOrders.roleId, agent.roleId))
-				.orderBy(rolePromptOrders.orderIndex);
+			const promptsResult = await pool.query(`
+				SELECT 
+					p.id,
+					p.name,
+					p.type,
+					p.content,
+					rpo.order_index as "orderIndex",
+					rpo.source,
+					p.is_global as "isGlobal"
+				FROM role_prompt_orders rpo
+				INNER JOIN prompts p ON rpo.prompt_id = p.id
+				WHERE rpo.role_id = $1
+				ORDER BY rpo.order_index
+			`, [agent.roleId]);
+			
+			agentPrompts = promptsResult.rows;
 		}
 
 		// If no role-specific prompts, get basic prompts for the project
 		if (agentPrompts.length === 0) {
-			agentPrompts = await db
-				.select({
-					id: prompts.id,
-					name: prompts.name,
-					type: prompts.type,
-					content: prompts.content,
-					orderIndex: prompts.orderIndex,
-					source: 'project',
-					isGlobal: prompts.isGlobal
-				})
-				.from(prompts)
-				.where(eq(prompts.projectId, agent.projectId))
-				.orderBy(prompts.orderIndex);
+			console.log('No role-specific prompts, getting project prompts...');
+			const promptsResult = await pool.query(`
+				SELECT 
+					id,
+					name,
+					type,
+					content,
+					order_index as "orderIndex",
+					'project' as source,
+					is_global as "isGlobal"
+				FROM prompts
+				WHERE project_id = $1
+				ORDER BY order_index
+			`, [agent.projectId]);
+			
+			agentPrompts = promptsResult.rows;
 		}
 
 		console.log(`✅ Loaded ${agentPrompts.length} prompts for agent ${agentId}`);
@@ -87,6 +103,14 @@ export async function GET({ params }) {
 
 	} catch (error) {
 		console.error('Failed to load agent prompts:', error);
-		return json({ error: 'Failed to load agent prompts' }, { status: 500 });
+		console.error('Error stack:', error.stack);
+		console.error('Error details:', JSON.stringify(error, null, 2));
+		return json({ 
+			error: 'Failed to load agent prompts',
+			details: error.message,
+			stack: error.stack
+		}, { status: 500 });
+	} finally {
+		await pool.end();
 	}
 }

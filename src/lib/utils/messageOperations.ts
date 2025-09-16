@@ -10,6 +10,7 @@ import {
 	isReadByHumanDirector,
 	getHumanDirectorAgentId
 } from './humanDirectorClientHelpers';
+import { contentActions } from '../stores/contentStore';
 
 // Helper function to check if a message is unread by human director
 export function isUnreadByHumanDirector(message: any): boolean {
@@ -141,8 +142,10 @@ export async function markMessageAsRead(
 		// Find the assignment(s) for human-director
 		const humanDirectorAssignments = getHumanDirectorAssignments(message);
 		
-		// Mark each assignment as read
+		// Mark each assignment as read with optimistic updates
 		let markedAsRead = false;
+		const apiCalls: Promise<Response>[] = [];
+		
 		for (const assignment of humanDirectorAssignments) {
 			// Check if already read to avoid duplicate marking
 			const hasRead = assignment.readBy ? assignment.readBy.some((read: any) => 
@@ -152,7 +155,12 @@ export async function markMessageAsRead(
 			) : false;
 			
 			if (!hasRead) {
-				await fetch('/api/reading-assignments/mark-read', {
+				// Optimistically update the store immediately
+				contentActions.optimisticallyMarkAsRead(message.id, assignment.id, humanDirectorId);
+				markedAsRead = true;
+				
+				// Queue the API call
+				const apiCall = fetch('/api/reading-assignments/mark-read', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({
@@ -160,7 +168,8 @@ export async function markMessageAsRead(
 						agentId: humanDirectorId
 					})
 				});
-				markedAsRead = true;
+				
+				apiCalls.push(apiCall);
 			}
 		}
 		
@@ -173,22 +182,20 @@ export async function markMessageAsRead(
 				callbacks.updateCounts(channelDecrement, dmDecrement);
 			}
 			
-			console.log(`📖 Marked message as read. Decrements - Channel: ${channelDecrement}, DM: ${dmDecrement}`);
+			console.log(`📖 Marked message as read optimistically. Decrements - Channel: ${channelDecrement}, DM: ${dmDecrement}`);
 		}
 		
-		// Refresh the content to reflect read status changes
-		if (callbacks.refreshChannel) {
-			await callbacks.refreshChannel();
+		// Execute all API calls in parallel (fire and forget for now)
+		if (apiCalls.length > 0) {
+			Promise.all(apiCalls).catch(error => {
+				console.error('Failed to mark message as read on server:', error);
+				// TODO: Implement rollback logic if needed
+			});
 		}
 		
-		if (callbacks.refreshDM) {
-			await callbacks.refreshDM();
-		}
+		// Note: We no longer need to refresh components since they're now reactive to the store changes
+		// The optimistic update already triggered all reactive updates
 		
-		// Trigger a content polling refresh to update unread badges immediately
-		if (callbacks.triggerPolling) {
-			callbacks.triggerPolling();
-		}
 	} catch (error) {
 		console.error('Failed to mark message as read:', error);
 	}

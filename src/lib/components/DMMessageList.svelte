@@ -12,6 +12,7 @@
 	export let isMessageFullyRead: (message: any) => boolean;
 	export let isMessagePartiallyRead: (message: any) => boolean;
 	export let toggleReadStatusTooltip: (event: MouseEvent, message: any) => void;
+	export let messagesPagination: any = null; // Pagination info from API
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
@@ -39,11 +40,27 @@
 			handleSendDM();
 		}
 	}
+
+	function handleSeeAllMessages() {
+		dispatch('seeAllMessages');
+	}
 </script>
 
 {#if selectedDMAgent}
 	<div class="dm-messages-view">
 		<div class="dm-messages-container">
+			<!-- Show pagination info and see all button if applicable -->
+			{#if messagesPagination?.hasMore}
+				<div class="pagination-banner">
+					<span class="pagination-info">
+						Showing last {messagesPagination.showing} of {messagesPagination.total} messages
+					</span>
+					<button class="see-all-btn" on:click={handleSeeAllMessages}>
+						See all messages
+					</button>
+				</div>
+			{/if}
+			
 			<div class="dm-messages-list">
 				{#if dmMessages.length > 0}
 					{#each dmMessages as message}
@@ -125,6 +142,36 @@
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+	}
+	
+	.pagination-banner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 12px 16px;
+		background: #f3f4f6;
+		border-bottom: 1px solid #e5e7eb;
+		font-size: 14px;
+	}
+	
+	.pagination-info {
+		color: #6b7280;
+	}
+	
+	.see-all-btn {
+		background: #3b82f6;
+		color: white;
+		border: none;
+		padding: 6px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 12px;
+		font-weight: 500;
+		transition: background-color 0.2s ease;
+	}
+	
+	.see-all-btn:hover {
+		background: #2563eb;
 	}
 	
 	.dm-messages-list {

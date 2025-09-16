@@ -129,10 +129,11 @@ class ContentPollingService {
 		if (!this.projectId) return;
 
 		try {
-			// Fetch both content updates and agents data in parallel
-			const [contentResponse, agentsResponse] = await Promise.all([
+			// Fetch content updates, agents data, and DM oversight data in parallel
+			const [contentResponse, agentsResponse, dmOversightResponse] = await Promise.all([
 				this.fetchContentUpdates(),
-				this.fetchAgentsData()
+				this.fetchAgentsData(),
+				this.fetchDMOversightAgents()
 			]);
 
 			// Process content updates
@@ -168,6 +169,20 @@ class ContentPollingService {
 				window.dispatchEvent(new CustomEvent('agentsUpdated', {
 					detail: {
 						agents: agentsResponse,
+						timestamp: new Date().toISOString()
+					}
+				}));
+			}
+
+			// Process DM oversight data updates
+			if (dmOversightResponse) {
+				// Update DM oversight agents store with fresh data
+				contentActions.setDMOversightAgents(dmOversightResponse);
+
+				// Emit custom event for DM oversight updates
+				window.dispatchEvent(new CustomEvent('dmOversightUpdated', {
+					detail: {
+						agents: dmOversightResponse,
 						timestamp: new Date().toISOString()
 					}
 				}));
@@ -217,6 +232,21 @@ class ContentPollingService {
 		
 		if (!response.ok) {
 			throw new Error(`Failed to fetch agents: ${response.status}`);
+		}
+
+		return await response.json();
+	}
+
+	/**
+	 * Fetch DM oversight agents data from server
+	 */
+	private async fetchDMOversightAgents() {
+		const response = await fetch(`/api/dm-oversight/agents?projectId=${this.projectId}`);
+		
+		if (!response.ok) {
+			// Don't throw error for DM oversight data - it's not critical
+			console.warn(`Failed to fetch DM oversight agents: ${response.status}`);
+			return null;
 		}
 
 		return await response.json();

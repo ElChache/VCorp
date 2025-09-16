@@ -48,6 +48,7 @@ export async function POST({ params, request }) {
 			title, 
 			body: contentBody, 
 			documentSlug, 
+			authorAgentId,
 			assignedToRoleType, 
 			phaseStatus, 
 			requiredInputs, 
@@ -68,8 +69,9 @@ export async function POST({ params, request }) {
 				title,
 				body: contentBody || '',
 				documentSlug,
+				authorAgentId,
 				assignedToRoleType,
-				phaseStatus,
+				phaseStatus: type === 'phase' ? 'draft' : phaseStatus, // Force phases to draft
 				requiredInputs,
 				expectedOutputs,
 				createdAt: new Date(),

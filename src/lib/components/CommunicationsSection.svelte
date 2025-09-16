@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { marked } from 'marked';
 	import { contentPollingService, contentPollingStore } from '$lib/services/ContentPollingService';
-	import { contentStore, channels, agents, roleTypes, squads, channelMessages, directMessages, tickets, messagesForChannel, dmConversationWith, isLoading, error, contentActions } from '$lib/stores/contentStore';
+	import { contentStore, channels, agents, roleTypes, squads, channelMessages, directMessages, tickets, messagesForChannel, dmConversationWith, isLoading, error, contentActions, humanDirectorUnreadAssignments } from '$lib/stores/contentStore';
 	import CommunicationsNavigation from './CommunicationsNavigation.svelte';
 	import ChannelItem from './ChannelItem.svelte';
 	import DMAgentItem from './DMAgentItem.svelte';
@@ -16,6 +16,7 @@
 	import DocumentsSection from './DocumentsSection.svelte';
 	import TicketsSection from './TicketsSection.svelte';
 	import PhasesSection from './PhasesSection.svelte';
+	import DMOversightSection from './DMOversightSection.svelte';
 	import { toggleReadStatusTooltip } from '$lib/utils/tooltipManager';
 	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 	import { 
@@ -32,7 +33,7 @@
 	export let selectedProject: any = null;
 
 	// Communications Center variables
-	let commsViewMode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases' = 'communications';
+	let commsViewMode: 'communications' | 'direct-messages' | 'dm-oversight' | 'documents' | 'tickets' | 'phases' = 'communications';
 	let replyContent = '';
 
 	// Send Message variables
@@ -51,6 +52,12 @@
 	// Direct Messages variables
 	let selectedDMAgent: any = null;
 	let newDMContent = '';
+	
+	// Pagination state
+	let channelMessagesPagination: any = null;
+	let dmMessagesPagination: any = null;
+	let showAllChannelMessages = false;
+	let showAllDMMessages = false;
 
 	// Reactive data from content store
 	$: storeChannels = $channels;
@@ -63,6 +70,12 @@
 	// Filtered channel messages for selected channel
 	$: selectedChannelMessagesStore = selectedChannel ? messagesForChannel(selectedChannel.id) : null;
 	$: storeChannelMessages = selectedChannelMessagesStore ? $selectedChannelMessagesStore : [];
+	
+	// Load paginated channel messages when needed
+	let paginatedChannelMessages: any[] = [];
+	let finalChannelMessages: any[] = [];
+	let channelMessagesLoaded = false;
+	$: finalChannelMessages = channelMessagesLoaded ? paginatedChannelMessages : storeChannelMessages;
 	
 	// Enhance channels with message counts using all channel messages data
 	$: allChannelMessages = $channelMessages;
@@ -85,11 +98,63 @@
 	// Create reactive DM messages store for selected agent
 	$: dmMessagesStore = selectedDMAgent ? dmConversationWith(selectedDMAgent.id) : null;
 	$: storeDMMessages = dmMessagesStore ? $dmMessagesStore : [];
+	
+	// Load paginated DM messages when needed
+	let paginatedDMMessages: any[] = [];
+	let finalDMMessages: any[] = [];
+	let dmMessagesLoaded = false;
+	$: finalDMMessages = dmMessagesLoaded ? paginatedDMMessages : storeDMMessages;
 	$: storeIsLoading = $isLoading;
 	$: storeError = $error;
 	
-	// Show all agents in DM list (excluding human director)
-	$: dmAgents = storeAgents.filter(agent => !agent.isHumanDirector);
+	// Enhanced DM agents list with unread counts and sorting by most recent message
+	$: dmAgents = (() => {
+		const allDirectMessages = $directMessages || [];
+		const unreadAssignments = $humanDirectorUnreadAssignments || [];
+		const baseAgents = storeAgents.filter(agent => !agent.isHumanDirector);
+		
+		// Create enhanced agent objects with DM stats
+		const enhancedAgents = baseAgents.map(agent => {
+			// Get all DM messages for this agent (both sent and received)
+			const agentDMs = allDirectMessages.filter(dm => 
+				dm.authorAgentId === agent.id
+			);
+			
+			// Count unread messages FROM this agent to human director using proper unread assignments
+			const unreadCount = unreadAssignments.filter(assignment => 
+				assignment.content && 
+				assignment.content.authorAgentId === agent.id &&
+				assignment.content.channelId === null && // DM only
+				assignment.content.type === 'message'
+			).length;
+			
+			// Find most recent message timestamp for sorting
+			const lastMessage = agentDMs.length > 0 ? 
+				agentDMs.reduce((latest, dm) => 
+					new Date(dm.createdAt) > new Date(latest.createdAt) ? dm : latest
+				) : null;
+			
+			return {
+				...agent,
+				unreadCount,
+				lastMessageAt: lastMessage?.createdAt || null,
+				lastMessage: lastMessage?.body || null
+			};
+		});
+		
+		// Sort by most recent message (agents with recent messages first)
+		return enhancedAgents.sort((a, b) => {
+			// If both have messages, sort by most recent
+			if (a.lastMessageAt && b.lastMessageAt) {
+				return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
+			}
+			// If only one has messages, put that one first
+			if (a.lastMessageAt && !b.lastMessageAt) return -1;
+			if (!a.lastMessageAt && b.lastMessageAt) return 1;
+			// If neither has messages, sort by agent ID
+			return a.id.localeCompare(b.id);
+		});
+	})();
 
 	// Event dispatcher for parent communication
 	import { createEventDispatcher } from 'svelte';
@@ -148,6 +213,15 @@
 	function handleSendDM() {
 		sendDMMessage();
 	}
+	
+	// Pagination event handlers
+	function handleChannelSeeAllMessages() {
+		loadAllChannelMessages();
+	}
+	
+	function handleDMSeeAllMessages() {
+		loadAllDMMessages();
+	}
 
 
 
@@ -170,6 +244,12 @@
 
 	function onChannelSelect(channel) {
 		selectedChannel = channel;
+		// Reset pagination state when switching channels
+		paginatedChannelMessages = [];
+		channelMessagesPagination = null;
+		showAllChannelMessages = false;
+		channelMessagesLoaded = false;
+		loadChannelMessagesDefault();
 		// Channel messages are available via reactive store
 	}
 
@@ -197,6 +277,12 @@
 
 	function onDMAgentSelect(agent) {
 		selectedDMAgent = agent;
+		// Reset pagination state when switching agents
+		paginatedDMMessages = [];
+		dmMessagesPagination = null;
+		showAllDMMessages = false;
+		dmMessagesLoaded = false;
+		loadDMMessagesDefault();
 		// DM messages are available via reactive store dmConversationWith
 	}
 
@@ -372,6 +458,74 @@
 		isThreadsColumnOpen = false;
 		selectedThreadMessage = null;
 	}
+	
+	// Pagination functions
+	async function loadAllChannelMessages() {
+		if (!selectedChannel || !selectedProject) return;
+		
+		try {
+			const response = await fetch(`/api/channels/${selectedChannel.id}/messages?showAll=true`);
+			if (response.ok) {
+				const data = await response.json();
+				paginatedChannelMessages = data.messages;
+				channelMessagesPagination = data.pagination;
+				showAllChannelMessages = true;
+			}
+		} catch (error) {
+			console.error('Failed to load all channel messages:', error);
+		}
+	}
+	
+	async function loadAllDMMessages() {
+		if (!selectedDMAgent || !selectedProject) return;
+		
+		try {
+			const humanDirectorId = getHumanDirectorAgentId();
+			const response = await fetch(`/api/messages/conversation?projectId=${selectedProject.id}&agent1=${humanDirectorId}&agent2=${selectedDMAgent.id}&showAll=true`);
+			if (response.ok) {
+				const data = await response.json();
+				paginatedDMMessages = data.messages;
+				dmMessagesPagination = data.pagination;
+				showAllDMMessages = true;
+			}
+		} catch (error) {
+			console.error('Failed to load all DM messages:', error);
+		}
+	}
+	
+	// Load pagination info for default view (last 50 messages)
+	async function loadChannelMessagesDefault() {
+		if (!selectedChannel || !selectedProject) return;
+		
+		try {
+			const response = await fetch(`/api/channels/${selectedChannel.id}/messages`);
+			if (response.ok) {
+				const data = await response.json();
+				paginatedChannelMessages = data.messages;
+				channelMessagesPagination = data.pagination;
+				channelMessagesLoaded = true;
+			}
+		} catch (error) {
+			console.error('Failed to load channel messages:', error);
+		}
+	}
+	
+	async function loadDMMessagesDefault() {
+		if (!selectedDMAgent || !selectedProject) return;
+		
+		try {
+			const humanDirectorId = getHumanDirectorAgentId();
+			const response = await fetch(`/api/messages/conversation?projectId=${selectedProject.id}&agent1=${humanDirectorId}&agent2=${selectedDMAgent.id}`);
+			if (response.ok) {
+				const data = await response.json();
+				paginatedDMMessages = data.messages;
+				dmMessagesPagination = data.pagination;
+				dmMessagesLoaded = true;
+			}
+		} catch (error) {
+			console.error('Failed to load DM messages:', error);
+		}
+	}
 
 
 
@@ -441,7 +595,8 @@
 				<div class="messages-viewer">
 					<ChannelMessageList 
 						{selectedChannel}
-						channelMessages={storeChannelMessages}
+						channelMessages={finalChannelMessages}
+						messagesPagination={channelMessagesPagination}
 						{selectedThreadMessage}
 						bind:newMessageContent
 						{formatMessageTime}
@@ -450,6 +605,7 @@
 						{toggleReadStatusTooltip}
 						on:messageSelect={(e) => onMessageSelect(e.detail)}
 						on:sendMessage={sendMessage}
+						on:seeAllMessages={handleChannelSeeAllMessages}
 					/>
 				</div>
 				
@@ -483,7 +639,8 @@
 				<div class="dm-right">
 					<DMMessageList 
 						{selectedDMAgent}
-						dmMessages={storeDMMessages}
+						dmMessages={finalDMMessages}
+						messagesPagination={dmMessagesPagination}
 						{replyingToMessage}
 						bind:replyContent
 						bind:newDMContent
@@ -495,8 +652,11 @@
 						on:sendReply={handleSendReply}
 						on:cancelReply={handleCancelReply}
 						on:sendDM={handleSendDM}
+						on:seeAllMessages={handleDMSeeAllMessages}
 					/>
 				</div>			</div>
+		{:else if commsViewMode === 'dm-oversight'}
+			<DMOversightSection {selectedProject} />
 		{:else if commsViewMode === 'documents'}
 			<DocumentsSection {selectedProject} />
 		{:else if commsViewMode === 'tickets'}

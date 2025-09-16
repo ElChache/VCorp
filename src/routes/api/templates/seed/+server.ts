@@ -3,6 +3,7 @@ import { db } from '$lib/db/index';
 import { roleTemplates, promptTemplates, rolePromptCompositionTemplates, squadTemplates, squadPromptAssignmentTemplates, squadRoleAssignmentTemplates, phaseTemplates, phaseRoleAssignmentTemplates, channelTemplates, channelRoleAssignmentTemplates } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { CORE_ROLE_TEMPLATES, CORE_PROMPT_TEMPLATES, CORE_SQUAD_TEMPLATES, CORE_SQUAD_ROLE_ASSIGNMENTS, CORE_PHASE_TEMPLATES, CORE_PHASE_ROLE_ASSIGNMENTS, CORE_CHANNEL_TEMPLATES, CORE_CHANNEL_ROLE_ASSIGNMENTS } from '$lib/templates/core-templates';
+import { rolePermissionTemplates } from '$lib/templates/permissions';
 
 export async function POST() {
 	try {
@@ -21,6 +22,10 @@ export async function POST() {
 				.limit(1);
 				
 			if (existing) {
+				// Get permissions for this role type
+				const permissions = rolePermissionTemplates[roleTemplate.name];
+				const permissionsJson = permissions ? JSON.stringify(permissions) : null;
+				
 				// Update existing role template to ensure all fields are current
 				const [updated] = await db
 					.update(roleTemplates)
@@ -30,7 +35,8 @@ export async function POST() {
 						isHumanDirector: roleTemplate.isHumanDirector || false,
 						isItAdministrator: roleTemplate.isItAdministrator || false,
 						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
-						canCreatePhases: roleTemplate.canCreatePhases || false
+						canCreatePhases: roleTemplate.canCreatePhases || false,
+						permissions: permissionsJson
 					})
 					.where(eq(roleTemplates.id, existing.id))
 					.returning();
@@ -38,6 +44,10 @@ export async function POST() {
 				createdRoleTemplates[roleTemplate.name] = updated;
 				console.log(`🔄 Updated existing role template: ${updated.name} (ID: ${updated.id}) canCreatePhases: ${updated.canCreatePhases}`);
 			} else {
+				// Get permissions for this role type
+				const permissions = rolePermissionTemplates[roleTemplate.name];
+				const permissionsJson = permissions ? JSON.stringify(permissions) : null;
+				
 				// Create new one if it doesn't exist
 				const [created] = await db
 					.insert(roleTemplates)
@@ -48,7 +58,8 @@ export async function POST() {
 						isHumanDirector: roleTemplate.isHumanDirector || false,
 						isItAdministrator: roleTemplate.isItAdministrator || false,
 						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
-						canCreatePhases: roleTemplate.canCreatePhases || false
+						canCreatePhases: roleTemplate.canCreatePhases || false,
+						permissions: permissionsJson
 					})
 					.returning();
 				

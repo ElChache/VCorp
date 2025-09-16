@@ -1,0 +1,1 @@
+ALTER TABLE "content" ALTER COLUMN "priority" SET DEFAULT 'medium';

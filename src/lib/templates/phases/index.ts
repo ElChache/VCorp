@@ -1,7 +1,6 @@
 // Individual phase exports
 export { 
-  human_collaboration_clarification, 
-  product_specification_creation, 
+  complete_product_specification, 
   ongoing_product_management 
 } from './product_manager_phases';
 
@@ -48,11 +47,14 @@ export {
 export { 
   assistant_takeover_phase
 } from './assistant_phases';
+
+export {
+  IT_ADMINISTRATOR_PHASES
+} from './it_administrator_phases';
 
 // Re-create the CORE_PHASE_TEMPLATES array from individual phase templates
 import { 
-  human_collaboration_clarification, 
-  product_specification_creation, 
+  complete_product_specification, 
   ongoing_product_management 
 } from './product_manager_phases';
 
@@ -100,10 +102,13 @@ import {
   assistant_takeover_phase
 } from './assistant_phases';
 
+import {
+  IT_ADMINISTRATOR_PHASES
+} from './it_administrator_phases';
+
 export const CORE_PHASE_TEMPLATES = [
   // Product Manager phases
-  human_collaboration_clarification,
-  product_specification_creation,
+  complete_product_specification,
   ongoing_product_management,
   
   // System Architect phases
@@ -139,15 +144,17 @@ export const CORE_PHASE_TEMPLATES = [
   qa_implementation_phase,
   
   // Assistant phases
-  assistant_takeover_phase
+  assistant_takeover_phase,
+  
+  // IT Administrator phases
+  ...IT_ADMINISTRATOR_PHASES
 ];
 
 // Phase-Role assignment templates
 export const CORE_PHASE_ROLE_ASSIGNMENTS = [
   // Product Manager phases
-  { phaseName: 'Human Collaboration & Clarification', roleName: 'product-manager', phaseOrder: 1 },
-  { phaseName: 'Product Specification Creation', roleName: 'product-manager', phaseOrder: 2 },
-  { phaseName: 'Ongoing Product Management', roleName: 'product-manager', phaseOrder: 3 },
+  { phaseName: 'Complete Release 1.0 Product Specification', roleName: 'product-manager', phaseOrder: 1 },
+  { phaseName: 'Ongoing Product Management', roleName: 'product-manager', phaseOrder: 2 },
   
   // System Architect phases
   { phaseName: 'Architecture Creation', roleName: 'system-architect', phaseOrder: 1 },
@@ -170,8 +177,8 @@ export const CORE_PHASE_ROLE_ASSIGNMENTS = [
   { phaseName: 'AI Implementation Phase', roleName: 'ai-developer', phaseOrder: 2 },
   
   // UX Expert phases
-  { phaseName: 'UX Preparation Phase', roleName: 'ux-expert', phaseOrder: 1 },
-  { phaseName: 'UX Implementation Phase', roleName: 'ux-expert', phaseOrder: 2 },
+  { phaseName: 'UX Feedback & Collaboration Phase', roleName: 'ux-expert', phaseOrder: 1 },
+  { phaseName: 'Ongoing UX Excellence Monitoring', roleName: 'ux-expert', phaseOrder: 2 },
   
   // Graphic Designer phases
   { phaseName: 'Graphic Design Preparation Phase', roleName: 'graphic-designer', phaseOrder: 1 },
@@ -182,5 +189,8 @@ export const CORE_PHASE_ROLE_ASSIGNMENTS = [
   { phaseName: 'QA Implementation Phase', roleName: 'technical-qa', phaseOrder: 2 },
   
   // Assistant phases
-  { phaseName: 'Assistant Takeover Mode', roleName: 'director-assistant', phaseOrder: 1 }
+  { phaseName: 'Assistant Takeover Mode', roleName: 'director-assistant', phaseOrder: 1 },
+  
+  // IT Administrator phases
+  { phaseName: 'Platform Monitoring & Maintenance', roleName: 'it-administrator', phaseOrder: 1 }
 ];

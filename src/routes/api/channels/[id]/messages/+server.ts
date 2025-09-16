@@ -1,12 +1,13 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles, channels, channelRoleAssignments } from '$lib/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, desc } from 'drizzle-orm';
 
 // GET /api/channels/[id]/messages - Get messages for a channel
-export async function GET({ params }) {
+export async function GET({ params, url }) {
 	try {
 		const channelId = parseInt(params.id);
+		const showAll = url.searchParams.get('showAll') === 'true'; // Default to false (limit 50)
 		
 		if (!channelId || channelId < 0) {
 			return json({ 
@@ -14,8 +15,9 @@ export async function GET({ params }) {
 			}, { status: 400 });
 		}
 
-		// Get all messages for this channel, ordered by creation time
-		const messages = await db
+		// Get messages for this channel, ordered by creation time
+		// Limit to last 50 messages unless showAll is true
+		let messagesQuery = db
 			.select({
 				id: content.id,
 				type: content.type,
@@ -33,7 +35,14 @@ export async function GET({ params }) {
 			})
 			.from(content)
 			.where(eq(content.channelId, channelId))
-			.orderBy(content.createdAt);
+			.orderBy(desc(content.createdAt));
+		
+		// Apply limit if not showing all messages
+		if (!showAll) {
+			messagesQuery = messagesQuery.limit(20);
+		}
+		
+		const messages = await messagesQuery;
 
 		// For each message, get the reading assignments with read status
 		const messagesWithAssignments = await Promise.all(
@@ -106,7 +115,29 @@ export async function GET({ params }) {
 			})
 		);
 
-		return json(messagesWithAssignments);
+		// Get total count of messages for pagination info (only if not showing all)
+		let totalCount = messagesWithAssignments.length;
+		if (!showAll) {
+			// Get total count to see if there are more messages
+			const totalMessages = await db
+				.select({ count: sql`count(*)` })
+				.from(content)
+				.where(eq(content.channelId, channelId));
+			totalCount = Number(totalMessages[0]?.count || 0);
+		}
+
+		// Sort messages chronologically (oldest first) for display
+		const sortedMessages = messagesWithAssignments.reverse();
+		
+		return json({
+			messages: sortedMessages,
+			pagination: {
+				showing: messagesWithAssignments.length,
+				total: totalCount,
+				hasMore: !showAll && totalCount > 20,
+				showingAll: showAll
+			}
+		});
 	} catch (error) {
 		console.error('Failed to load channel messages:', error);
 		

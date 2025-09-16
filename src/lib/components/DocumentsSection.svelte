@@ -78,6 +78,7 @@
 				},
 				body: JSON.stringify({
 					...newDocument,
+					authorAgentId: getHumanDirectorAgentId(),
 					readingAssignments: documentReadingAssignments
 				})
 			});
@@ -456,6 +457,9 @@
 								<h4>{document.title}</h4>
 								<span class="document-type">{document.type}</span>
 							</div>
+							{#if document.documentSlug}
+								<div class="document-slug">{document.documentSlug}</div>
+							{/if}
 							<div class="document-meta">
 								<span class="author">{document.authorAgentId || 'Unknown'}</span>
 								<span class="date">{formatDate(document.createdAt)}</span>
@@ -630,7 +634,7 @@
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Role Type</option>
 										{#each storeRoleTypes as roleType}
-											<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
+											<option value={roleType.name}>{roleType.name} ({roleType.count} agents)</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'agent'}
@@ -715,7 +719,7 @@
 									<select bind:value={assignment.assignedTo}>
 										<option value="">Select Role Type</option>
 										{#each storeRoleTypes as roleType}
-											<option value={roleType.roleType}>{roleType.roleType} ({roleType.count} agents)</option>
+											<option value={roleType.name}>{roleType.name} ({roleType.count} agents)</option>
 										{/each}
 									</select>
 								{:else if assignment.assignedToType === 'agent'}
@@ -859,6 +863,17 @@
 		font-size: 0.75rem;
 		font-weight: 500;
 		text-transform: capitalize;
+	}
+
+	.document-slug {
+		font-family: 'Courier New', monospace;
+		font-size: 0.75rem;
+		color: #6b7280;
+		margin-top: 4px;
+		padding: 2px 6px;
+		background: #f3f4f6;
+		border-radius: 3px;
+		width: fit-content;
 	}
 
 	.document-meta {

@@ -3,6 +3,7 @@ import { db } from '$lib/db/index';
 import { content, readingAssignments, agents, roles, channels, channelRoleAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { resolveAssignmentTarget, isHumanDirectorId, getHumanDirectorIdForProject } from '$lib/utils/humanDirectorHelpers';
+import { CONFIG } from '$lib/config';
 
 // POST /api/send-message - Send a message with automatic reading assignments
 export async function POST({ request }) {
@@ -15,6 +16,7 @@ export async function POST({ request }) {
 			channelId, // Optional - null for DMs
 			parentContentId, // Optional - for replies to other messages/content
 			type = 'message', // 'message', 'document', 'reply'
+			priority = 'medium', // 'low', 'medium', 'high' - default to medium
 			assignTo // Array of assignments: { type: 'agent'|'role'|'squad', target: 'be_001'|'Backend Developer'|'leadership' }
 		} = await request.json();
 
@@ -31,12 +33,64 @@ export async function POST({ request }) {
 			}, { status: 400 });
 		}
 
+		// Validate message length based on message type and channel
+		const bodyLength = body.length;
+		let maxLength: number;
+		let messageContext: string;
+
+		if (type === 'document') {
+			maxLength = CONFIG.MESSAGE_LIMITS.MAX_DOCUMENT_LENGTH;
+			messageContext = 'document';
+		} else if (channelId) {
+			// Channel message
+			maxLength = CONFIG.MESSAGE_LIMITS.MAX_CHANNEL_MESSAGE_LENGTH;
+			messageContext = 'channel message';
+		} else {
+			// Direct message
+			maxLength = CONFIG.MESSAGE_LIMITS.MAX_DIRECT_MESSAGE_LENGTH;
+			messageContext = 'direct message';
+		}
+
+		if (bodyLength > maxLength) {
+			return json({ 
+				error: `Message too long: ${messageContext} cannot exceed ${maxLength} characters. Your message is ${bodyLength} characters long (${bodyLength - maxLength} characters over the limit). Please shorten your message to maintain concise communication in channels.`,
+				details: {
+					messageType: messageContext,
+					currentLength: bodyLength,
+					maxLength: maxLength,
+					overLimit: bodyLength - maxLength
+				}
+			}, { status: 400 });
+		}
+
 		// Validate projectId is a valid number
 		const parsedProjectId = parseInt(projectId);
 		if (isNaN(parsedProjectId) || parsedProjectId <= 0) {
 			return json({ 
 				error: 'Invalid projectId: must be a positive integer'
 			}, { status: 400 });
+		}
+
+		// Validate priority
+		if (priority && !['low', 'medium', 'high'].includes(priority)) {
+			return json({ 
+				error: 'Invalid priority: must be "low", "medium", or "high"'
+			}, { status: 400 });
+		}
+
+		// Override priority to 'high' if message is from human director
+		let finalPriority = priority;
+		if (authorAgentId) {
+			// Check if the agent is a human director by querying the database
+			const [authorAgent] = await db
+				.select({ isHumanDirector: agents.isHumanDirector })
+				.from(agents)
+				.where(eq(agents.id, authorAgentId))
+				.limit(1);
+			
+			if (authorAgent && authorAgent.isHumanDirector) {
+				finalPriority = 'high';
+			}
 		}
 
 		// Validate assignment targets (if provided)
@@ -224,14 +278,45 @@ export async function POST({ request }) {
 				type: type,
 				title: title || null,
 				body,
+				priority: finalPriority,
 				authorAgentId: authorAgentId || null,
 			})
 			.returning();
 
 		// Helper function to resolve agent ID
 		const resolveAgentId = async (target: string, type: string): Promise<string> => {
+			if (type === 'role') {
+				if (target === 'human-director') {
+					// Find the actual human director agent ID for this project using isHumanDirector flag
+					const [humanDirector] = await db
+						.select({ id: agents.id })
+						.from(agents)
+						.where(and(
+							eq(agents.projectId, parsedProjectId),
+							eq(agents.isHumanDirector, true)
+						))
+						.limit(1);
+					
+					return humanDirector?.id || target; // Fallback to original if not found
+				}
+				
+				if (target === 'it-administrator') {
+					// Find the actual IT administrator agent ID for this project using isItAdministrator flag
+					const [itAdmin] = await db
+						.select({ id: agents.id })
+						.from(agents)
+						.where(and(
+							eq(agents.projectId, parsedProjectId),
+							eq(agents.isItAdministrator, true)
+						))
+						.limit(1);
+					
+					return itAdmin?.id || target; // Fallback to original if not found
+				}
+			}
+			
 			if (type === 'agent' && target === 'human-director') {
-				// Find the actual human director agent ID for this project
+				// Legacy support: Find the actual human director agent ID for this project
 				const [humanDirector] = await db
 					.select({ id: agents.id })
 					.from(agents)
@@ -243,6 +328,7 @@ export async function POST({ request }) {
 				
 				return humanDirector?.id || target; // Fallback to original if not found
 			}
+			
 			return target;
 		};
 

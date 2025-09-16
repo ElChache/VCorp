@@ -39,8 +39,8 @@
 
 	async function handleMarkAsRead() {
 		await markMessageAsRead(message);
-		// The markMessageAsRead function handles updating the backend
-		// The ContentPollingService will automatically pick up the changes
+		// The markMessageAsRead function now optimistically updates the store
+		// UI will update immediately due to reactive stores
 	}
 </script>
 

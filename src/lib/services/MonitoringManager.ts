@@ -1,9 +1,12 @@
 import { execSync, spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import { join, dirname } from 'path';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments, readingAssignmentReads, projects, scheduledReminders } from '$lib/db/schema';
 import { eq, and, or, notExists } from 'drizzle-orm';
 
 import { checkForwardingStatus } from '$lib/services/ForwardingService';
+import { CONFIG } from '$lib/config';
 
 interface MonitoringStats {
 	totalChecks: number;
@@ -11,6 +14,7 @@ interface MonitoringStats {
 	notificationsSent: number;
 	gentlePokes: number;
 	remindersSent: number;
+	terminalLogsCaptured: number;
 	errors: number;
 	startTime: Date;
 	lastCheck: Date | null;
@@ -63,6 +67,7 @@ class MonitoringManager {
 		notificationsSent: 0,
 		gentlePokes: 0,
 		remindersSent: 0,
+		terminalLogsCaptured: 0,
 		errors: 0,
 		startTime: new Date(),
 		lastCheck: null,
@@ -71,27 +76,79 @@ class MonitoringManager {
 
 	// Track when agents went idle for gentle poking
 	private agentIdleTimes: Map<string, Date> = new Map();
+	
+	// Track notification timing per agent for grace period and rate limiting
+	private agentNotificationState: Map<string, {
+		lastNotificationTime: Date;
+		notificationCount: number; // Count in current minute
+		lastGracePeriodStart: Date | null;
+	}> = new Map();
 
 	private readonly INTERVAL_MS = 5000; // 5 seconds
-	private readonly NOTIFICATION_TEMPLATE = `[AUTO] 📬 UNREAD MESSAGES NOTIFICATION
+	// High Priority: Human Director Messages
+	private readonly URGENT_NOTIFICATION_TEMPLATE = `[AUTO] 📥 Message from Project Director
 ═══════════════════════════════════════════════════════════════════════
 ⚠️  This is an automated system message - DO NOT REPLY ⚠️
 ═══════════════════════════════════════════════════════════════════════
 
-You have {count} unread message{plural} assigned to you.
+You have {count} unread message{plural} from the project director.
 
-To read your messages:
-curl -X GET "http://localhost:5173/api/inbox?agentId={agentId}"
+📋 Please review when convenient:
+vcorp inbox
+
+Recent director messages:
+{preview}
+
+💡 The director's messages are important - please respond when you can.
+
+═══════════════════════════════════════════════════════════════════════
+🤖 VCorp Monitoring System - Director Communication
+═══════════════════════════════════════════════════════════════════════`;
+
+	// Medium Priority: Agent-to-Agent Messages
+	private readonly NOTIFICATION_TEMPLATE = `[AUTO] 📬 NEW TEAM MESSAGES
+═══════════════════════════════════════════════════════════════════════
+⚠️  This is an automated system message - DO NOT REPLY ⚠️
+═══════════════════════════════════════════════════════════════════════
+
+You have {count} unread message{plural} from team members.
+
+🔧 Simple function to check your messages:
+inbox
 
 Recent messages:
 {preview}
 
-Please check your inbox.
+Each message in your inbox will show a replyCommand like "reply 456" for easy responding.
 
-📚 Need help? Your complete guide: http://localhost:5173/api/agents/{agentId}/help
+💡 Finish your current task when convenient, then respond to team messages.
+
+📚 Need help? Type: help
 
 ═══════════════════════════════════════════════════════════════════════
-🤖 VCorp Monitoring System - Automated Message
+🤖 VCorp Monitoring System - Team Messages
+═══════════════════════════════════════════════════════════════════════`;
+
+	// Low Priority: Documents, Announcements, etc.
+	private readonly LOW_PRIORITY_TEMPLATE = `[AUTO] 📄 PROJECT UPDATES SUMMARY
+═══════════════════════════════════════════════════════════════════════
+⚠️  This is an automated system message - DO NOT REPLY ⚠️
+═══════════════════════════════════════════════════════════════════════
+
+You have {count} project update{plural} and document{plural} to review.
+
+🔧 Check when convenient:
+inbox
+
+Recent updates:
+{preview}
+
+💡 Review these when you have completed your current work priorities.
+
+📚 Need help? Type: help
+
+═══════════════════════════════════════════════════════════════════════
+🤖 VCorp Monitoring System - Project Updates
 ═══════════════════════════════════════════════════════════════════════`;
 
 	private readonly GENTLE_POKE_TEMPLATE = `[AUTO] 👋 GENTLE CHECK-IN
@@ -108,13 +165,42 @@ curl -X GET "http://localhost:5173/api/roles/{roleType}/current-phase?projectId=
 
 This is just a gentle reminder - no action needed if you're already working! 🚀
 
-📚 Need help? Your complete guide: http://localhost:5173/api/agents/{agentId}/help
+📚 Need help? Type: help
 
 ═══════════════════════════════════════════════════════════════════════
 🤖 VCorp Monitoring System - Automated Idle Check
 ═══════════════════════════════════════════════════════════════════════`;
 
-	private readonly IDLE_THRESHOLD_MS = 300000; // 5 minutes
+	// Timing Configuration
+	private readonly IDLE_THRESHOLD_MS = 600000; // 10 minutes
+	private readonly DIRECTOR_MESSAGE_GRACE_PERIOD_MS = 120000; // 2 minutes for director messages
+	private readonly GRACE_PERIOD_MS = 900000; // 15 minutes grace period for agent messages
+	private readonly LOW_PRIORITY_GRACE_PERIOD_MS = 1800000; // 30 minutes for low priority
+	private readonly MAX_NOTIFICATIONS_PER_MINUTE = 1;
+	
+	// Escalation Configuration
+	private readonly HUMAN_DIRECTOR_RESPONSE_TIMEOUT_MS = 300000; // 5 minutes
+	private readonly ESCALATION_REMINDER_INTERVAL_MS = 120000; // 2 minutes
+	
+	// Message Priority Thresholds
+	private readonly LOW_PRIORITY_CONTENT_TYPES = ['document', 'announcement', 'phase'];
+	
+	// Track escalation state for human director messages
+	private humanDirectorEscalationState: Map<string, {
+		firstNotificationTime: Date;
+		lastEscalationTime: Date;
+		escalationCount: number;
+	}> = new Map();
+
+	// Batching system for low priority notifications
+	private batchedNotifications: Map<string, {
+		messages: any[];
+		firstMessageTime: Date;
+		lastBatchTime: Date;
+	}> = new Map();
+	
+	private readonly BATCH_INTERVAL_MS = 1800000; // 30 minutes - send batched summaries every 30 minutes
+	private readonly BATCH_SIZE_THRESHOLD = 5; // Send batch early if 5+ messages accumulated
 
 	private constructor() {}
 
@@ -148,6 +234,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 			notificationsSent: 0,
 			gentlePokes: 0,
 			remindersSent: 0,
+			terminalLogsCaptured: 0,
 			errors: 0,
 			startTime: new Date(),
 			lastCheck: null,
@@ -224,12 +311,15 @@ This is just a gentle reminder - no action needed if you're already working! �
 
 	private async processProject(projectId: number): Promise<void> {
 		// Run all monitoring tasks in parallel
-		const [statusUpdates, notificationResults, gentlePokeResults, reminderResults, forwardingResults] = await Promise.all([
+		const [statusUpdates, notificationResults, gentlePokeResults, reminderResults, forwardingResults, terminalLogResults] = await Promise.all([
 			this.updateAgentStatuses(projectId),
 			this.sendUnreadNotifications(projectId),
 			this.sendGentlePokes(projectId),
 			this.processScheduledReminders(projectId),
-			this.processAssistantForwarding(projectId)
+			this.processAssistantForwarding(projectId),
+			this.captureTerminalLogs(projectId),
+			this.checkHumanDirectorEscalations(), // Add escalation checking
+			this.processBatchedNotifications() // Add batch processing
 		]);
 
 		// Update stats
@@ -237,6 +327,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 		this.stats.notificationsSent += notificationResults.filter(r => r.success).length;
 		this.stats.gentlePokes += gentlePokeResults.filter(r => r.success).length;
 		this.stats.remindersSent += reminderResults.filter(r => r.success).length;
+		this.stats.terminalLogsCaptured += terminalLogResults.filter(r => r.success).length;
 
 		// Log significant events
 		if (statusUpdates.length > 0) {
@@ -401,7 +492,17 @@ This is just a gentle reminder - no action needed if you're already working! �
 					continue; // No unread messages
 				}
 
+				// Check if this agent should receive a notification based on grace period, rate limiting, and work phase
+				if (!await this.shouldSendNotificationToAgent(agent.id, unreadMessages, projectId)) {
+					continue; // Skip due to grace period, rate limiting, or work phase considerations
+				}
+
 				const success = await this.sendNotificationToAgent(agent, unreadMessages);
+				
+				// Update notification state if successful
+				if (success) {
+					this.updateAgentNotificationState(agent.id);
+				}
 				
 				results.push({
 					agentId: agent.id,
@@ -446,24 +547,26 @@ This is just a gentle reminder - no action needed if you're already working! �
 			);
 		}
 
-		const now = new Date();
-		const oneMinuteAgo = new Date(now.getTime() - 60000); // 1 minute ago
-
-		// Get all unread messages first, then filter by notification timing
+		// Get all unread messages with author's human director status
 		const unreadMessages = await db
 			.select({
 				id: content.id,
 				title: content.title,
 				body: content.body,
 				type: content.type,
+				priority: content.priority,
 				parentContentId: content.parentContentId,
 				authorAgentId: content.authorAgentId,
 				createdAt: content.createdAt,
 				assignmentId: readingAssignments.id,
-				lastNotifiedAt: readingAssignments.lastNotifiedAt
+				lastNotifiedAt: readingAssignments.lastNotifiedAt,
+				assignedAt: readingAssignments.assignedAt,
+				// Include author's human director status
+				authorIsHumanDirector: agents.isHumanDirector
 			})
 			.from(readingAssignments)
 			.innerJoin(content, eq(readingAssignments.contentId, content.id))
+			.leftJoin(agents, eq(content.authorAgentId, agents.id))
 			.where(and(
 				or(...assignmentConditions),
 				notExists(
@@ -475,21 +578,11 @@ This is just a gentle reminder - no action needed if you're already working! �
 						))
 				)
 			))
-			.limit(20); // Get more to filter from
-
-		// Filter messages that need notification (never notified OR > 1 minute since last notification)
-		const messagesToNotify = unreadMessages.filter(message => {
-			if (!message.lastNotifiedAt) {
-				return true; // Never been notified
-			}
-			
-			const lastNotified = new Date(message.lastNotifiedAt);
-			return lastNotified < oneMinuteAgo; // More than 1 minute ago
-		}).slice(0, 5); // Limit to 5 for notification
+			.limit(20);
 
 		// For each message, if it's a reply, get the full thread context
 		const messagesWithContext = await Promise.all(
-			messagesToNotify.map(async (message) => {
+			unreadMessages.map(async (message) => {
 				if (message.parentContentId) {
 					// This is a reply - get the full thread
 					const thread = await this.getMessageThread(message.parentContentId);
@@ -573,23 +666,56 @@ This is just a gentle reminder - no action needed if you're already working! �
 	}
 
 	private async sendNotificationToAgent(agent: any, messages: any[]): Promise<boolean> {
-		const preview = messages
-			.slice(0, 2)
-			.map(msg => {
-				if (msg.isReply && msg.thread && msg.thread.length > 0) {
-					// This is a reply - include the thread context with character limit
-					const threadContext = this.buildThreadContextWithLimit(msg.thread, 300);
-					return `• THREAD UPDATE (${msg.type}):\n${threadContext}`;
-				} else {
-					// Regular message
-					return `• ${msg.title || msg.type}: ${msg.body}`;
-				}
-			})
-			.join('\n\n');
+		// Determine message categories
+		const humanDirectorMessages = messages.filter(msg => msg.authorIsHumanDirector === true);
+		const lowPriorityMessages = messages.filter(msg => 
+			this.LOW_PRIORITY_CONTENT_TYPES.includes(msg.type) && !msg.authorIsHumanDirector
+		);
+		const regularMessages = messages.filter(msg => 
+			!msg.authorIsHumanDirector && !this.LOW_PRIORITY_CONTENT_TYPES.includes(msg.type)
+		);
 
-		const notification = this.NOTIFICATION_TEMPLATE
-			.replace('{count}', messages.length.toString())
-			.replace('{plural}', messages.length === 1 ? '' : 's')
+		// Choose template and messages based on priority
+		let template: string;
+		let messagesToShow: any[];
+		let isUrgent = false;
+
+		if (humanDirectorMessages.length > 0) {
+			// URGENT: Human Director Messages
+			template = this.URGENT_NOTIFICATION_TEMPLATE;
+			messagesToShow = humanDirectorMessages;
+			isUrgent = true;
+			
+			// Track escalation for human director messages
+			this.trackHumanDirectorEscalation(agent.id);
+		} else if (regularMessages.length > 0) {
+			// MEDIUM: Agent-to-Agent Messages
+			template = this.NOTIFICATION_TEMPLATE;
+			messagesToShow = regularMessages;
+		} else {
+			// LOW: Documents, Announcements, etc. - Consider batching
+			const shouldBatch = await this.shouldBatchLowPriorityMessages(agent.id, lowPriorityMessages);
+			if (shouldBatch) {
+				// Add to batch instead of sending immediately
+				this.addToBatch(agent.id, lowPriorityMessages);
+				return true; // Return success but don't send notification yet
+			}
+			
+			template = this.LOW_PRIORITY_TEMPLATE;
+			messagesToShow = lowPriorityMessages;
+		}
+
+		// Sort messages by priority (high first) for display
+		const sortedMessages = messagesToShow.sort((a, b) => {
+			const priorityOrder = { high: 3, medium: 2, low: 1 };
+			return (priorityOrder[b.priority] || 2) - (priorityOrder[a.priority] || 2);
+		});
+
+		const preview = this.buildNotificationPreview(sortedMessages, isUrgent);
+
+		const notification = template
+			.replace('{count}', messagesToShow.length.toString())
+			.replace('{plural}', messagesToShow.length === 1 ? '' : 's')
 			.replace(/\{agentId\}/g, agent.id)
 			.replace('{preview}', preview || 'No preview available');
 
@@ -619,6 +745,267 @@ This is just a gentle reminder - no action needed if you're already working! �
 		return success;
 	}
 
+	private buildNotificationPreview(messages: any[], isUrgent: boolean = false): string {
+		const maxPreviewMessages = isUrgent ? 3 : 2; // Show more messages for urgent notifications
+		
+		return messages
+			.slice(0, maxPreviewMessages)
+			.map(msg => {
+				const priorityIcon = msg.priority === 'high' ? '🔴 HIGH' : 
+									 msg.priority === 'low' ? '🟡 LOW' : '🔵 MEDIUM';
+				
+				// Add special formatting for human director messages
+				const authorPrefix = msg.authorIsHumanDirector ? '👑 DIRECTOR' : priorityIcon;
+				
+				if (msg.isReply && msg.thread && msg.thread.length > 0) {
+					// This is a reply - include the thread context with character limit
+					const threadContext = this.buildThreadContextWithLimit(msg.thread, isUrgent ? 400 : 300);
+					return `• [${authorPrefix}] THREAD UPDATE (${msg.type}):\n${threadContext}`;
+				} else {
+					// Regular message with enhanced formatting for urgent messages
+					const bodyPreview = isUrgent ? msg.body : (msg.body?.substring(0, 100) + (msg.body?.length > 100 ? '...' : ''));
+					return `• [${authorPrefix}] ${msg.title || msg.type}: ${bodyPreview}`;
+				}
+			})
+			.join('\n\n');
+	}
+
+	private trackHumanDirectorEscalation(agentId: string): void {
+		const now = new Date();
+		const state = this.humanDirectorEscalationState.get(agentId);
+		
+		if (!state) {
+			// First human director message for this agent
+			this.humanDirectorEscalationState.set(agentId, {
+				firstNotificationTime: now,
+				lastEscalationTime: now,
+				escalationCount: 1
+			});
+		} else {
+			// Update escalation tracking
+			state.lastEscalationTime = now;
+			state.escalationCount++;
+		}
+	}
+
+	private async checkHumanDirectorEscalations(): Promise<void> {
+		const now = new Date();
+		
+		for (const [agentId, state] of this.humanDirectorEscalationState.entries()) {
+			const timeSinceFirstNotification = now.getTime() - state.firstNotificationTime.getTime();
+			const timeSinceLastEscalation = now.getTime() - state.lastEscalationTime.getTime();
+			
+			// If 5+ minutes have passed since first notification and 2+ minutes since last escalation
+			if (timeSinceFirstNotification >= this.HUMAN_DIRECTOR_RESPONSE_TIMEOUT_MS &&
+				timeSinceLastEscalation >= this.ESCALATION_REMINDER_INTERVAL_MS) {
+				
+				await this.sendEscalationReminder(agentId, state.escalationCount);
+				state.lastEscalationTime = now;
+				state.escalationCount++;
+			}
+		}
+	}
+
+	private async sendEscalationReminder(agentId: string, escalationCount: number): Promise<void> {
+		try {
+			const agent = await db
+				.select()
+				.from(agents)
+				.where(eq(agents.id, agentId))
+				.limit(1);
+			
+			if (!agent[0] || !agent[0].tmuxSession) return;
+
+			const urgencyLevel = escalationCount > 3 ? 'CRITICAL' : 'HIGH';
+			const escalationTemplate = `[AUTO] 🚨🚨 ESCALATION ${urgencyLevel} PRIORITY 🚨🚨
+${'🔴'.repeat(50)}
+⚠️  This is an automated ESCALATION - DO NOT REPLY ⚠️
+${'🔴'.repeat(50)}
+
+🚨 ESCALATION #${escalationCount}: HUMAN DIRECTOR still waiting for response! 🚨
+
+⏰ Response overdue by ${Math.floor((Date.now() - this.humanDirectorEscalationState.get(agentId)!.firstNotificationTime.getTime()) / 60000)} minutes
+
+🔥 IMMEDIATE ACTION REQUIRED:
+inbox
+
+${escalationCount > 2 ? '⚠️ CRITICAL: Multiple escalations sent. Please respond ASAP!' : ''}
+
+${'🔴'.repeat(50)}
+🚨 VCorp ESCALATION System - Response Required 🚨
+${'🔴'.repeat(50)}`;
+
+			await this.sendTmuxMessage(agent[0].tmuxSession, escalationTemplate);
+			console.log(`📢 Sent escalation #${escalationCount} to agent ${agentId}`);
+			
+		} catch (error) {
+			console.error(`Failed to send escalation to agent ${agentId}:`, error);
+		}
+	}
+
+	// Clear escalation tracking when agent responds to human director
+	public clearHumanDirectorEscalation(agentId: string): void {
+		this.humanDirectorEscalationState.delete(agentId);
+		console.log(`✅ Cleared human director escalation tracking for agent ${agentId}`);
+	}
+
+	// Work Phase Awareness - Deep work phases that should have reduced interruptions
+	private readonly DEEP_WORK_PHASES = [
+		'Implementation',
+		'Development', 
+		'Coding',
+		'Testing',
+		'Debugging',
+		'Architecture Design',
+		'Technical Research'
+	];
+
+	private async isAgentInDeepWorkPhase(agentId: string, projectId: number): Promise<boolean> {
+		try {
+			// Get agent's role type first
+			const agent = await db
+				.select({ roleType: agents.roleType })
+				.from(agents)
+				.where(eq(agents.id, agentId))
+				.limit(1);
+			
+			if (!agent[0]) return false;
+
+			// Get current phase for this role
+			const currentPhase = await db
+				.select({
+					name: content.title,
+					description: content.body
+				})
+				.from(content)
+				.where(and(
+					eq(content.projectId, projectId),
+					eq(content.type, 'phase'),
+					eq(content.status, 'active')
+				))
+				.limit(1);
+			
+			if (!currentPhase[0]) return false;
+
+			// Check if current phase is a deep work phase
+			return this.DEEP_WORK_PHASES.some(deepPhase => 
+				currentPhase[0].name?.toLowerCase().includes(deepPhase.toLowerCase()) ||
+				currentPhase[0].description?.toLowerCase().includes(deepPhase.toLowerCase())
+			);
+		} catch (error) {
+			console.error(`Error checking work phase for agent ${agentId}:`, error);
+			return false; // Default to not in deep work phase if error
+		}
+	}
+
+	// Batching System Methods
+	private async shouldBatchLowPriorityMessages(agentId: string, messages: any[]): Promise<boolean> {
+		const now = new Date();
+		const batchState = this.batchedNotifications.get(agentId);
+		
+		// Don't batch if no messages or agent hasn't received any notifications recently
+		if (!batchState && messages.length < 3) {
+			return false; // Send immediately for small numbers of first-time messages
+		}
+		
+		// Always batch documents and announcements unless urgent
+		const allBatchable = messages.every(msg => 
+			this.LOW_PRIORITY_CONTENT_TYPES.includes(msg.type) && 
+			msg.priority !== 'high'
+		);
+		
+		return allBatchable;
+	}
+
+	private addToBatch(agentId: string, messages: any[]): void {
+		const now = new Date();
+		const existingBatch = this.batchedNotifications.get(agentId);
+		
+		if (existingBatch) {
+			// Add to existing batch
+			existingBatch.messages.push(...messages);
+		} else {
+			// Create new batch
+			this.batchedNotifications.set(agentId, {
+				messages: [...messages],
+				firstMessageTime: now,
+				lastBatchTime: now
+			});
+		}
+		
+		console.log(`📦 Added ${messages.length} messages to batch for agent ${agentId}`);
+	}
+
+	private async processBatchedNotifications(): Promise<void> {
+		const now = new Date();
+		
+		for (const [agentId, batchState] of this.batchedNotifications.entries()) {
+			const timeSinceFirstMessage = now.getTime() - batchState.firstMessageTime.getTime();
+			const timeSinceLastBatch = now.getTime() - batchState.lastBatchTime.getTime();
+			const shouldSendBatch = 
+				timeSinceLastBatch >= this.BATCH_INTERVAL_MS || // 30 minutes elapsed
+				batchState.messages.length >= this.BATCH_SIZE_THRESHOLD; // 5+ messages accumulated
+			
+			if (shouldSendBatch && batchState.messages.length > 0) {
+				await this.sendBatchedNotification(agentId, batchState);
+				// Clear the batch after sending
+				this.batchedNotifications.delete(agentId);
+			}
+		}
+	}
+
+	private async sendBatchedNotification(agentId: string, batchState: any): Promise<void> {
+		try {
+			// Get agent info
+			const agent = await db
+				.select()
+				.from(agents)
+				.where(eq(agents.id, agentId))
+				.limit(1);
+			
+			if (!agent[0] || !agent[0].tmuxSession) return;
+
+			// Group messages by type for better summary
+			const messagesByType = batchState.messages.reduce((acc: any, msg: any) => {
+				const type = msg.type || 'message';
+				if (!acc[type]) acc[type] = [];
+				acc[type].push(msg);
+				return acc;
+			}, {});
+
+			const summary = Object.entries(messagesByType)
+				.map(([type, msgs]: [string, any]) => `• ${msgs.length} ${type}${msgs.length > 1 ? 's' : ''}`)
+				.join('\n');
+
+			const batchTemplate = `[AUTO] 📦 BATCHED PROJECT UPDATES
+═══════════════════════════════════════════════════════════════════════
+⚠️  This is an automated batch summary - DO NOT REPLY ⚠️
+═══════════════════════════════════════════════════════════════════════
+
+You have ${batchState.messages.length} accumulated project update${batchState.messages.length > 1 ? 's' : ''}:
+
+${summary}
+
+🔧 Review all updates when convenient:
+inbox
+
+💡 These are non-urgent items batched to minimize interruptions during focused work.
+Consider reviewing during natural break points.
+
+📚 Need help? Type: help
+
+═══════════════════════════════════════════════════════════════════════
+🤖 VCorp Batch System - Non-Urgent Updates
+═══════════════════════════════════════════════════════════════════════`;
+
+			await this.sendTmuxMessage(agent[0].tmuxSession, batchTemplate);
+			console.log(`📦 Sent batched notification to agent ${agentId} (${batchState.messages.length} messages)`);
+			
+		} catch (error) {
+			console.error(`Failed to send batched notification to agent ${agentId}:`, error);
+		}
+	}
+
 	private async sendTmuxMessage(tmuxSession: string, message: string): Promise<boolean> {
 		return new Promise((resolve) => {
 			const sendMessage = spawn('tmux', ['send-keys', '-t', tmuxSession, message], {
@@ -645,6 +1032,130 @@ This is just a gentle reminder - no action needed if you're already working! �
 				}, 500);
 			});
 		});
+	}
+
+	private async shouldSendNotificationToAgent(agentId: string, unreadMessages: any[], projectId: number): Promise<boolean> {
+		const now = new Date();
+		const state = this.agentNotificationState.get(agentId);
+		
+		// Initialize state if not exists
+		if (!state) {
+			this.agentNotificationState.set(agentId, {
+				lastNotificationTime: new Date(0), // Never notified
+				notificationCount: 0,
+				lastGracePeriodStart: null
+			});
+			return true; // First notification always allowed
+		}
+		
+		// Check for messages from human director - these have shorter grace period (2 minutes)
+		const hasHumanDirectorMessages = unreadMessages.some(msg => {
+			// Check if the message author is a human director
+			// This requires checking if the authorAgentId has isHumanDirector = true
+			return msg.authorIsHumanDirector === true;
+		});
+		
+		// Check rate limiting: max 2 notifications per minute (only applies to non-human-director messages)
+		const oneMinuteAgo = new Date(now.getTime() - 60000);
+		if (state.lastNotificationTime > oneMinuteAgo) {
+			// Within last minute, check count
+			if (state.notificationCount >= this.MAX_NOTIFICATIONS_PER_MINUTE) {
+				return false; // Rate limited
+			}
+		} else {
+			// Reset counter for new minute
+			state.notificationCount = 0;
+		}
+		
+		// Check for high priority messages - these always bypass grace period
+		const hasHighPriorityMessages = unreadMessages.some(msg => msg.priority === 'high');
+		if (hasHighPriorityMessages) {
+			return true; // High priority bypasses all delays
+		}
+
+		// Work Phase Awareness - reduce interruptions during deep work phases
+		const isInDeepWork = await this.isAgentInDeepWorkPhase(agentId, projectId);
+		if (isInDeepWork) {
+			// During deep work phases, only allow human director messages and critical items
+			const hasCriticalMessages = unreadMessages.some(msg => 
+				msg.authorIsHumanDirector || 
+				msg.priority === 'high' ||
+				msg.type === 'ticket' && msg.priority === 'critical'
+			);
+			
+			if (!hasCriticalMessages) {
+				// Extend grace period for non-critical messages during deep work
+				const deepWorkGracePeriod = this.GRACE_PERIOD_MS * 2; // Double the grace period
+				const gracePeriodExpired = (now.getTime() - state.lastNotificationTime.getTime()) >= deepWorkGracePeriod;
+				if (!gracePeriodExpired) {
+					return false; // Skip notification to maintain focus
+				}
+			}
+		}
+
+		// Check if there are any NEW reading assignments since last grace period
+		const hasNewAssignments = unreadMessages.some(msg => {
+			const assignedAt = new Date(msg.assignedAt);
+			return !state.lastGracePeriodStart || assignedAt > state.lastGracePeriodStart;
+		});
+		
+		if (hasNewAssignments) {
+			// New assignments arrived - immediate notification allowed
+			return true;
+		}
+		
+		// No new assignments, check appropriate grace period based on message types
+		const hasLowPriorityOnly = unreadMessages.every(msg => 
+			this.LOW_PRIORITY_CONTENT_TYPES.includes(msg.type) || msg.priority === 'low'
+		);
+		
+		// Determine applicable grace period based on message priority
+		let applicableGracePeriod: number;
+		if (hasHumanDirectorMessages) {
+			applicableGracePeriod = this.DIRECTOR_MESSAGE_GRACE_PERIOD_MS; // 2 minutes for director
+		} else if (hasLowPriorityOnly) {
+			applicableGracePeriod = this.LOW_PRIORITY_GRACE_PERIOD_MS; // 30 minutes for low priority
+		} else {
+			applicableGracePeriod = this.GRACE_PERIOD_MS; // 15 minutes for regular messages
+		}
+		
+		const gracePeriodExpired = (now.getTime() - state.lastNotificationTime.getTime()) >= applicableGracePeriod;
+		return gracePeriodExpired;
+	}
+	
+	private updateAgentNotificationState(agentId: string): void {
+		const now = new Date();
+		const state = this.agentNotificationState.get(agentId);
+		
+		if (!state) {
+			this.agentNotificationState.set(agentId, {
+				lastNotificationTime: now,
+				notificationCount: 1,
+				lastGracePeriodStart: now
+			});
+			return;
+		}
+		
+		// Check if this is within the same minute for rate limiting
+		const oneMinuteAgo = new Date(now.getTime() - 60000);
+		if (state.lastNotificationTime > oneMinuteAgo) {
+			// Same minute, increment counter
+			state.notificationCount++;
+		} else {
+			// New minute, reset counter
+			state.notificationCount = 1;
+		}
+		
+		state.lastNotificationTime = now;
+		state.lastGracePeriodStart = now; // Reset grace period
+	}
+	
+	// Public method to reset grace period when agent reads messages
+	public resetAgentGracePeriod(agentId: string): void {
+		const state = this.agentNotificationState.get(agentId);
+		if (state) {
+			state.lastGracePeriodStart = new Date();
+		}
 	}
 
 	private async sendGentlePokes(projectId: number): Promise<GentlePokeResult[]> {
@@ -954,8 +1465,145 @@ Status: ${phase.status}`;
 		}
 	}
 
+	private async captureTerminalLogs(projectId: number): Promise<{agentId: string, success: boolean, error?: string}[]> {
+		if (!CONFIG.TERMINAL_LOGGING.ENABLED) {
+			return [];
+		}
+
+		// Get all agents with tmux sessions for this project
+		const projectAgents = await db
+			.select({
+				id: agents.id,
+				tmuxSession: agents.tmuxSession,
+				status: agents.status
+			})
+			.from(agents)
+			.where(eq(agents.projectId, projectId));
+
+		const results: {agentId: string, success: boolean, error?: string}[] = [];
+
+		for (const agent of projectAgents) {
+			if (!agent.tmuxSession || agent.status === 'offline') {
+				continue; // Skip agents without sessions or offline
+			}
+
+			try {
+				const success = await this.captureAgentTerminalLog(agent.id, agent.tmuxSession);
+				results.push({
+					agentId: agent.id,
+					success
+				});
+			} catch (error) {
+				results.push({
+					agentId: agent.id,
+					success: false,
+					error: error instanceof Error ? error.message : 'Unknown error'
+				});
+			}
+		}
+
+		return results;
+	}
+
+	private async captureAgentTerminalLog(agentId: string, tmuxSession: string): Promise<boolean> {
+		try {
+			// Capture the current terminal content
+			const terminalOutput = execSync(
+				`tmux capture-pane -t "${tmuxSession}" -p`,
+				{ encoding: 'utf8', timeout: 3000 }
+			);
+
+			// Ensure log directory exists
+			await this.ensureLogDirectory();
+
+			// Generate log file path
+			const logFilePath = this.getLogFilePath(agentId);
+
+			// Append to log file with timestamp
+			const timestamp = new Date().toISOString();
+			const logEntry = `\n=== ${timestamp} ===\n${terminalOutput}\n`;
+
+			await fs.appendFile(logFilePath, logEntry);
+
+			// Check if log rotation is needed
+			await this.rotateLogFileIfNeeded(logFilePath, agentId);
+
+			return true;
+
+		} catch (error) {
+			console.error(`Failed to capture terminal log for agent ${agentId}:`, error);
+			return false;
+		}
+	}
+
+	private async ensureLogDirectory(): Promise<void> {
+		try {
+			await fs.access(CONFIG.TERMINAL_LOGGING.LOG_DIR);
+		} catch {
+			// Directory doesn't exist, create it
+			await fs.mkdir(CONFIG.TERMINAL_LOGGING.LOG_DIR, { recursive: true });
+		}
+	}
+
+	private getLogFilePath(agentId: string): string {
+		const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+		const fileName = CONFIG.TERMINAL_LOGGING.LOG_FILE_PATTERN
+			.replace('{agentId}', agentId)
+			.replace('{date}', date);
+		return join(CONFIG.TERMINAL_LOGGING.LOG_DIR, fileName);
+	}
+
+	private async rotateLogFileIfNeeded(logFilePath: string, agentId: string): Promise<void> {
+		try {
+			const stats = await fs.stat(logFilePath);
+			
+			if (stats.size > CONFIG.TERMINAL_LOGGING.MAX_LOG_FILE_SIZE) {
+				// Create rotated filename
+				const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+				const rotatedPath = `${logFilePath}.${timestamp}`;
+				
+				// Move current log to rotated name
+				await fs.rename(logFilePath, rotatedPath);
+				
+				// Clean up old rotated logs
+				await this.cleanupOldLogs(agentId);
+				
+				console.log(`📄 Rotated log file for agent ${agentId}: ${rotatedPath}`);
+			}
+		} catch (error) {
+			console.error(`Failed to rotate log file for agent ${agentId}:`, error);
+		}
+	}
+
+	private async cleanupOldLogs(agentId: string): Promise<void> {
+		try {
+			const files = await fs.readdir(CONFIG.TERMINAL_LOGGING.LOG_DIR);
+			
+			// Find all log files for this agent
+			const agentLogFiles = files
+				.filter(file => file.includes(`terminal_${agentId}_`))
+				.map(file => ({
+					name: file,
+					path: join(CONFIG.TERMINAL_LOGGING.LOG_DIR, file)
+				}))
+				.sort((a, b) => b.name.localeCompare(a.name)); // Sort by name (newest first)
+			
+			// Remove excess files
+			if (agentLogFiles.length > CONFIG.TERMINAL_LOGGING.MAX_LOG_FILES) {
+				const filesToDelete = agentLogFiles.slice(CONFIG.TERMINAL_LOGGING.MAX_LOG_FILES);
+				
+				for (const file of filesToDelete) {
+					await fs.unlink(file.path);
+					console.log(`🗑️  Deleted old log file: ${file.name}`);
+				}
+			}
+		} catch (error) {
+			console.error(`Failed to cleanup old logs for agent ${agentId}:`, error);
+		}
+	}
+
 	private logStats(): void {
-		const { totalChecks, statusUpdates, notificationsSent, gentlePokes, errors, uptime } = this.getStats();
+		const { totalChecks, statusUpdates, notificationsSent, gentlePokes, terminalLogsCaptured, errors, uptime } = this.getStats();
 		const uptimeMinutes = Math.floor(uptime / 60000);
 		const uptimeSeconds = Math.floor((uptime % 60000) / 1000);
 
@@ -966,6 +1614,7 @@ Status: ${phase.status}`;
 		console.log(`🔄 Status Updates: ${statusUpdates}`);
 		console.log(`📬 Notifications Sent: ${notificationsSent}`);
 		console.log(`👋 Gentle Pokes: ${gentlePokes}`);
+		console.log(`📄 Terminal Logs Captured: ${terminalLogsCaptured}`);
 		console.log(`❌ Errors: ${errors}`);
 		console.log('═══════════════════════════════════');
 	}

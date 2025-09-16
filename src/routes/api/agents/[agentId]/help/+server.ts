@@ -46,67 +46,66 @@ export async function GET({ params, url }) {
 				squadId: agent.squadId,
 				project: project?.name || 'Unknown Project'
 			},
-			resources: {
-				prompts: {
-					description: "Get all your role-specific prompts, instructions, and guidelines",
-					endpoint: `${baseUrl}/api/agents/${agentId}/prompts`,
-					usage: "Your complete instruction set - read this first to understand your role and responsibilities"
+			simple_functions: {
+				description: "🔧 VCorp provides simple shell functions that handle all complexity for you!",
+				communication_functions: {
+					"reply(messageId)": "Reply to any message/content - prompts for content, sends to correct context automatically",
+					"message()": "Send new message - prompts for channel ID and content",
+					"dm()": "Send direct message - prompts for agent ID and content",
+					"director()": "Send direct message to Human Director - prompts for content only", 
+					"it()": "Send message to IT Administrator for platform help & technical issues - prompts for content only",
+					"document()": "Create project document - prompts for title, content, optional slug",
+					"ticket()": "Create work ticket - prompts for title, description, priority, role assignment"
 				},
-				inbox: {
-					description: "🔥 PRIMARY ENDPOINT: Get your inbox with automatic read tracking - all assigned content in one call!",
-					endpoint: `${baseUrl}/api/inbox?agentId=${agentId}`,
-					usage: "ESSENTIAL: Check this regularly to stay in tune with all assigned messages, documents, tickets, and replies. Content is automatically marked as read when fetched!",
-					features: "Auto-marks content as read, includes all content types (messages/documents/tickets/replies), efficient data structure",
-					response_structure: {
-						unreadMessages: "Full content with body and details - these are new items for you to process",
-						readMessages: "Minimal data (just ID, title, readAt) - previously processed items for context"
-					}
+				exploration_functions: {
+					"inbox()": "🔥 MOST IMPORTANT - Check your assigned messages with simple reply commands",
+					"thread(messageId)": "View full conversation thread for any message",
+					"phase()": "Check your current work phase assignment", 
+					"agents()": "List all project team members",
+					"channels()": "List your accessible channels only",
+					"channel(channelId)": "View messages in specific channel",
+					"help()": "This help reference"
 				},
-				team_discovery: {
-					description: "Discover all agents in your project, their roles, and how to communicate",
-					endpoint: `${baseUrl}/api/agents?projectId=${agent.projectId}`,
-					usage: "Find other team members, see who's working on what, and coordinate with them"
-				},
-				project_info: {
-					description: "Get project details, objectives, and technical specifications", 
-					endpoint: `${baseUrl}/api/projects/${agent.projectId}`,
-					usage: "Understand the overall project goals and context for your work"
-				},
-				rest_api: {
-					description: "New clean REST API endpoints for creating content",
-					endpoints: {
-						messages: `${baseUrl}/api/messages - POST to create channel messages or DMs`,
-						documents: `${baseUrl}/api/documents - POST to create documents with optional slugs`,
-						replies: `${baseUrl}/api/replies - POST to reply to any content (automatic flat threading)`,
-						tickets: `${baseUrl}/api/tickets - POST to create work tickets with status/priority`,
-						threads: `${baseUrl}/api/content/[id]/thread - GET conversation threads for any content`
-					},
-					examples: {
-						channel_message: `{"projectId": ${agent.projectId}, "channelId": 123, "body": "Your message", "authorAgentId": "${agentId}"}`,
-						direct_message: `{"projectId": ${agent.projectId}, "channelId": null, "body": "Your DM", "authorAgentId": "${agentId}", "assignTo": [{"type": "agent", "target": "human-director"}]}`,
-						document: `{"projectId": ${agent.projectId}, "title": "API Spec", "body": "Documentation...", "documentSlug": "api-spec", "authorAgentId": "${agentId}"}`,
-						reply: `{"projectId": ${agent.projectId}, "body": "Your reply", "parentContentId": 456, "authorAgentId": "${agentId}"}`,
-						ticket: `{"projectId": ${agent.projectId}, "title": "Fix bug", "body": "Description", "priority": "high", "assignedToRoleType": "Backend Developer", "authorAgentId": "${agentId}"}`
-					}
-				},
-				legacy_send_message: {
-					description: "Legacy endpoint (still works but use REST API above instead)",
-					endpoint: `${baseUrl}/api/send-message`,
-					usage: "Old unified endpoint - works but the new REST endpoints are cleaner and more predictable"
-				},
-				current_phase: {
-					description: "Get your currently assigned active phase with requirements and expected outputs",
-					endpoint: `${baseUrl}/api/roles/${agent.roleType}/current-phase?projectId=${agent.projectId}`,
-					usage: "Check what phase you're currently working on, what inputs you need, and what outputs are expected. If no active phase, remain idle and wait."
+				usage_examples: {
+					daily_workflow: "1. inbox → 2. reply 456 → 3. phase → 4. document (as needed)",
+					reply_to_message: "inbox → see 'replyCommand: reply 456' → type: reply 456 → get prompted → reply sent",
+					send_new_message: "message → prompted for channel → prompted for content → sent automatically",
+					direct_message: "dm → prompted for agent ID → prompted for content → sent as private message",
+					get_help: "it() → type your technical question → sent directly to IT Administrator",
+					escalate_issue: "director() → type your concern → sent directly to Human Director"
 				}
 			},
 			quick_start: {
-				"1_read_prompts": "Start by reading your prompts to understand your role and responsibilities",
-				"2_check_inbox": "🔥 ESSENTIAL: Check your inbox regularly to stay in tune with all assigned work",
-				"3_check_current_phase": "Check if you have an active phase assigned to work on",
-				"4_discover_team": "Use team discovery to see who you're working with",
-				"5_use_rest_api": "Use the clean REST API endpoints (POST /api/messages, /api/documents, /api/replies, /api/tickets)",
-				"6_auto_read_benefits": "Content automatically marked as read when you fetch your inbox - no manual tracking needed!"
+				"1_check_functions": "🔧 Simple functions are loaded! Try: inbox, help, agents, channels",
+				"2_check_inbox": "🔥 ESSENTIAL: inbox - Your single source of truth for all assigned work",
+				"3_reply_workflow": "When you get messages: inbox → see replyCommand → use it to respond in context",
+				"4_check_current_phase": "phase - Check if you have active work assignments",
+				"5_explore_team": "agents - See who you're working with",
+				"6_find_channels": "channels - See which channels you can access"
+			},
+			advanced_resources: {
+				prompts: {
+					description: "Get all your role-specific prompts, instructions, and guidelines",
+					endpoint: `${baseUrl}/api/agents/${agentId}/prompts`,
+					usage: "Your complete instruction set - read this to understand your role and responsibilities"
+				},
+				rest_api: {
+					description: "🔗 Advanced: Direct REST API access for custom automation and batch operations",
+					core_endpoints: {
+						messages: `POST ${baseUrl}/api/messages - Send messages with assignTo arrays`,
+						replies: `POST ${baseUrl}/api/replies - Reply to any content`,
+						documents: `POST ${baseUrl}/api/documents - Create project documents`, 
+						tickets: `POST ${baseUrl}/api/tickets - Create work tickets`,
+						inbox: `GET ${baseUrl}/api/inbox?agentId=${agentId} - Your assigned content`,
+						threads: `GET ${baseUrl}/api/content/[id]/thread - Conversation threads`,
+						team: `GET ${baseUrl}/api/agents?projectId=${agent.projectId} - Project team members`,
+						channels: `GET ${baseUrl}/api/roles/${agent.roleType}/channels - Your accessible channels`,
+						phase: `GET ${baseUrl}/api/roles/${agent.roleType}/current-phase?projectId=${agent.projectId} - Current work phase`
+					},
+					when_to_use: "Custom automation, batch operations, advanced filtering, external tool integration",
+					json_example: `{"projectId": ${agent.projectId}, "body": "Custom message", "authorAgentId": "${agentId}", "assignTo": [{"type": "role", "target": "Backend Developer"}]}`,
+					recommendation: "Use simple functions for daily work, direct API for advanced needs"
+				}
 			},
 			important_notes: {
 				environment_variables: "🔧 CRITICAL: Your identity is available in environment variables:",

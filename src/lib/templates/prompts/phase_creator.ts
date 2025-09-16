@@ -22,7 +22,6 @@ You have the authority to create development phases for this project. Use this p
   "title": "Clear Phase Name",
   "body": "Detailed description with workflow steps, requirements, and deliverables...",
   "assignedToRoleType": "target-role-type", // e.g. "backend-developer", "product-manager"
-  "phaseStatus": "draft", // Always start as draft
   "requiredInputs": "[\\"input-doc-slug-1\\", \\"input-doc-slug-2\\"]", // JSON string array
   "expectedOutputs": "[\\"output-doc-slug-1\\", \\"output-doc-slug-2\\"]" // JSON string array
 }

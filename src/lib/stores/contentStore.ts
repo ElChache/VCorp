@@ -11,10 +11,10 @@
 import { writable, derived, get } from 'svelte/store';
 import type { ContentUpdate, GroupedUpdates } from '$lib/services/ContentPollingService';
 import { 
-	isMessageFromHumanDirector, 
-	getHumanDirectorAssignments,
 	isContentUnreadByHumanDirector,
-	getHumanDirectorAgentId 
+	getHumanDirectorAssignments,
+	isMessageFromHumanDirector,
+	getHumanDirectorAgentId
 } from '$lib/utils/humanDirectorClientHelpers';
 
 // ==================== Core State ====================
@@ -28,6 +28,10 @@ interface ContentState {
 	agents: any[]; 
 	roleTypes: any[];
 	squads: any[];
+	
+	// DM Oversight data
+	dmOversightAgents: any[];
+	dmOversightConversations: Record<string, any>;
 	
 	// Sync state
 	lastSyncTimestamp: string | null;
@@ -44,6 +48,8 @@ const initialState: ContentState = {
 	agents: [],
 	roleTypes: [],
 	squads: [],
+	dmOversightAgents: [],
+	dmOversightConversations: {},
 	lastSyncTimestamp: null,
 	isLoading: false,
 	error: null,
@@ -127,6 +133,10 @@ export const channels = derived(contentStore, $store => $store.channels);
 export const agents = derived(contentStore, $store => $store.agents);
 export const roleTypes = derived(contentStore, $store => $store.roleTypes);
 export const squads = derived(contentStore, $store => $store.squads);
+
+// DM Oversight selectors
+export const dmOversightAgents = derived(contentStore, $store => $store.dmOversightAgents);
+export const dmOversightConversations = derived(contentStore, $store => $store.dmOversightConversations);
 
 // Loading/error state
 export const isLoading = derived(contentStore, $store => $store.isLoading);
@@ -228,7 +238,8 @@ export const contentActions = {
 				contentActions.loadChannels(projectId),
 				contentActions.loadAgents(projectId),
 				contentActions.loadRoleTypes(projectId),
-				contentActions.loadSquads(projectId)
+				contentActions.loadSquads(projectId),
+				contentActions.loadDMOversightAgents(projectId)
 			]);
 
 			// Then load content updates
@@ -367,6 +378,95 @@ export const contentActions = {
 		}
 	},
 
+	// Optimistically mark reading assignment as read (for immediate UI updates)
+	optimisticallyMarkAsRead(contentId: number, assignmentId: number, agentId: string) {
+		if (!agentId) return;
+
+		console.log('🚀 Optimistically marking as read:', { contentId, assignmentId, agentId });
+
+		contentStore.update(state => {
+			const content = state.contentById[contentId];
+			if (!content) {
+				console.warn('Content not found for optimistic update:', contentId);
+				return state;
+			}
+
+			console.log('📝 Original content:', content);
+
+			const updatedContent = { ...content };
+			if (updatedContent.readingAssignments) {
+				updatedContent.readingAssignments = updatedContent.readingAssignments.map(assignment => {
+					if (assignment.id === assignmentId) {
+						const updatedAssignment = {
+							...assignment,
+							reads: [
+								...(assignment.reads || []),
+								{ agentId: agentId, readAt: new Date().toISOString() }
+							]
+						};
+						console.log('✅ Updated assignment:', updatedAssignment);
+						return updatedAssignment;
+					}
+					return assignment;
+				});
+			}
+
+			const newState = {
+				...state,
+				contentById: {
+					...state.contentById,
+					[contentId]: updatedContent
+				}
+			};
+
+			console.log('💾 New state after optimistic update:', newState);
+			return newState;
+		});
+	},
+
+	// DM Oversight data loading
+	async loadDMOversightAgents(projectId: number) {
+		try {
+			const response = await fetch(`/api/dm-oversight/agents?projectId=${projectId}`);
+			if (response.ok) {
+				const agents = await response.json();
+				contentActions.setDMOversightAgents(agents);
+			}
+		} catch (error) {
+			console.error('Failed to load DM oversight agents:', error);
+		}
+	},
+
+	async loadDMOversightConversations(projectId: number, agentId: string) {
+		try {
+			const response = await fetch(`/api/dm-oversight/${agentId}/conversations?projectId=${projectId}`);
+			if (response.ok) {
+				const data = await response.json();
+				contentActions.setDMOversightConversations(agentId, data);
+			}
+		} catch (error) {
+			console.error('Failed to load DM oversight conversations:', error);
+		}
+	},
+
+	// DM Oversight setters
+	setDMOversightAgents(agents: any[]) {
+		contentStore.update(state => ({
+			...state,
+			dmOversightAgents: agents
+		}));
+	},
+
+	setDMOversightConversations(agentId: string, conversationData: any) {
+		contentStore.update(state => ({
+			...state,
+			dmOversightConversations: {
+				...state.dmOversightConversations,
+				[agentId]: conversationData
+			}
+		}));
+	},
+
 	// Clear all data (useful for logout/project switch)
 	clear() {
 		contentStore.set(initialState);
@@ -408,8 +508,17 @@ export const humanDirectorReadingAssignments = derived(allReadingAssignments, $a
 );
 
 // Unread assignments for human-director
-export const humanDirectorUnreadAssignments = derived(humanDirectorReadingAssignments, $assignments =>
-	$assignments.filter(assignment => {
-		return isContentUnreadByHumanDirector({ readingAssignments: [assignment] });
-	})
-);
+export const humanDirectorUnreadAssignments = derived(humanDirectorReadingAssignments, $assignments => {
+	const unreadAssignments = $assignments.filter(assignment => {
+		const isUnread = isContentUnreadByHumanDirector({ readingAssignments: [assignment] });
+		return isUnread;
+	});
+	
+	console.log('🔄 humanDirectorUnreadAssignments recalculated:', {
+		totalAssignments: $assignments.length,
+		unreadCount: unreadAssignments.length,
+		unreadAssignments: unreadAssignments.map(a => ({ id: a.id, contentId: a.contentId }))
+	});
+	
+	return unreadAssignments;
+});

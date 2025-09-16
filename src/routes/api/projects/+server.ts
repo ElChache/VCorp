@@ -101,6 +101,7 @@ export async function POST({ request }) {
 						isItAdministrator: roleTemplate.isItAdministrator || false,
 						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
 						canCreatePhases: roleTemplate.canCreatePhases || false,
+						permissions: roleTemplate.permissions, // Inherit permissions from template
 					})
 					.returning();
 
@@ -120,6 +121,7 @@ export async function POST({ request }) {
 						isItAdministrator: roleTemplate.isItAdministrator || false,
 						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
 						canCreatePhases: roleTemplate.canCreatePhases || false,
+						permissions: roleTemplate.permissions, // Inherit permissions from template
 					})
 					.returning();
 

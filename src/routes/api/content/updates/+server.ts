@@ -41,15 +41,8 @@ export async function GET({ url }) {
 				)
 			);
 		} else {
-			// If no timestamp provided, return recent content (last 1 hour as default)
-			const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-			whereCondition = and(
-				eq(content.projectId, parsedProjectId),
-				or(
-					gte(content.createdAt, oneHourAgo),
-					gte(content.updatedAt, oneHourAgo)
-				)
-			);
+			// If no timestamp provided, return all content for the project
+			whereCondition = eq(content.projectId, parsedProjectId);
 		}
 
 		// Get updated content with basic fields
@@ -62,11 +55,12 @@ export async function GET({ url }) {
 				type: content.type,
 				title: content.title,
 				body: content.body,
+				priority: content.priority,
 				authorAgentId: content.authorAgentId,
+				documentSlug: content.documentSlug,
 				squadId: content.squadId,
 				// Ticket-specific fields
 				status: content.status,
-				priority: content.priority,
 				assignedToRoleType: content.assignedToRoleType,
 				claimedByAgent: content.claimedByAgent,
 				// Phase-specific fields
@@ -215,6 +209,7 @@ export async function GET({ url }) {
 		const directMessagesPromises = updatesWithAssignments.map(async (u) => {
 			if (u.channelId !== null) return null; // Not a DM
 			if (u.type === 'document') return null; // Direct document
+			if (u.type === 'phase') return null; // Phases are not DMs
 			
 			const isDocRelated = await isDocumentRelated(u);
 			return isDocRelated ? null : u; // Return null if document-related, otherwise return content

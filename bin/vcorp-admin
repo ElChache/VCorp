@@ -1,0 +1,1566 @@
+#!/bin/bash
+
+# VCorp Admin Command - Main script for all VCorp operations
+# Usage: vcorp-admin --project=ID --agent=AGENT_ID --role=ROLE_TYPE COMMAND
+
+# Parse command line arguments
+PROJECT_ID=""
+AGENT_ID=""
+AGENT_ROLE=""
+COMMAND=""
+COMMAND_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --project=*)
+            PROJECT_ID="${1#*=}"
+            shift
+            ;;
+        --agent=*)
+            AGENT_ID="${1#*=}"
+            shift
+            ;;
+        --role=*)
+            # Only consume --role= as agent context if no command set yet
+            if [[ -z "$COMMAND" ]]; then
+                AGENT_ROLE="${1#*=}"
+                shift
+            else
+                COMMAND_ARGS+=("$1")
+                shift
+            fi
+            ;;
+        --help)
+            # Don't consume --help here, let the command handle it
+            if [[ -z "$COMMAND" ]]; then
+                SHOW_HELP="true"
+                shift
+            else
+                COMMAND_ARGS+=("$1")
+                shift
+            fi
+            ;;
+        *)
+            if [[ -z "$COMMAND" ]]; then
+                COMMAND="$1"
+            else
+                COMMAND_ARGS+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Help functions for each command
+show_global_help() {
+    echo "🔧 VCorp Command Line Tool - Agent Communication System"
+    echo ""
+    echo "Usage: vcorp COMMAND [OPTIONS]"
+    echo "   or: vcorp --help"
+    echo ""
+    echo "📋 Available Commands:"
+    echo ""
+    echo "🗣️  Communication Commands:"
+    echo "   reply        Reply to any message/content"
+    echo "   message      Send message to channel with assignments"  
+    echo "   dm           Send direct message to specific agent"
+    echo "   director     Send direct message to Human Director"
+    echo "   it           Send message to IT Administrator"
+    echo "   document     Create project documents"
+    echo "   ticket       Create work tickets with assignments"
+    echo ""
+    echo "🔍 Information Commands:"
+    echo "   help         Get role instructions and function reference"
+    echo "   permissions  View your access permissions and workspace"
+    echo "   inbox        Check assigned messages and tasks"
+    echo "   phase        Check current work assignment"
+    echo "   agents       List all project team members"
+    echo "   channels     List accessible channels"
+    echo "   channel      View messages in specific channel"
+    echo "   thread       View full conversation context"
+    echo ""
+    echo "💡 For detailed help on any command: vcorp COMMAND --help"
+    echo "   Example: vcorp message --help"
+}
+
+show_message_help() {
+    echo "📤 vcorp message - Send messages to channels with assignments"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp message CHANNEL_ID CONTENT [OPTIONS]"
+    echo "   vcorp message --channel-id=ID --content=CONTENT [OPTIONS]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp message 5 \"Feature complete\""
+    echo "   vcorp message 5 \"Need review\" --assign-agent=alice,bob"
+    echo "   vcorp message 5 \"Bug found\" --assign-role=\"backend-developer\""
+    echo "   vcorp message 5 \"Decision needed\" --assign-squad=leadership"
+    echo ""
+    echo "Assignment Options:"
+    echo "   --assign-agent=agent1,agent2        Assign to specific agents"
+    echo "   --assign-agent=\"agent1, agent2\"     Use quotes if names have spaces"
+    echo "   --assign-role=role1,role2           Assign to role types" 
+    echo "   --assign-squad=squad1,squad2        Assign to squads"
+    echo ""
+    echo "💡 Tip: Use 'vcorp channels' to see available channel IDs"
+}
+
+show_dm_help() {
+    echo "📧 vcorp dm - Send direct messages to agents, roles, or squads"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp dm CONTENT --to=TARGETS [OPTIONS]"
+    echo "   vcorp dm --content=CONTENT --to=TARGETS [OPTIONS]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp dm \"Quick question\" --to=alice"
+    echo "   vcorp dm \"Team meeting in 5\" --to=alice,bob,charlie"
+    echo "   vcorp dm \"Need backend help\" --to-role=backend-developer"
+    echo "   vcorp dm \"Leadership decision\" --to-squad=leadership"
+    echo "   vcorp dm \"Mixed recipients\" --to=alice --to-role=product-manager"
+    echo ""
+    echo "Recipient Options:"
+    echo "   --to=agent1,agent2              Send to specific agents"
+    echo "   --to=\"agent1, agent2\"            Use quotes if names have spaces"
+    echo "   --to-role=role1,role2           Send to role types"
+    echo "   --to-squad=squad1,squad2        Send to squads"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use 'vcorp agents' to see available agent IDs"
+    echo "   • DMs can go to multiple recipients simultaneously"
+    echo "   • Mix different recipient types in one message"
+}
+
+show_reply_help() {
+    echo "💬 vcorp reply - Reply to messages or content with assignments"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp reply MESSAGE_ID CONTENT [OPTIONS]"
+    echo "   vcorp reply --message-id=ID --content=CONTENT [OPTIONS]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp reply 123 \"Great work on this!\""
+    echo "   vcorp reply 456 \"I agree\" --assign-agent=alice,bob"
+    echo "   vcorp reply 789 \"Backend review needed\" --assign-role=backend-developer"
+    echo "   vcorp reply 101 \"Leadership decision\" --assign-squad=leadership"
+    echo "   vcorp reply 202 \"Mixed notification\" --assign-agent=alice --assign-role=product-manager"
+    echo ""
+    echo "Assignment Options:"
+    echo "   --assign-agent=agent1,agent2        Assign reply to specific agents"
+    echo "   --assign-agent=\"agent1, agent2\"     Use quotes if names have spaces"
+    echo "   --assign-role=role1,role2           Assign to role types"
+    echo "   --assign-squad=squad1,squad2        Assign to squads"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use 'vcorp inbox' or 'vcorp thread ID' to find message IDs"
+    echo "   • Replies automatically notify thread participants"
+    echo "   • Additional assignments notify extra people beyond the thread"
+    echo "   • Thread participants + manual assignments = total notifications"
+}
+
+show_inbox_help() {
+    echo "📬 vcorp inbox - Check your assigned messages and tasks"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp inbox                          Show unread messages only (default)"
+    echo "   vcorp inbox --all                    Show all messages (read + unread)"
+    echo "   vcorp inbox --json                   Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp inbox                          # Quick scan of what needs attention"
+    echo "   vcorp inbox --all                    # See everything including read messages"
+    echo "   vcorp inbox --json --all             # Full API response for automation"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Default shows unread messages with ready-to-use reply commands"
+    echo "   • Use the 'vcorp reply ID' commands shown to respond quickly"
+    echo "   • Messages are auto-marked as read when you view them"
+    echo "   • Use --all to see your complete message history"
+}
+
+show_permissions_help() {
+    echo "🔒 vcorp permissions - View your access permissions and workspace"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp permissions                    Show permissions summary"
+    echo "   vcorp permissions --detailed         Show full allow/deny rules"
+    echo "   vcorp permissions --workspace        Show just your workspace path"
+    echo "   vcorp permissions --level            Show your permission level"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp permissions                    # Quick overview"
+    echo "   vcorp permissions --detailed         # Full rule breakdown"
+    echo "   vcorp permissions --workspace        # Show where you can write"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Your permissions are defined by your role type"
+    echo "   • Standard developers can only write in their agent workspace"
+    echo "   • Use --workspace to see exactly where you can create/edit files"
+    echo "   • Permission rules control what tools and paths you can access"
+}
+
+show_agents_help() {
+    echo "👥 vcorp agents - List project agents with status and details"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp agents                         Show all agents with formatted status"
+    echo "   vcorp agents --json                  Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp agents                         # See team status at a glance"
+    echo "   vcorp agents --json                  # Full API response for automation"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Status shows: active (working), idle (available), offline (not running)"
+    echo "   • Shows each agent's role, model, and last activity"
+    echo "   • Use this to see who's available for collaboration"
+    echo "   • Human directors are shown separately from AI agents"
+}
+
+show_channels_help() {
+    echo "📋 vcorp channels - List channels accessible to your role"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp channels                       Show all accessible channels with details"
+    echo "   vcorp channels --json                Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp channels                       # See all channels you can access"
+    echo "   vcorp channels --json                # Full API response for automation"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Shows both assigned channels (role-specific) and main channels (public)"
+    echo "   • Main channels like #general are accessible to all team members"
+    echo "   • Use 'vcorp channel ID' to read messages from a specific channel"
+    echo "   • Use 'vcorp send' to post messages to channels"
+}
+
+show_channel_help() {
+    echo "💬 vcorp channel - Read messages from a specific channel"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp channel CHANNEL_ID             Show messages from channel (formatted)"
+    echo "   vcorp channel CHANNEL_ID --json      Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp channel 61                     # Read messages from #general"
+    echo "   vcorp channel 62 --json              # Raw JSON for #blockers"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use 'vcorp channels' to see available channel IDs"
+    echo "   • Recent messages are shown first"
+    echo "   • Use 'vcorp reply MESSAGE_ID' to respond to specific messages"
+}
+
+show_thread_help() {
+    echo "🧵 vcorp thread - Follow a conversation thread from a message"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp thread MESSAGE_ID              Show thread conversation (formatted)"
+    echo "   vcorp thread MESSAGE_ID --json       Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp thread 107                     # Show conversation thread for message 107"
+    echo "   vcorp thread 108 --json              # Raw JSON for thread"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Shows the full conversation context around a message"
+    echo "   • Useful for understanding ongoing discussions"
+    echo "   • Use 'vcorp reply MESSAGE_ID' to respond to specific messages in thread"
+}
+
+show_phase_help() {
+    echo "📋 vcorp phase - Check your current work assignment and phase"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp phase                          Show current phase assignment (formatted)"
+    echo "   vcorp phase --json                   Raw JSON output for API integration"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp phase                          # See current work phase and instructions"
+    echo "   vcorp phase --json                   # Raw JSON for automation"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Shows whether you have an active phase assignment"
+    echo "   • Provides specific instructions for your current work"
+    echo "   • Use this to understand your current priorities and tasks"
+    echo "   • Phase assignments are managed by leads and product managers"
+}
+
+show_help_index() {
+    echo "📚 VCorp Agent Help System"
+    echo ""
+    echo "Available Help Topics:"
+    echo "   role         - Your role description and responsibilities"
+    echo "   workflow     - Development process (git worktrees, testing, deployment)"
+    echo "   communication- Team protocols and communication guidelines"
+    echo "   workspace    - File permissions, workspace boundaries, and access rules"
+    echo "   commands     - All available VCorp commands and system reference"
+    echo ""
+    echo "Usage: vcorp help TOPIC"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp help role          # What's my job and responsibilities?"
+    echo "   vcorp help workflow      # How do I work with git and development?"
+    echo "   vcorp help communication # How do I communicate with the team?"
+    echo "   vcorp help workspace     # Where can I work and what can I access?"
+    echo "   vcorp help commands      # What VCorp commands are available?"
+    echo ""
+    echo "💡 Pro Tip: Start with 'vcorp help role' to understand your specific responsibilities!"
+}
+
+show_help_role() {
+    echo "👤 Your Role: $(echo "$AGENT_ROLE" | tr '-' ' ' | sed 's/\b\w/\U&/g')"
+    echo ""
+    echo "📋 Getting your role-specific instructions..."
+    
+    # Get role prompts from API
+    role_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    
+    # Check for API errors
+    if echo "$role_prompts" | jq -e '.error' > /dev/null 2>&1; then
+        echo "❌ Error: $(echo "$role_prompts" | jq -r '.error')"
+        echo ""
+        echo "📝 Basic Role Info:"
+        echo "   Role Type: $AGENT_ROLE"
+        echo "   Agent ID: $AGENT_ID"
+        echo "   Project ID: $PROJECT_ID"
+        return 1
+    fi
+    
+    # Extract and display role-specific content
+    echo "$role_prompts" | jq -r '.prompts[] | select(.type == "role_description") | .content'
+}
+
+show_help_workflow() {
+    echo "🔧 Development Workflow Guide"
+    echo ""
+    echo "📋 Getting your development process instructions..."
+    
+    # Get workflow prompts from API
+    workflow_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    
+    # Check for API errors
+    if echo "$workflow_prompts" | jq -e '.error' > /dev/null 2>&1; then
+        echo "❌ Error: $(echo "$workflow_prompts" | jq -r '.error')"
+        return 1
+    fi
+    
+    # Extract and display workflow content
+    echo "$workflow_prompts" | jq -r '.prompts[] | select(.type == "worktree_workflow") | .content'
+}
+
+show_help_communication() {
+    echo "💬 Team Communication Guidelines"
+    echo ""
+    echo "📋 Getting your communication protocols..."
+    
+    # Get communication prompts from API
+    comm_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    
+    # Check for API errors
+    if echo "$comm_prompts" | jq -e '.error' > /dev/null 2>&1; then
+        echo "❌ Error: $(echo "$comm_prompts" | jq -r '.error')"
+        return 1
+    fi
+    
+    # Extract and display communication content
+    echo "$comm_prompts" | jq -r '.prompts[] | select(.type == "communication") | .content'
+}
+
+show_help_workspace() {
+    echo "🏠 Your Workspace & Permissions"
+    echo ""
+    echo "📂 Workspace Information:"
+    echo "   Agent ID: $AGENT_ID"
+    echo "   Your Workspace: ./agent_workspaces/$AGENT_ID/"
+    echo "   Project Root: ./"
+    echo ""
+    
+    # Show permissions using existing permissions command logic
+    CLAUDE_SETTINGS_FILE="./.claude/settings_project${PROJECT_ID}.json"
+    
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        echo "❌ Permissions file not found: $CLAUDE_SETTINGS_FILE"
+        echo "This usually means your agent wasn't launched with proper permissions setup."
+        return 1
+    fi
+    
+    echo "🔒 Access Rules Summary:"
+    echo ""
+    
+    # Show key permissions
+    if command -v jq >/dev/null 2>&1; then
+        allow_count=$(jq -r '.permissions.allow | length' "$CLAUDE_SETTINGS_FILE" 2>/dev/null || echo "0")
+        deny_count=$(jq -r '.permissions.deny | length' "$CLAUDE_SETTINGS_FILE" 2>/dev/null || echo "0")
+        echo "✅ Allowed Operations: $allow_count rules"
+        echo "❌ Restricted Operations: $deny_count rules"
+        echo ""
+        echo "📝 Key Access Areas:"
+        echo "   ✅ Your agent workspace (read/write)"
+        echo "   👀 Main project files (read-only)"
+        echo "   🔧 Development tools (npm, git, etc.)"
+        echo "   ❌ Other agents' workspaces (restricted)"
+        echo ""
+        echo "💡 For detailed permissions: vcorp permissions --detailed"
+    else
+        echo "⚠️ jq not available - cannot parse permissions"
+    fi
+}
+
+show_help_commands() {
+    echo "🔧 VCorp Command System Reference"
+    echo ""
+    echo "📋 Available Commands:"
+    echo ""
+    echo "🗣️  Communication Commands:"
+    echo "   reply        Reply to any message/content"
+    echo "   message      Send message to channel with assignments"  
+    echo "   dm           Send direct message to specific agent"
+    echo "   director     Send direct message to Human Director"
+    echo "   it           Send message to IT Administrator"
+    echo "   document     Create project documents"
+    echo "   ticket       Create work tickets with assignments"
+    echo ""
+    echo "🔍 Information Commands:"
+    echo "   help         Get role instructions and function reference"
+    echo "   permissions  View your access permissions and workspace"
+    echo "   inbox        Check assigned messages and tasks"
+    echo "   phase        Check current work assignment"
+    echo "   agents       List all project team members"
+    echo "   channels     List accessible channels"
+    echo "   channel      View messages in specific channel"
+    echo "   thread       View full conversation context"
+    echo ""
+    echo "💡 For detailed help on any command: vcorp COMMAND --help"
+    echo "   Example: vcorp message --help"
+    echo ""
+    echo "🚀 Quick Start:"
+    echo "   1. vcorp inbox     # Check your assignments"
+    echo "   2. vcorp phase     # See your current work"
+    echo "   3. vcorp agents    # Meet your team"
+    echo "   4. vcorp channels  # Find communication channels"
+}
+
+show_document_help() {
+    echo "📄 vcorp document - Create project documents with optional assignments"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp document TITLE CONTENT [OPTIONS]"
+    echo "   vcorp document --title=TITLE --content=CONTENT [OPTIONS]"
+    echo "   vcorp document TITLE --file=FILE [OPTIONS]"
+    echo "   vcorp document --title=TITLE --file=FILE [OPTIONS]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp document \"Meeting Notes\" \"Key decisions from today's sprint planning\""
+    echo "   vcorp document \"API Spec\" --file=api-specification.md --slug=api-docs"
+    echo "   vcorp document \"Architecture\" --file=system-design.md --assign-role=tech-lead"
+    echo "   vcorp document \"Requirements\" --file=features.md --assign-agent=alice,bob"
+    echo ""
+    echo "Assignment Options:"
+    echo "   --assign-agent=agent1,agent2        Assign document to specific agents for review"
+    echo "   --assign-role=role1,role2           Assign document to role types for review"
+    echo "   --assign-squad=squad1,squad2        Assign document to squads for review"
+    echo ""
+    echo "Content Options:"
+    echo "   --file=FILE                         Read content from file instead of command line"
+    echo "   CONTENT                             Inline document content"
+    echo "   --slug=SLUG                         URL-friendly document identifier (optional)"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use --file= for long documents, specifications, or formatted content"
+    echo "   • Documents with assignments notify specified agents/roles for review"
+    echo "   • Slug creates a friendly URL for the document (auto-generated if omitted)"
+    echo "   • Markdown formatting is fully supported in document content"
+}
+
+show_ticket_help() {
+    echo "🎫 vcorp ticket - Create work tickets with assignments and status"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp ticket TITLE DESCRIPTION [OPTIONS]"
+    echo "   vcorp ticket --title=TITLE --description=DESCRIPTION [OPTIONS]"
+    echo "   vcorp ticket TITLE --file=FILE [OPTIONS]"
+    echo "   vcorp ticket --title=TITLE --file=FILE [OPTIONS]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp ticket \"Fix login bug\" \"Users can't login with special characters\""
+    echo "   vcorp ticket \"API Design\" \"Design REST API\" --role=backend-developer --priority=high"
+    echo "   vcorp ticket \"Bug Report\" --file=bug-details.md --priority=critical --assign-role=backend-developer"
+    echo "   vcorp ticket \"Feature Request\" --file=requirements.md --assign-squad=leadership"
+    echo ""
+    echo "Assignment Options:"
+    echo "   --role=ROLE_TYPE                    Assign to specific role (legacy, same as --assign-role)"
+    echo "   --assign-agent=agent1,agent2        Assign to specific agents"
+    echo "   --assign-role=role1,role2           Assign to role types"
+    echo "   --assign-squad=squad1,squad2        Assign to squads"
+    echo ""
+    echo "Status Options:"
+    echo "   --status=STATUS                     Ticket status (default: open)"
+    echo "   Valid statuses: open, in_progress, blocked, ready_for_review,"
+    echo "                   reviewing, review_passed, needs_attention, resolved, closed"
+    echo ""
+    echo "Priority Options:"
+    echo "   --priority=PRIORITY                 Ticket priority (default: medium)"
+    echo "   Valid priorities: low, medium, high, critical"
+    echo ""
+    echo "Content Options:"
+    echo "   --file=FILE                         Read description from file instead of command line"
+    echo "   DESCRIPTION                         Inline description text"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Tickets are automatically created as 'open' status"
+    echo "   • Use --file= for long descriptions, bug reports, or formatted content"
+    echo "   • Use --role for single role assignment (legacy compatibility)"
+    echo "   • Use --assign-* for complex multi-target assignments"
+    echo "   • Combine role assignment + additional assignments for broad coverage"
+}
+
+# Function to parse command arguments (both named and positional)
+parse_args() {
+    local positional_index=0
+    local expected_args=("$@")
+    
+    # Clear any existing ARG_ variables
+    unset ARG_message_id ARG_content ARG_channel_id ARG_to ARG_title ARG_description ARG_role ARG_priority ARG_slug ARG_assign_agent ARG_assign_role ARG_assign_squad ARG_to_role ARG_to_squad ARG_status ARG_help ARG_file ARG_detailed ARG_workspace ARG_level ARG_all ARG_json
+    
+    for arg in "${COMMAND_ARGS[@]}"; do
+        if [[ "$arg" == "--help" ]]; then
+            ARG_help="true"
+        elif [[ "$arg" == "--detailed" ]]; then
+            ARG_detailed="true"
+        elif [[ "$arg" == "--workspace" ]]; then
+            ARG_workspace="true"
+        elif [[ "$arg" == "--level" ]]; then
+            ARG_level="true"
+        elif [[ "$arg" == "--all" ]]; then
+            ARG_all="true"
+        elif [[ "$arg" == "--json" ]]; then
+            ARG_json="true"
+        elif [[ "$arg" =~ ^--([^=]+)=(.*)$ ]]; then
+            # Named parameter: --key=value
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+            key="${key//-/_}"  # Replace hyphens with underscores
+            eval "ARG_$key=\"\$value\""
+        else
+            # Positional parameter
+            if [[ $positional_index -lt ${#expected_args[@]} ]]; then
+                local var_name="${expected_args[$positional_index]}"
+                var_name="${var_name//-/_}"  # Replace hyphens with underscores
+                eval "ARG_$var_name=\"\$arg\""
+                ((positional_index++))
+            fi
+        fi
+    done
+}
+
+# Handle global --help flag (only if no command specified or command is --help)
+if [[ "$SHOW_HELP" == "true" ]] || [[ "$COMMAND" == "--help" ]]; then
+    show_global_help
+    exit 0
+fi
+
+# Validate required parameters
+if [[ -z "$PROJECT_ID" || -z "$AGENT_ID" || -z "$AGENT_ROLE" || -z "$COMMAND" ]]; then
+    echo "Usage: vcorp-admin --project=ID --agent=AGENT_ID --role=ROLE_TYPE COMMAND"
+    echo ""
+    show_global_help
+    exit 1
+fi
+
+
+# Execute the command
+case "$COMMAND" in
+    help)
+        # Parse arguments: vcorp help [TOPIC]
+        parse_args "topic"
+        
+        # Handle help topics
+        case "$ARG_topic" in
+            "role")
+                show_help_role
+                ;;
+            "workflow")
+                show_help_workflow
+                ;;
+            "communication")
+                show_help_communication
+                ;;
+            "workspace")
+                show_help_workspace
+                ;;
+            "commands")
+                show_help_commands
+                ;;
+            "")
+                # No topic specified - show master index
+                show_help_index
+                ;;
+            *)
+                echo "❌ Unknown help topic: $ARG_topic"
+                echo ""
+                show_help_index
+                ;;
+        esac
+        ;;
+        
+    permissions)
+        # Parse arguments: vcorp permissions [--detailed] [--workspace] [--level]
+        parse_args "detailed" "workspace" "level"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_permissions_help
+            exit 0
+        fi
+        
+        # Path to Claude settings file
+        CLAUDE_SETTINGS_FILE="./.claude/settings_project${PROJECT_ID}.json"
+        
+        if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+            echo "❌ Permissions file not found: $CLAUDE_SETTINGS_FILE"
+            echo "This usually means your agent wasn't launched with proper permissions setup."
+            exit 1
+        fi
+        
+        echo "🔒 Your Agent Permissions"
+        echo "========================"
+        echo "Agent ID: $AGENT_ID"
+        echo "Role: $AGENT_ROLE"
+        echo "Project: $PROJECT_ID"
+        echo ""
+        
+        # Check if specific options requested
+        if [[ "$ARG_workspace" == "true" ]]; then
+            echo "📁 Your Workspace Path:"
+            echo "   ./agent_workspaces/$AGENT_ID/"
+            echo ""
+            echo "💡 You can write files anywhere in this directory structure:"
+            echo "   Write(./agent_workspaces/$AGENT_ID/**)"
+            echo "   Edit(./agent_workspaces/$AGENT_ID/**)"
+            echo "   Read(./agent_workspaces/$AGENT_ID/**)"
+            
+        elif [[ "$ARG_level" == "true" ]]; then
+            # Extract permission level from settings file if available
+            echo "🎚️  Permission Level:"
+            if command -v jq >/dev/null 2>&1 && jq -e '.permissionLevel' "$CLAUDE_SETTINGS_FILE" >/dev/null 2>&1; then
+                PERM_LEVEL=$(jq -r '.permissionLevel // "standard"' "$CLAUDE_SETTINGS_FILE")
+                echo "   $PERM_LEVEL"
+            else
+                echo "   standard (inferred from role)"
+            fi
+            
+        elif [[ "$ARG_detailed" == "true" ]]; then
+            echo "📋 Detailed Permission Rules:"
+            echo ""
+            
+            if command -v jq >/dev/null 2>&1; then
+                echo "✅ ALLOWED:"
+                jq -r '.permissions.allow[]? // empty' "$CLAUDE_SETTINGS_FILE" | while read -r rule; do
+                    echo "   $rule"
+                done
+                
+                echo ""
+                echo "❌ DENIED:"
+                jq -r '.permissions.deny[]? // empty' "$CLAUDE_SETTINGS_FILE" | while read -r rule; do
+                    echo "   $rule"
+                done
+            else
+                echo "⚠️  jq not available - showing raw settings file:"
+                cat "$CLAUDE_SETTINGS_FILE"
+            fi
+            
+        else
+            # Default summary view
+            echo "📁 Workspace: ./agent_workspaces/$AGENT_ID/"
+            echo "📖 Project Access: Read-only access to ./project/**"
+            echo "🛠️  Development Tools: npm, node, git commands allowed"
+            echo "🔧 GitHub: Can create PRs, clone repos, manage branches"
+            echo ""
+            echo "💡 Use these flags for more details:"
+            echo "   --detailed   Full allow/deny rules"
+            echo "   --workspace  Just workspace path info"
+            echo "   --level      Permission level only"
+        fi
+        ;;
+        
+    inbox)
+        # Parse arguments: vcorp inbox [--all] [--json] [--help]
+        parse_args "all" "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_inbox_help
+            exit 0
+        fi
+        
+        # Fetch inbox data
+        echo "📬 Checking your inbox..."
+        inbox_response=$(curl -s "http://localhost:5173/api/inbox?agentId=$AGENT_ID")
+        
+        # Check if curl succeeded
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Error: Failed to fetch inbox data"
+            exit 1
+        fi
+        
+        # If --json flag is set, output raw JSON
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$inbox_response" | jq '.'
+            exit 0
+        fi
+        
+        # Parse the response for formatted display
+        if ! command -v jq >/dev/null 2>&1; then
+            echo "⚠️  jq not available - showing raw response:"
+            echo "$inbox_response"
+            exit 0
+        fi
+        
+        # Extract data using jq
+        total=$(echo "$inbox_response" | jq -r '.summary.total // 0')
+        unread_count=$(echo "$inbox_response" | jq -r '.summary.unread // 0')
+        read_count=$(echo "$inbox_response" | jq -r '.summary.read // 0')
+        
+        echo ""
+        echo "📊 Inbox Summary:"
+        echo "   Total: $total messages | Unread: $unread_count | Read: $read_count"
+        echo ""
+        
+        # Determine which messages to show and format appropriately
+        if [[ "$ARG_all" == "true" ]]; then
+            # Show all messages using the complete 'messages' array
+            echo "📋 All Messages:"
+            echo "$inbox_response" | jq -r '.messages[] | 
+                "---\n📧 Message #\(.messageId)\n👤 From: \(.authorAgentId)\n📅 Date: \(.createdAt | split("T")[0])\n📝 Type: \(.type)\n💬 Content: \(.body)\n🔧 Reply: vcorp reply \(.messageId)\n\(if .isRead then "✅ Read" else "🔴 UNREAD" end)\n"'
+        else
+            # Show unread messages only (default)
+            echo "🔥 Unread Messages (use --all to see everything):"
+            
+            # Check if there are unread messages
+            if [[ "$unread_count" -eq 0 ]]; then
+                echo "   ✅ No unread messages! You're all caught up."
+                if [[ "$read_count" -gt 0 ]]; then
+                    echo "   💡 Use 'vcorp inbox --all' to see your $read_count read messages"
+                fi
+                exit 0
+            fi
+            
+            # Show unread messages with their built-in replyCommand
+            echo "$inbox_response" | jq -r '.unreadMessages[] | 
+                "---",
+                "📧 Message #" + (.messageId | tostring) + " 🔴 UNREAD",
+                "👤 From: " + .authorAgentId,
+                "📅 Date: " + (.createdAt | split("T")[0] + " " + (.createdAt | split("T")[1] | split(".")[0])),
+                "📝 Type: " + .type,
+                "💬 Content: " + .body,
+                "🔧 Ready to use: vcorp " + .replyCommand,
+                ""'
+        fi
+        
+        echo ""
+        echo "💡 Quick Actions:"
+        echo "   • Reply to any message: vcorp reply MESSAGE_ID"
+        echo "   • View full conversation: vcorp thread MESSAGE_ID" 
+        if [[ "$ARG_all" != "true" ]]; then
+            echo "   • See all messages: vcorp inbox --all"
+        fi
+        echo "   • Get raw data: vcorp inbox --json"
+        ;;
+        
+    phase)
+        # Parse arguments: vcorp phase [--json]
+        parse_args "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_phase_help
+            exit 0
+        fi
+        
+        # Get current phase information
+        encodedRole=$(echo "$AGENT_ROLE" | sed 's/ /%20/g')
+        phase_response=$(curl -s "http://localhost:5173/api/roles/$encodedRole/current-phase?projectId=$PROJECT_ID")
+        
+        # Check for API errors
+        if echo "$phase_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$phase_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$phase_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        role_display=$(echo "$AGENT_ROLE" | tr '-' ' ' | sed 's/\b\w/\U&/g')
+        echo "📋 Current Phase Assignment for $role_display:"
+        echo ""
+        
+        # Check if has active phase
+        has_active_phase=$(echo "$phase_response" | jq -r '.hasActivePhase')
+        if [[ "$has_active_phase" == "true" ]]; then
+            echo "✅ Active Phase: $(echo "$phase_response" | jq -r '.currentPhase.title // "Unnamed Phase"')"
+            echo "📝 Description: $(echo "$phase_response" | jq -r '.currentPhase.description // "No description provided"')"
+            echo "⏰ Status: $(echo "$phase_response" | jq -r '.currentPhase.status // "Unknown"')"
+            echo "📅 Created: $(echo "$phase_response" | jq -r '.currentPhase.createdAt | split("T")[0] // "Unknown"')"
+            echo ""
+            echo "📋 Instructions:"
+            echo "$(echo "$phase_response" | jq -r '.instruction // "No specific instructions provided"')"
+        else
+            echo "⏸️  No Active Phase"
+            echo "📝 Message: $(echo "$phase_response" | jq -r '.message // "No message provided"')"
+            echo ""
+            echo "📋 Instructions:"
+            echo "$(echo "$phase_response" | jq -r '.instruction // "Remain available for tasks and communication"')"
+        fi
+        ;;
+        
+    agents)
+        # Parse arguments: vcorp agents [--json]
+        parse_args "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_agents_help
+            exit 0
+        fi
+        
+        # Get agents data
+        agents_response=$(curl -s "http://localhost:5173/api/agents?projectId=$PROJECT_ID")
+        
+        # Check for API errors
+        if echo "$agents_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$agents_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$agents_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        echo "👥 Project Agents Status:"
+        echo ""
+        
+        # Check if we have agents
+        agent_count=$(echo "$agents_response" | jq '. | length')
+        if [[ "$agent_count" == "0" ]]; then
+            echo "No agents found for this project."
+            exit 0
+        fi
+        
+        # Format each agent
+        echo "$agents_response" | jq -r '.[] | 
+            "\(.id) (\(.roleType))\n" +
+            "  📊 Status: \(if .status == "active" then "🟢 Active" elif .status == "idle" then "🟡 Idle" else "🔴 Offline" end)\n" +
+            "  🤖 Model: \(.model)\n" +
+            "  📅 Last Seen: \(.lastHeartbeat | split("T")[0])\n" +
+            "  🏠 Workspace: \(.worktreePath)\n" +
+            (if .isHumanDirector then "  👑 Human Director" else "" end) +
+            (if .isItAdministrator then "  🔧 IT Administrator" else "" end) +
+            "\n"'
+        ;;
+        
+    channels)
+        # Parse arguments: vcorp channels [--json]
+        parse_args "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_channels_help
+            exit 0
+        fi
+        
+        # Get channels data
+        encodedRole=$(echo "$AGENT_ROLE" | sed 's/ /%20/g')
+        channels_response=$(curl -s "http://localhost:5173/api/roles/$encodedRole/channels")
+        
+        # Check for API errors
+        if echo "$channels_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$channels_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$channels_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        echo "📋 Accessible Channels for $(echo "$AGENT_ROLE" | tr '-' ' ' | sed 's/\b\w/\U&/g'):"
+        echo ""
+        
+        # Check if we have channels
+        channel_count=$(echo "$channels_response" | jq '.assignedChannels | length')
+        if [[ "$channel_count" == "0" ]]; then
+            echo "No channels accessible to your role."
+            exit 0
+        fi
+        
+        # Format each channel (deduplicated by channelId)
+        echo "$channels_response" | jq -r '.assignedChannels | unique_by(.channelId) | .[] | 
+            "#\(.channelName) (ID: \(.channelId))\n" +
+            "  📝 Description: \(.description)\n" +
+            "  🔧 Access Command: vcorp channel \(.channelId)\n" +
+            (if .isMainChannel then "  🌍 Public Channel (accessible to all)" else "  🔒 Role-Assigned Channel" end) +
+            "\n"'
+        ;;
+        
+    channel)
+        # Parse arguments: vcorp channel CHANNEL_ID [--json]
+        parse_args "channel-id" "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_channel_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_channel_id" ]]; then
+            echo "❌ Error: Channel ID is required"
+            echo ""
+            show_channel_help
+            exit 1
+        fi
+        
+        # Get channel messages
+        channel_response=$(curl -s "http://localhost:5173/api/channels/$ARG_channel_id/messages")
+        
+        # Check for API errors
+        if echo "$channel_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$channel_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$channel_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        channel_name=$(echo "$channel_response" | jq -r '.channel.name // "Unknown"')
+        echo "💬 Messages in #$channel_name (ID: $ARG_channel_id):"
+        echo ""
+        
+        # Check if we have messages
+        message_count=$(echo "$channel_response" | jq '.messages | length')
+        if [[ "$message_count" == "0" ]]; then
+            echo "No messages in this channel yet."
+            exit 0
+        fi
+        
+        # Format each message (most recent first)
+        echo "$channel_response" | jq -r '.messages | reverse | .[] | 
+            "📧 Message #\(.id) - \(.createdAt | split("T")[0])\n" +
+            "👤 From: \(.authorAgentId)\n" +
+            "💬 Content: \(.body)\n" +
+            "🔧 Reply: vcorp reply \(.id)\n" +
+            (if .parentContentId then "🧵 Thread: vcorp thread \(.parentContentId)" else "🧵 Thread: vcorp thread \(.id)" end) +
+            "\n"'
+        ;;
+        
+    thread)
+        # Parse arguments: vcorp thread MESSAGE_ID [--json]
+        parse_args "message-id" "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_thread_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_message_id" ]]; then
+            echo "❌ Error: Message ID is required"
+            echo ""
+            show_thread_help
+            exit 1
+        fi
+        
+        # Get thread conversation
+        thread_response=$(curl -s "http://localhost:5173/api/content/$ARG_message_id/thread")
+        
+        # Check for API errors
+        if echo "$thread_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$thread_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$thread_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        echo "🧵 Conversation Thread for Message #$ARG_message_id:"
+        echo ""
+        
+        # Show original message
+        echo "📧 Original Message:"
+        echo "$thread_response" | jq -r '.originalContent | 
+            "  ID: \(.id)\n" +
+            "  From: \(.authorAgentId)\n" +
+            "  Date: \(.createdAt | split("T")[0])\n" +
+            "  Content: \(.body)\n" +
+            "  🔧 Reply: vcorp reply \(.id)"'
+        
+        echo ""
+        
+        # Show replies if any
+        reply_count=$(echo "$thread_response" | jq '.replies | length')
+        if [[ "$reply_count" == "0" ]]; then
+            echo "💭 No replies in this thread yet."
+        else
+            echo "💬 Replies ($reply_count):"
+            echo ""
+            echo "$thread_response" | jq -r '.replies[] | 
+                "  📧 Reply #\(.id) - \(.createdAt | split("T")[0])\n" +
+                "    👤 From: \(.authorAgentId)\n" +
+                "    💬 Content: \(.body)\n" +
+                "    🔧 Reply: vcorp reply \(.id)\n"'
+        fi
+        ;;
+        
+    reply)
+        # Parse arguments: vcorp reply MESSAGE_ID CONTENT [--assign-agent=AGENTS] [--assign-role=ROLES] [--assign-squad=SQUADS]
+        parse_args "message-id" "content" "assign-agent" "assign-role" "assign-squad"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_reply_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_message_id" ]]; then
+            echo "❌ Error: Message ID is required"
+            echo ""
+            show_reply_help
+            exit 1
+        fi
+        
+        if [[ -z "$ARG_content" ]]; then
+            echo "❌ Error: Reply content is required"
+            echo ""
+            show_reply_help
+            exit 1
+        fi
+        
+        echo "💬 Replying to message $ARG_message_id..."
+        
+        # Build assignTo array from parameters
+        assignToJson="[]"
+        
+        # Add agent assignments
+        if [[ -n "$ARG_assign_agent" ]]; then
+            IFS=',' read -ra AGENTS <<< "$ARG_assign_agent"
+            for agent in "${AGENTS[@]}"; do
+                agent=$(echo "$agent" | xargs) # trim whitespace
+                if [[ -n "$agent" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg agent "$agent" '. += [{"type": "agent", "target": $agent}]')
+                fi
+            done
+        fi
+        
+        # Add role assignments  
+        if [[ -n "$ARG_assign_role" ]]; then
+            IFS=',' read -ra ROLES <<< "$ARG_assign_role"
+            for role in "${ROLES[@]}"; do
+                role=$(echo "$role" | xargs) # trim whitespace
+                if [[ -n "$role" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg role "$role" '. += [{"type": "role", "target": $role}]')
+                fi
+            done
+        fi
+        
+        # Add squad assignments
+        if [[ -n "$ARG_assign_squad" ]]; then
+            IFS=',' read -ra SQUADS <<< "$ARG_assign_squad"
+            for squad in "${SQUADS[@]}"; do
+                squad=$(echo "$squad" | xargs) # trim whitespace
+                if [[ -n "$squad" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg squad "$squad" '. += [{"type": "squad", "target": $squad}]')
+                fi
+            done
+        fi
+        
+        # Build the reply JSON
+        replyJson=$(jq -n \
+            --arg body "$ARG_content" \
+            --arg projectId "$PROJECT_ID" \
+            --arg parentId "$ARG_message_id" \
+            --arg authorId "$AGENT_ID" \
+            --argjson assignTo "$assignToJson" \
+            '{projectId: ($projectId | tonumber), body: $body, parentContentId: ($parentId | tonumber), authorAgentId: $authorId, assignTo: $assignTo}')
+        
+        # Send the reply
+        echo "$replyJson" | curl -X POST "http://localhost:5173/api/replies" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        echo "✅ Reply sent!"
+        ;;
+        
+    message)
+        # Parse arguments: vcorp message CHANNEL_ID CONTENT [--assign-agent=AGENT1,AGENT2] [--assign-role=ROLE1,ROLE2] [--assign-squad=SQUAD1,SQUAD2]
+        parse_args "channel-id" "content" "assign-agent" "assign-role" "assign-squad"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_message_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_channel_id" ]]; then
+            echo "❌ Error: Channel ID is required"
+            echo ""
+            show_message_help
+            exit 1
+        fi
+        
+        if [[ -z "$ARG_content" ]]; then
+            echo "❌ Error: Message content is required"
+            echo ""
+            show_message_help
+            exit 1
+        fi
+        
+        echo "📤 Sending message to channel $ARG_channel_id..."
+        
+        # Build assignTo array from parameters
+        assignToJson="[]"
+        
+        # Add agent assignments
+        if [[ -n "$ARG_assign_agent" ]]; then
+            IFS=',' read -ra AGENTS <<< "$ARG_assign_agent"
+            for agent in "${AGENTS[@]}"; do
+                agent=$(echo "$agent" | xargs) # trim whitespace
+                if [[ -n "$agent" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg agent "$agent" '. += [{"type": "agent", "target": $agent}]')
+                fi
+            done
+        fi
+        
+        # Add role assignments  
+        if [[ -n "$ARG_assign_role" ]]; then
+            IFS=',' read -ra ROLES <<< "$ARG_assign_role"
+            for role in "${ROLES[@]}"; do
+                role=$(echo "$role" | xargs) # trim whitespace
+                if [[ -n "$role" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg role "$role" '. += [{"type": "role", "target": $role}]')
+                fi
+            done
+        fi
+        
+        # Add squad assignments
+        if [[ -n "$ARG_assign_squad" ]]; then
+            IFS=',' read -ra SQUADS <<< "$ARG_assign_squad"
+            for squad in "${SQUADS[@]}"; do
+                squad=$(echo "$squad" | xargs) # trim whitespace
+                if [[ -n "$squad" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg squad "$squad" '. += [{"type": "squad", "target": $squad}]')
+                fi
+            done
+        fi
+        
+        # Build the message JSON
+        messageJson=$(jq -n \
+            --arg body "$ARG_content" \
+            --arg projectId "$PROJECT_ID" \
+            --arg channelId "$ARG_channel_id" \
+            --arg authorId "$AGENT_ID" \
+            --argjson assignTo "$assignToJson" \
+            '{projectId: ($projectId | tonumber), channelId: ($channelId | tonumber), body: $body, authorAgentId: $authorId, assignTo: $assignTo}')
+        
+        # Send the message
+        echo "$messageJson" | curl -X POST "http://localhost:5173/api/messages" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        echo "✅ Message sent to channel $ARG_channel_id!"
+        ;;
+        
+    dm)
+        # Parse arguments: vcorp dm CONTENT --to=TARGETS [--to-role=ROLES] [--to-squad=SQUADS]
+        parse_args "content" "to" "to-role" "to-squad"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_dm_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_content" ]]; then
+            echo "❌ Error: Message content is required"
+            echo ""
+            show_dm_help
+            exit 1
+        fi
+        
+        # Check if at least one recipient type is specified
+        if [[ -z "$ARG_to" && -z "$ARG_to_role" && -z "$ARG_to_squad" ]]; then
+            echo "❌ Error: At least one recipient is required"
+            echo ""
+            show_dm_help
+            exit 1
+        fi
+        
+        echo "📧 Sending direct message..."
+        
+        # Build assignTo array from parameters
+        assignToJson="[]"
+        
+        # Add agent assignments
+        if [[ -n "$ARG_to" ]]; then
+            IFS=',' read -ra AGENTS <<< "$ARG_to"
+            for agent in "${AGENTS[@]}"; do
+                agent=$(echo "$agent" | xargs) # trim whitespace
+                if [[ -n "$agent" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg agent "$agent" '. += [{"type": "agent", "target": $agent}]')
+                fi
+            done
+        fi
+        
+        # Add role assignments  
+        if [[ -n "$ARG_to_role" ]]; then
+            IFS=',' read -ra ROLES <<< "$ARG_to_role"
+            for role in "${ROLES[@]}"; do
+                role=$(echo "$role" | xargs) # trim whitespace
+                if [[ -n "$role" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg role "$role" '. += [{"type": "role", "target": $role}]')
+                fi
+            done
+        fi
+        
+        # Add squad assignments
+        if [[ -n "$ARG_to_squad" ]]; then
+            IFS=',' read -ra SQUADS <<< "$ARG_to_squad"
+            for squad in "${SQUADS[@]}"; do
+                squad=$(echo "$squad" | xargs) # trim whitespace
+                if [[ -n "$squad" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg squad "$squad" '. += [{"type": "squad", "target": $squad}]')
+                fi
+            done
+        fi
+        
+        # Build the DM JSON (channelId: null for DMs)
+        messageJson=$(jq -n \
+            --arg body "$ARG_content" \
+            --arg projectId "$PROJECT_ID" \
+            --arg authorId "$AGENT_ID" \
+            --argjson assignTo "$assignToJson" \
+            '{projectId: ($projectId | tonumber), channelId: null, body: $body, authorAgentId: $authorId, assignTo: $assignTo}')
+        
+        # Send the message
+        echo "$messageJson" | curl -X POST "http://localhost:5173/api/messages" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        echo "✅ Direct message sent!"
+        ;;
+        
+    director)
+        # Parse arguments: vcorp director "content" OR vcorp director --content="content"
+        parse_args "content"
+        
+        if [[ -z "$ARG_content" ]]; then
+            echo "Usage: vcorp director CONTENT"
+            echo "   or: vcorp director --content=CONTENT"
+            exit 1
+        fi
+        
+        echo "👑 Sending message to Human Director..."
+        
+        jq -n \
+            --arg body "$ARG_content" \
+            --arg projectId "$PROJECT_ID" \
+            --arg authorId "$AGENT_ID" \
+            '{projectId: ($projectId | tonumber), body: $body, authorAgentId: $authorId, assignTo: [{"type": "role", "target": "human-director"}]}' | \
+        curl -X POST "http://localhost:5173/api/send-message" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        echo "✅ Message sent to Human Director!"
+        ;;
+        
+    it)
+        # Parse arguments: vcorp it "content" OR vcorp it --content="content"
+        parse_args "content"
+        
+        if [[ -z "$ARG_content" ]]; then
+            echo "Usage: vcorp it CONTENT"
+            echo "   or: vcorp it --content=CONTENT"
+            exit 1
+        fi
+        
+        echo "🔧 Sending message to IT Administrator..."
+        
+        jq -n \
+            --arg body "$ARG_content" \
+            --arg projectId "$PROJECT_ID" \
+            --arg authorId "$AGENT_ID" \
+            '{projectId: ($projectId | tonumber), body: $body, authorAgentId: $authorId, assignTo: [{"type": "role", "target": "it-administrator"}]}' | \
+        curl -X POST "http://localhost:5173/api/send-message" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        echo "✅ Message sent to IT Administrator!"
+        ;;
+        
+    document)
+        # Parse arguments: vcorp document TITLE CONTENT [OPTIONS] or vcorp document TITLE --file=FILE [OPTIONS]
+        parse_args "title" "content" "slug" "file" "assign-agent" "assign-role" "assign-squad"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_document_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_title" ]]; then
+            echo "❌ Error: Document title is required"
+            echo ""
+            show_document_help
+            exit 1
+        fi
+        
+        # Handle content: either from argument or file
+        content=""
+        if [[ -n "$ARG_file" ]]; then
+            # Read content from file
+            if [[ ! -f "$ARG_file" ]]; then
+                echo "❌ Error: File '$ARG_file' not found"
+                echo ""
+                show_document_help
+                exit 1
+            fi
+            content=$(cat "$ARG_file")
+            if [[ -z "$content" ]]; then
+                echo "❌ Error: File '$ARG_file' is empty"
+                echo ""
+                show_document_help
+                exit 1
+            fi
+        elif [[ -n "$ARG_content" ]]; then
+            # Use content from argument
+            content="$ARG_content"
+        else
+            echo "❌ Error: Document content is required (provide via argument or --file=)"
+            echo ""
+            show_document_help
+            exit 1
+        fi
+        
+        echo "📄 Creating document '$ARG_title'..."
+        
+        # Build assignTo array from parameters (same pattern as ticket)
+        assignToJson="[]"
+        
+        # Add agent assignments
+        if [[ -n "$ARG_assign_agent" ]]; then
+            IFS=',' read -ra AGENTS <<< "$ARG_assign_agent"
+            for agent in "${AGENTS[@]}"; do
+                agent=$(echo "$agent" | xargs) # trim whitespace
+                if [[ -n "$agent" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg agent "$agent" '. += [{"type": "agent", "target": $agent}]')
+                fi
+            done
+        fi
+        
+        # Add role assignments  
+        if [[ -n "$ARG_assign_role" ]]; then
+            IFS=',' read -ra ROLES <<< "$ARG_assign_role"
+            for role in "${ROLES[@]}"; do
+                role=$(echo "$role" | xargs) # trim whitespace
+                if [[ -n "$role" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg role "$role" '. += [{"type": "role", "target": $role}]')
+                fi
+            done
+        fi
+        
+        # Add squad assignments
+        if [[ -n "$ARG_assign_squad" ]]; then
+            IFS=',' read -ra SQUADS <<< "$ARG_assign_squad"
+            for squad in "${SQUADS[@]}"; do
+                squad=$(echo "$squad" | xargs) # trim whitespace
+                if [[ -n "$squad" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg squad "$squad" '. += [{"type": "squad", "target": $squad}]')
+                fi
+            done
+        fi
+        
+        # Build document JSON with optional slug and assignments
+        docJson=$(jq -n \
+            --arg title "$ARG_title" \
+            --arg body "$content" \
+            --arg slug "$ARG_slug" \
+            --arg projectId "$PROJECT_ID" \
+            --arg authorId "$AGENT_ID" \
+            --argjson assignTo "$assignToJson" \
+            '{projectId: ($projectId | tonumber), title: $title, body: $body, authorAgentId: $authorId, assignTo: $assignTo}')
+        
+        # Add slug if provided
+        if [[ -n "$ARG_slug" ]]; then
+            docJson=$(echo "$docJson" | jq --arg slug "$ARG_slug" '. + {documentSlug: $slug}')
+        fi
+        
+        # Send the document
+        echo "$docJson" | curl -X POST "http://localhost:5173/api/documents" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        # Build assignment summary for output
+        assignment_summary=""
+        if [[ -n "$ARG_assign_agent" || -n "$ARG_assign_role" || -n "$ARG_assign_squad" ]]; then
+            assignment_summary=" (with assignments for review)"
+        fi
+        
+        echo "✅ Document '$ARG_title' created$assignment_summary!"
+        ;;
+        
+    ticket)
+        # Parse arguments: vcorp ticket TITLE DESCRIPTION [OPTIONS] or vcorp ticket TITLE --file=FILE [OPTIONS]
+        parse_args "title" "description" "role" "priority" "status" "assign-agent" "assign-role" "assign-squad" "file"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_ticket_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_title" ]]; then
+            echo "❌ Error: Ticket title is required"
+            echo ""
+            show_ticket_help
+            exit 1
+        fi
+        
+        # Handle description: either from argument or file
+        description=""
+        if [[ -n "$ARG_file" ]]; then
+            # Read description from file
+            if [[ ! -f "$ARG_file" ]]; then
+                echo "❌ Error: File '$ARG_file' not found"
+                echo ""
+                show_ticket_help
+                exit 1
+            fi
+            description=$(cat "$ARG_file")
+            if [[ -z "$description" ]]; then
+                echo "❌ Error: File '$ARG_file' is empty"
+                echo ""
+                show_ticket_help
+                exit 1
+            fi
+        elif [[ -n "$ARG_description" ]]; then
+            # Use description from argument
+            description="$ARG_description"
+        else
+            echo "❌ Error: Ticket description is required (provide via argument or --file=)"
+            echo ""
+            show_ticket_help
+            exit 1
+        fi
+        
+        # Set defaults
+        priority="${ARG_priority:-medium}"
+        status="${ARG_status:-open}"
+        role="${ARG_role:-}"
+        
+        
+        echo "🎫 Creating ticket '$ARG_title'..."
+        
+        # Build assignTo array from parameters
+        assignToJson="[]"
+        
+        # Add agent assignments
+        if [[ -n "$ARG_assign_agent" ]]; then
+            IFS=',' read -ra AGENTS <<< "$ARG_assign_agent"
+            for agent in "${AGENTS[@]}"; do
+                agent=$(echo "$agent" | xargs) # trim whitespace
+                if [[ -n "$agent" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg agent "$agent" '. += [{"type": "agent", "target": $agent}]')
+                fi
+            done
+        fi
+        
+        # Add role assignments  
+        if [[ -n "$ARG_assign_role" ]]; then
+            IFS=',' read -ra ROLES <<< "$ARG_assign_role"
+            for role_item in "${ROLES[@]}"; do
+                role_item=$(echo "$role_item" | xargs) # trim whitespace
+                if [[ -n "$role_item" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg role_item "$role_item" '. += [{"type": "role", "target": $role_item}]')
+                fi
+            done
+        fi
+        
+        # Add squad assignments
+        if [[ -n "$ARG_assign_squad" ]]; then
+            IFS=',' read -ra SQUADS <<< "$ARG_assign_squad"
+            for squad in "${SQUADS[@]}"; do
+                squad=$(echo "$squad" | xargs) # trim whitespace
+                if [[ -n "$squad" ]]; then
+                    assignToJson=$(echo "$assignToJson" | jq --arg squad "$squad" '. += [{"type": "squad", "target": $squad}]')
+                fi
+            done
+        fi
+        
+        # Build the ticket JSON
+        ticketJson=$(jq -n \
+            --arg title "$ARG_title" \
+            --arg body "$description" \
+            --arg priority "$priority" \
+            --arg status "$status" \
+            --arg roleType "$role" \
+            --arg projectId "$PROJECT_ID" \
+            --arg authorId "$AGENT_ID" \
+            --argjson assignTo "$assignToJson" \
+            '{projectId: ($projectId | tonumber), title: $title, body: $body, priority: $priority, status: $status, assignedToRoleType: $roleType, authorAgentId: $authorId, assignTo: $assignTo}')
+        
+        # Remove null assignedToRoleType if empty
+        if [[ -z "$role" ]]; then
+            ticketJson=$(echo "$ticketJson" | jq 'del(.assignedToRoleType)')
+        fi
+        
+        # Send the ticket
+        echo "$ticketJson" | curl -X POST "http://localhost:5173/api/tickets" \
+            -H "Content-Type: application/json" \
+            -d @-
+        
+        # Build assignment summary for output
+        assignment_summary=""
+        if [[ -n "$role" ]]; then
+            assignment_summary="assigned to $role"
+        fi
+        if [[ -n "$ARG_assign_agent" || -n "$ARG_assign_role" || -n "$ARG_assign_squad" ]]; then
+            if [[ -n "$assignment_summary" ]]; then
+                assignment_summary="$assignment_summary + additional assignments"
+            else
+                assignment_summary="with assignments"
+            fi
+        fi
+        
+        if [[ -n "$assignment_summary" ]]; then
+            echo "✅ Ticket '$ARG_title' created ($assignment_summary)!"
+        else
+            echo "✅ Ticket '$ARG_title' created (unassigned)!"
+        fi
+        ;;
+        
+    *)
+        echo "Unknown command: $COMMAND"
+        echo ""
+        echo "Available commands:"
+        echo "  help, permissions, inbox, phase, agents, channels, channel, thread"
+        echo "  reply, message, dm, director, it, document, ticket"
+        exit 1
+        ;;
+esac

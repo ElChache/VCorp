@@ -15,6 +15,20 @@
       "when": 1757786999794,
       "tag": "0001_dusty_newton_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1757812185233,
+      "tag": "0002_thin_rocket_racer",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1757961567996,
+      "tag": "0003_certain_red_ghost",
+      "breakpoints": true
     }
   ]
 }

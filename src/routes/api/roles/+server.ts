@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { roles, prompts, rolePromptCompositions } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { standardDeveloperPermissions } from '$lib/templates/permissions';
 
 // Get roles for a project
 export async function GET({ url }) {
@@ -39,7 +40,8 @@ export async function POST({ request }) {
 				projectId: parseInt(projectId),
 				name,
 				content,
-				templateId: null // Custom role
+				templateId: null, // Custom role
+				permissions: JSON.stringify(standardDeveloperPermissions) // Default to standard developer permissions for custom roles
 			})
 			.returning();
 

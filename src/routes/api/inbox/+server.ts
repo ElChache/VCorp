@@ -3,6 +3,7 @@ import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles } from '$lib/db/schema';
 import { eq, or, and, isNull } from 'drizzle-orm';
 import { isHumanDirectorId } from '$lib/utils/humanDirectorHelpers';
+import MonitoringManager from '$lib/services/MonitoringManager';
 
 // GET /api/inbox?agentId=be_001 - Get all messages assigned to an agent
 export async function GET({ url }) {
@@ -76,6 +77,7 @@ export async function GET({ url }) {
 				title: content.title,
 				body: content.body,
 				type: content.type,
+				priority: content.priority,
 				authorAgentId: content.authorAgentId,
 				channelId: content.channelId,
 				parentContentId: content.parentContentId,
@@ -106,6 +108,7 @@ export async function GET({ url }) {
 					title: message.title,
 					body: message.body,
 					type: message.type,
+					priority: message.priority,
 					authorAgentId: message.authorAgentId,
 					channelId: message.channelId,
 					parentContentId: message.parentContentId,
@@ -145,6 +148,15 @@ export async function GET({ url }) {
 
 					await db.insert(readingAssignmentReads).values(readRecordsToCreate);
 					console.log(`Auto-marked ${unreadAssignmentIds.length} messages as read for agent ${agentId}`);
+					
+					// Reset grace period for notification system
+					try {
+						const monitoringManager = MonitoringManager.getInstance();
+						monitoringManager.resetAgentGracePeriod(agentId);
+					} catch (resetError) {
+						console.error('Failed to reset notification grace period:', resetError);
+						// Don't fail the request if grace period reset fails
+					}
 				}
 			} catch (autoMarkError) {
 				console.error('Failed to auto-mark messages as read:', autoMarkError);
@@ -178,7 +190,12 @@ export async function GET({ url }) {
 			// These will be false since we just auto-marked them, but keeping structure
 			isRead: false,
 			readAt: null,
-			acknowledged: false
+			acknowledged: false,
+			// NEW: Simple reply commands using VCorp functions
+			replyCommand: `reply ${msg.messageId}`,
+			// Additional context commands
+			threadCommand: msg.parentContentId ? `thread ${msg.parentContentId}` : `thread ${msg.messageId}`,
+			channelCommand: msg.channelId ? `channel ${msg.channelId}` : null
 		}));
 
 		return json({

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { phases, agents, roleTypes, isLoading, error, contentActions } from '$lib/stores/contentStore';
+	import { phases, documents, agents, roleTypes, isLoading, error, contentActions } from '$lib/stores/contentStore';
 
 	export let selectedProject: any;
 
@@ -10,18 +10,56 @@
 	$: storeIsLoading = $isLoading;
 	$: storeError = $error;
 	
+	// Compute role types with active/blocked counts from central store phases data
+	$: roleTypesWithCounts = storeRoleTypes.map(role => {
+		// Filter phases from central store for this role
+		const rolePhasesData = storePhases.filter(phase => phase.assignedToRoleType === role.name);
+		const activeCount = rolePhasesData.filter(phase => phase.phaseStatus === 'active').length;
+		const blockedCount = rolePhasesData.filter(phase => phase.phaseStatus === 'blocked').length;
+		const draftCount = rolePhasesData.filter(phase => phase.phaseStatus === 'draft').length;
+		const completedCount = rolePhasesData.filter(phase => phase.phaseStatus === 'completed').length;
+		const approvedCount = rolePhasesData.filter(phase => phase.phaseStatus === 'approved').length;
+		
+		// Priority order: blocked, draft, active, completed, approved
+		let priority = 5; // default (no phases)
+		if (blockedCount > 0) priority = 1;
+		else if (draftCount > 0) priority = 2;
+		else if (activeCount > 0) priority = 3;
+		else if (completedCount > 0) priority = 4;
+		else if (approvedCount > 0) priority = 5;
+		
+		return {
+			...role,
+			activeCount,
+			blockedCount,
+			draftCount,
+			completedCount,
+			approvedCount,
+			priority
+		};
+	}).sort((a, b) => a.priority - b.priority);
+	
 	// Local component state
 	let selectedRole: any = null;
 	let selectedPhase: any = null;
+	let showStatusMenu: any = null; // Track which phase has open status menu
+	let existingDocuments: string[] = []; // Track which document slugs exist
 	
 	// Reactive filtering
 	$: filteredPhases = selectedRole && storePhases ? 
-		storePhases.filter(phase => phase.assignedToRoleType === selectedRole.roleType) : 
+		storePhases.filter(phase => phase.assignedToRoleType === selectedRole.name) : 
 		storePhases;
 
 	// Load content when project changes
 	$: if (selectedProject) {
 		contentActions.loadContent(selectedProject.id);
+	}
+
+	// Load existing documents from content store
+	$: if ($documents) {
+		existingDocuments = $documents
+			.filter(doc => doc.documentSlug)
+			.map(doc => doc.documentSlug);
 	}
 
 	// Phase status color mapping
@@ -60,9 +98,80 @@
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString();
 	}
+
+	// Parse document lists and check if they exist
+	function parseDocumentList(documentListJson: string | null): string[] {
+		if (!documentListJson) return [];
+		try {
+			return JSON.parse(documentListJson);
+		} catch {
+			return [];
+		}
+	}
+
+	function documentExists(documentSlug: string): boolean {
+		return existingDocuments.includes(documentSlug);
+	}
+
+	// Available phase statuses
+	const allStatuses = ['draft', 'approved', 'active', 'completed', 'blocked'];
+
+	// Get available statuses (excluding current status)
+	function getAvailableStatuses(currentStatus: string) {
+		return allStatuses.filter(status => status !== currentStatus);
+	}
+
+	// Toggle status menu
+	function toggleStatusMenu(phase: any, event: Event) {
+		event.stopPropagation(); // Prevent phase selection
+		showStatusMenu = showStatusMenu === phase.id ? null : phase.id;
+	}
+
+	// Change phase status
+	async function changePhaseStatus(phaseId: number, newStatus: string) {
+		try {
+			const response = await fetch(`/api/phases/${phaseId}/status`, {
+				method: 'PATCH',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					phaseStatus: newStatus,
+					projectId: selectedProject.id
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				
+				if (response.status === 400 && errorData.missingDocuments) {
+					// Specific error for missing documents
+					alert(`Cannot change status to "${getStatusText(newStatus)}": Required documents are missing.\n\nMissing documents: ${errorData.missingDocuments.join(', ')}\n\n${errorData.details || ''}`);
+				} else {
+					// Generic error
+					alert(`Failed to update phase status: ${errorData.error || `HTTP ${response.status}`}`);
+				}
+				
+				showStatusMenu = null; // Close menu
+				return;
+			}
+
+			showStatusMenu = null; // Close menu
+			// ContentPollingService will automatically pick up the updated phase
+		} catch (error) {
+			console.error('Failed to update phase status:', error);
+			alert(`Error updating phase status: ${error.message}`);
+			showStatusMenu = null; // Close menu
+		}
+	}
+
+	// Close status menu when clicking outside
+	function handleGlobalClick() {
+		showStatusMenu = null;
+	}
 </script>
 
-<div class="phases-section">
+<div class="phases-section" on:click={handleGlobalClick}>
 	<div class="section-header">
 		<h2>📋 Development Phases</h2>
 	</div>
@@ -79,16 +188,27 @@
 			<div class="roles-list">
 				{#if storeIsLoading}
 					<div class="loading">Loading roles...</div>
-				{:else if storeRoleTypes.length > 0}
-					{#each storeRoleTypes as role}
+				{:else if roleTypesWithCounts.length > 0}
+					{#each roleTypesWithCounts as role}
 						<div 
 							class="role-item"
-							class:selected={selectedRole?.roleType === role.roleType}
-							on:click={() => onRoleSelect(role)}
+							class:selected={selectedRole?.name === role.name}
+							class:no-phases={role.count == 0}
+							class:has-active={role.activeCount > 0}
+							class:has-blocked={role.blockedCount > 0}
+							on:click={() => role.count > 0 ? onRoleSelect(role) : null}
 						>
 							<div class="role-header">
-								<h4>{role.roleType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h4>
-								<span class="agent-count">{role.count} agents</span>
+								<h4>{role.name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h4>
+								<div class="phase-counts">
+									<span class="phase-count">{role.count} phase{role.count !== 1 ? 's' : ''}</span>
+									{#if role.activeCount > 0}
+										<span class="active-indicator">{role.activeCount} active</span>
+									{/if}
+									{#if role.blockedCount > 0}
+										<span class="blocked-indicator">{role.blockedCount} blocked</span>
+									{/if}
+								</div>
 							</div>
 						</div>
 					{/each}
@@ -105,7 +225,7 @@
 		<div class="phases-column">
 			{#if selectedRole}
 				<div class="column-header">
-					<h3>Phases for {selectedRole.roleType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h3>
+					<h3>Phases for {selectedRole.name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h3>
 				</div>
 				<div class="phases-list">
 					{#if storeIsLoading}
@@ -119,9 +239,32 @@
 							>
 								<div class="phase-header">
 									<h4>{phase.title}</h4>
-									<span class="phase-status-badge {getStatusBadgeClass(phase.phaseStatus)}">
-										{getStatusText(phase.phaseStatus)}
-									</span>
+									<div class="phase-status-area">
+										<span class="phase-status-badge {getStatusBadgeClass(phase.phaseStatus)}">
+											{getStatusText(phase.phaseStatus)}
+										</span>
+										<div class="status-menu-container">
+											<button 
+												class="change-status-btn"
+												title="Change status to..."
+												on:click={(e) => toggleStatusMenu(phase, e)}
+											>
+												⚙️
+											</button>
+											{#if showStatusMenu === phase.id}
+												<div class="status-menu">
+													{#each getAvailableStatuses(phase.phaseStatus) as status}
+														<button
+															class="status-option {getStatusBadgeClass(status)}"
+															on:click={() => changePhaseStatus(phase.id, status)}
+														>
+															{getStatusText(status)}
+														</button>
+													{/each}
+												</div>
+											{/if}
+										</div>
+									</div>
 								</div>
 								<div class="phase-meta">
 									<span class="phase-created">Created: {formatDate(phase.createdAt)}</span>
@@ -143,9 +286,10 @@
 		</div>
 
 		<!-- Column 3: Phase Details -->
-		<div class="phase-details-column">
+		<div class="phase-details-column" class:open={selectedPhase}>
 			{#if selectedPhase}
 				<div class="phase-details">
+					<button class="close-details-btn" on:click={() => selectedPhase = null}>✕</button>
 					<div class="phase-header-full">
 						<h1>{selectedPhase.title}</h1>
 						<div class="phase-meta-full">
@@ -159,6 +303,36 @@
 							{/if}
 						</div>
 					</div>
+
+					<!-- Required Input Documents -->
+					{#if parseDocumentList(selectedPhase.requiredInputs).length > 0}
+						<div class="document-section">
+							<h3>Required Input Documents</h3>
+							<div class="document-list">
+								{#each parseDocumentList(selectedPhase.requiredInputs) as docSlug}
+									<div class="document-item {documentExists(docSlug) ? 'exists' : 'missing'}">
+										<span class="document-status">{documentExists(docSlug) ? '✓' : '✗'}</span>
+										<span class="document-name">{docSlug}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Expected Output Documents -->
+					{#if parseDocumentList(selectedPhase.expectedOutputs).length > 0}
+						<div class="document-section">
+							<h3>Expected Output Documents</h3>
+							<div class="document-list">
+								{#each parseDocumentList(selectedPhase.expectedOutputs) as docSlug}
+									<div class="document-item {documentExists(docSlug) ? 'exists' : 'missing'}">
+										<span class="document-status">{documentExists(docSlug) ? '✓' : '✗'}</span>
+										<span class="document-name">{docSlug}</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
 					
 					{#if selectedPhase.body}
 						<div class="phase-body">
@@ -199,11 +373,12 @@
 
 	.phases-layout {
 		display: grid;
-		grid-template-columns: 250px 1fr 350px;
+		grid-template-columns: 300px 1fr;
 		gap: 20px;
 		height: 100%;
 		flex: 1;
 		min-height: 0;
+		position: relative;
 	}
 
 	.roles-sidebar {
@@ -237,6 +412,28 @@
 		background-color: #f8f9ff;
 		box-shadow: 0 2px 8px rgba(0,123,255,0.15);
 	}
+	.role-item.no-phases {
+		opacity: 0.5;
+		cursor: not-allowed;
+		background-color: #f8f9fa;
+		color: #6c757d;
+	}
+	.role-item.no-phases:hover {
+		border-color: #e0e0e0;
+		box-shadow: none;
+	}
+	.role-item.has-active {
+		border-left: 4px solid #2563eb;
+		background-color: #dbeafe;
+	}
+	.role-item.has-blocked {
+		border-left: 4px solid #dc2626;
+		background-color: #fee2e2;
+	}
+	.role-item.has-blocked.has-active {
+		border-left: 4px solid #7c3aed;
+		background-color: #ddd6fe;
+	}
 
 	.role-header {
 		display: flex;
@@ -251,7 +448,13 @@
 		color: #333;
 	}
 
-	.agent-count {
+	.phase-counts {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 2px;
+	}
+	.phase-count {
 		background: #e9ecef;
 		color: #495057;
 		padding: 2px 6px;
@@ -259,11 +462,31 @@
 		font-size: 0.7rem;
 		font-weight: 500;
 	}
+	.active-indicator {
+		background: #dbeafe;
+		color: #2563eb;
+		padding: 1px 4px;
+		border-radius: 8px;
+		font-size: 0.6rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		border: 1px solid #93c5fd;
+	}
+	.blocked-indicator {
+		background: #fee2e2;
+		color: #dc2626;
+		padding: 1px 4px;
+		border-radius: 8px;
+		font-size: 0.6rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		border: 1px solid #fca5a5;
+	}
 
 	.phases-column {
 		padding: 1rem;
 		overflow-y: auto;
-		border-right: 1px solid #ddd;
+		position: relative;
 	}
 
 	.column-header {
@@ -321,6 +544,64 @@
 		flex: 1;
 	}
 
+	.phase-status-area {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.status-menu-container {
+		position: relative;
+	}
+
+	.change-status-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 4px;
+		border-radius: 4px;
+		font-size: 0.8rem;
+		opacity: 0.7;
+		transition: all 0.2s ease;
+	}
+
+	.change-status-btn:hover {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.1);
+	}
+
+	.status-menu {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		z-index: 1000;
+		min-width: 120px;
+		padding: 4px 0;
+	}
+
+	.status-option {
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: none;
+		border: none;
+		padding: 8px 12px;
+		cursor: pointer;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.3px;
+		transition: background-color 0.2s ease;
+	}
+
+	.status-option:hover {
+		background: rgba(0, 0, 0, 0.05);
+	}
+
 	.phase-status-badge {
 		padding: 2px 6px;
 		border-radius: 10px;
@@ -337,8 +618,42 @@
 	}
 
 	.phase-details-column {
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 750px;
+		height: 100%;
+		background: white;
+		border-left: 1px solid #ddd;
 		padding: 1rem;
 		overflow-y: auto;
+		transform: translateX(100%);
+		transition: transform 0.3s ease;
+		z-index: 10;
+	}
+
+	.phase-details-column.open {
+		transform: translateX(0);
+	}
+
+	.close-details-btn {
+		position: absolute;
+		top: 1rem;
+		right: 1rem;
+		background: none;
+		border: none;
+		font-size: 1.5rem;
+		cursor: pointer;
+		color: #6b7280;
+		padding: 4px;
+		border-radius: 4px;
+		transition: all 0.2s ease;
+		z-index: 20;
+	}
+
+	.close-details-btn:hover {
+		background: #f3f4f6;
+		color: #374151;
 	}
 
 	.phase-header-full {
@@ -450,5 +765,55 @@
 	.date {
 		font-size: 0.85rem;
 		color: #9ca3af;
+	}
+
+	.document-section {
+		margin-bottom: 1.5rem;
+		padding-bottom: 1rem;
+		border-bottom: 1px solid #e5e7eb;
+	}
+
+	.document-section h3 {
+		margin: 0 0 0.75rem 0;
+		font-size: 1rem;
+		font-weight: 600;
+		color: #374151;
+	}
+
+	.document-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.document-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem;
+		border-radius: 6px;
+		font-size: 0.875rem;
+	}
+
+	.document-item.exists {
+		background: #f0fdf4;
+		border: 1px solid #bbf7d0;
+		color: #166534;
+	}
+
+	.document-item.missing {
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		color: #dc2626;
+	}
+
+	.document-status {
+		font-weight: bold;
+		font-size: 1rem;
+	}
+
+	.document-name {
+		font-family: 'Courier New', monospace;
+		font-size: 0.8rem;
 	}
 </style>

@@ -5,6 +5,15 @@ import { eq, and } from 'drizzle-orm';
 
 // PUT /api/phases/[id]/status - Update phase status (internal web app endpoint)
 export async function PUT({ params, request }) {
+	return updatePhaseStatus(params, request);
+}
+
+// PATCH /api/phases/[id]/status - Update phase status (internal web app endpoint)
+export async function PATCH({ params, request }) {
+	return updatePhaseStatus(params, request);
+}
+
+async function updatePhaseStatus(params: any, request: any) {
 	try {
 		const phaseId = parseInt(params.id);
 		const {

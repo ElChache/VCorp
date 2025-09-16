@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { agents, content } from '$lib/db/schema';
+import { agents, content, readingAssignmentReads, roleAssignments, tasks } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { execSync } from 'child_process';
 

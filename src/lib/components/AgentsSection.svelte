@@ -13,6 +13,8 @@
 	let selectedModel = 'sonnet';
 	let showStartupPromptEditor = false;
 	let startupPrompt = '';
+	let showSendPromptModal = false;
+	let promptToSend = '';
 	let agentOutput = '';
 	let refreshInterval = null;
 	let activeTab = 'console'; // Default to console tab
@@ -263,6 +265,55 @@
 		}
 	}
 
+	async function sendPromptToAgent() {
+		if (!selectedAgent) {
+			console.error('No agent selected');
+			return;
+		}
+
+		if (!promptToSend.trim()) {
+			alert('Please enter a prompt to send');
+			return;
+		}
+
+		try {
+			const response = await fetch(`/api/agents/${selectedAgent.id}/send-prompt`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ prompt: promptToSend.trim() })
+			});
+
+			if (response.ok) {
+				const result = await response.json();
+				console.log('Prompt sent successfully:', result);
+				showSendPromptModal = false;
+				promptToSend = '';
+				// Show success message
+				alert(`Prompt sent to ${selectedAgent.id} successfully!`);
+			} else {
+				const error = await response.json();
+				console.error('Failed to send prompt:', error);
+				alert(`Failed to send prompt: ${error.error}`);
+			}
+		} catch (error) {
+			console.error('Error sending prompt:', error);
+			alert('Failed to send prompt');
+		}
+	}
+
+	function openSendPromptModal() {
+		if (!selectedAgent) {
+			alert('Please select an agent first');
+			return;
+		}
+		if (!['active', 'idle'].includes(selectedAgent.status)) {
+			alert(`Cannot send prompt: Agent ${selectedAgent.id} is ${selectedAgent.status}. Only active or idle agents can receive prompts.`);
+			return;
+		}
+		showSendPromptModal = true;
+		promptToSend = '';
+	}
+
 	function formatHeartbeat(timestamp) {
 		if (!timestamp) return 'Never';
 		return new Date(timestamp).toLocaleTimeString();
@@ -408,7 +459,7 @@
 					<div class="agent-details-header">
 						<h3>{selectedAgent.id}</h3>
 						<div class="agent-actions">
-							<button class="btn-secondary">💬 Send Command</button>
+							<button class="btn-secondary" on:click={openSendPromptModal}>💬 Send Prompt</button>
 							{#if selectedAgent.status === 'offline'}
 								<button class="btn-primary" on:click={bringAgentBack}>🔄 Bring Back</button>
 							{:else}
@@ -529,6 +580,41 @@
 				<button class="btn-secondary" on:click={() => showStartupPromptEditor = false}>Cancel</button>
 				<button class="btn-primary" on:click={saveStartupPrompt}>
 					Save Prompt
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Send Prompt Modal -->
+{#if showSendPromptModal}
+	<div class="modal-overlay" on:click={() => showSendPromptModal = false}>
+		<div class="modal-content" on:click|stopPropagation>
+			<div class="modal-header">
+				<h3>Send Prompt to {selectedAgent?.id}</h3>
+				<button class="modal-close" on:click={() => showSendPromptModal = false}>×</button>
+			</div>
+			
+			<div class="modal-body">
+				<div class="form-group">
+					<label for="prompt-to-send">This prompt will be injected directly into the agent's Claude session:</label>
+					<textarea 
+						id="prompt-to-send"
+						bind:value={promptToSend}
+						placeholder="Enter your prompt here..."
+						rows="8"
+					></textarea>
+				</div>
+			</div>
+			
+			<div class="modal-actions">
+				<button class="btn-secondary" on:click={() => showSendPromptModal = false}>Cancel</button>
+				<button 
+					class="btn-primary" 
+					on:click={sendPromptToAgent}
+					disabled={!promptToSend.trim()}
+				>
+					💬 Send Prompt
 				</button>
 			</div>
 		</div>

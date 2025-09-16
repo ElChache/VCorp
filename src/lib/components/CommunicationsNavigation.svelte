@@ -2,7 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 
 	// Props
-	export let commsViewMode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases' = 'communications';
+	export let commsViewMode: 'communications' | 'direct-messages' | 'dm-oversight' | 'documents' | 'tickets' | 'phases' = 'communications';
 	export let channelUnreadCount: number = 0;
 	export let dmUnreadCount: number = 0;
 	export let documentsUnreadCount: number = 0;
@@ -12,7 +12,7 @@
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
 
-	function handleModeChange(mode: 'communications' | 'direct-messages' | 'documents' | 'tickets' | 'phases') {
+	function handleModeChange(mode: 'communications' | 'direct-messages' | 'dm-oversight' | 'documents' | 'tickets' | 'phases') {
 		dispatch('modeChange', mode);
 	}
 </script>
@@ -40,6 +40,15 @@
 			{#if dmUnreadCount > 0}
 				<span class="unread-badge nav-badge">{dmUnreadCount}</span>
 			{/if}
+		</span>
+	</button>
+	<button 
+		class="comms-nav-btn" 
+		class:active={commsViewMode === 'dm-oversight'}
+		on:click={() => handleModeChange('dm-oversight')}
+	>
+		<span class="nav-btn-content">
+			🔍 DM Oversight
 		</span>
 	</button>
 	<button 

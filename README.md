@@ -42,6 +42,13 @@ VCorp simulates a real software development company where AI agents take on role
 - System Architect ensuring bulletproof technical architecture
 - Uncompromising quality standards across all roles
 
+### 📄 **Terminal Logging & Monitoring**
+- **Real-time terminal capture** of all agent tmux session conversations
+- **Automatic log rotation** with configurable file size limits and retention
+- **API-based log access** with filtering and tail functionality
+- **5-second monitoring cycle** with comprehensive statistics tracking
+- **Persistent conversation history** for debugging and auditing agent behavior
+
 ## System Architecture
 
 ### **Database Layer**
@@ -78,7 +85,19 @@ VCorp simulates a real software development company where AI agents take on role
 
 3. Set up your database and configure environment variables
 
-4. Seed the system with templates:
+4. **Add VCorp bin directory to your PATH** (required for agent commands):
+   ```bash
+   # Add this line to your shell profile (.zshrc, .bashrc, .bash_profile, etc.)
+   export PATH="/path/to/vcorp/bin:$PATH"
+   
+   # For example, if VCorp is in /Users/username/Projects/vcorp:
+   export PATH="/Users/username/Projects/vcorp/bin:$PATH"
+   
+   # Then reload your shell profile:
+   source ~/.zshrc  # or source ~/.bashrc
+   ```
+
+5. Seed the system with templates:
    ```bash
    # Initialize role and phase templates
    curl -X POST http://localhost:5173/api/templates/seed
@@ -86,7 +105,7 @@ VCorp simulates a real software development company where AI agents take on role
    # Or visit in browser: http://localhost:5173/api/templates/seed
    ```
 
-5. Start the development server:
+6. Start the development server:
    ```bash
    pnpm run dev
    ```
@@ -143,6 +162,14 @@ Each role has carefully crafted prompts that emphasize:
 - `GET /api/agents?projectId={id}` - Project agents with role and status information
 - `POST /api/templates/seed` - Initialize system templates
 - `DELETE /api/templates/reset` - Reset all templates
+
+### Terminal Logging APIs
+- `POST /api/terminal-logs` - List available terminal logs for a project
+- `GET /api/terminal-logs?agentId={id}&date={date}` - Retrieve specific agent's terminal log
+- `GET /api/terminal-logs?agentId={id}&tail={n}` - Get last N lines from agent's log
+- `GET /api/monitoring/status` - Get monitoring service status and statistics
+- `POST /api/monitoring/start` - Start the monitoring service
+- `POST /api/monitoring/stop` - Stop the monitoring service
 
 ### Error Handling Standards
 All APIs return descriptive error messages with specific validation details:
@@ -219,6 +246,119 @@ curl -X POST http://localhost:5173/api/templates/seed
 - **Phase Templates**: `src/lib/templates/phases/*.ts`
 - **Core Templates**: `src/lib/templates/core-templates.ts`
 
+## Terminal Logging & Monitoring System
+
+VCorp includes a comprehensive terminal logging system that captures and stores all agent tmux session conversations for debugging, auditing, and monitoring purposes.
+
+### 🚀 **Getting Started with Terminal Logging**
+
+1. **Start Monitoring Service**:
+   ```bash
+   curl -X POST http://localhost:5173/api/monitoring/start
+   ```
+
+2. **Check Status**:
+   ```bash
+   curl -X GET http://localhost:5173/api/monitoring/status
+   ```
+
+3. **List Available Logs**:
+   ```bash
+   curl -X POST http://localhost:5173/api/terminal-logs \
+     -H "Content-Type: application/json" \
+     -d '{"action": "list", "projectId": 3}'
+   ```
+
+4. **View Agent Terminal Log**:
+   ```bash
+   # Get specific agent's full log
+   curl -X GET "http://localhost:5173/api/terminal-logs?agentId=pm_001&date=2025-09-14"
+   
+   # Get last 20 lines
+   curl -X GET "http://localhost:5173/api/terminal-logs?agentId=pm_001&tail=20"
+   ```
+
+### 📊 **What Gets Captured**
+
+The terminal logging system records everything visible in agent tmux sessions:
+- 📬 **Automated notification messages** from the monitoring system
+- 💬 **Agent conversations** and command responses
+- 🔧 **Function executions** and API interactions
+- ⚡ **Real-time terminal activity** with 5-second capture intervals
+- 🎯 **Timestamped entries** with precise ISO timestamps
+
+### ⚙️ **Configuration**
+
+Terminal logging settings are configured in `src/lib/config/index.ts`:
+
+```typescript
+TERMINAL_LOGGING: {
+  ENABLED: true,                           // Enable/disable logging
+  LOG_DIR: '/tmp/vcorp_terminal_logs',     // Log storage directory
+  CAPTURE_INTERVAL: 5000,                  // Capture every 5 seconds
+  MAX_LOG_FILE_SIZE: 10 * 1024 * 1024,    // 10MB rotation limit
+  MAX_LOG_FILES: 10,                       // Keep 10 rotated files
+  LOG_FILE_PATTERN: 'terminal_{agentId}_{date}.log'
+}
+```
+
+### 🗂️ **Log File Management**
+
+- **Daily Files**: `terminal_pm_001_2025-09-14.log` format
+- **Automatic Rotation**: Files rotate when reaching size limit
+- **Retention Policy**: Keeps configurable number of old files
+- **Cleanup**: Automatically removes excess rotated files
+
+### 📈 **Monitoring Statistics**
+
+The monitoring service tracks comprehensive metrics:
+- `totalChecks`: Total monitoring cycles run
+- `notificationsSent`: Messages delivered to agents
+- `terminalLogsCaptured`: Terminal snapshots recorded
+- `gentlePokes`: Idle agent reminders sent
+- `errors`: Failed operations count
+- `uptime`: Service runtime duration
+
+### 🔧 **Advanced Usage**
+
+```bash
+# Stop monitoring service
+curl -X POST http://localhost:5173/api/monitoring/stop
+
+# Get monitoring statistics
+curl -X GET http://localhost:5173/api/monitoring/status
+
+# Example response:
+{
+  "isRunning": true,
+  "stats": {
+    "totalChecks": 40,
+    "terminalLogsCaptured": 156,
+    "notificationsSent": 78,
+    "uptime": 196311
+  }
+}
+```
+
+### 🐛 **Log Analysis & Debugging**
+
+Terminal logs are invaluable for:
+- **Debugging agent behavior** and response patterns
+- **Auditing conversations** and decision-making processes  
+- **Performance analysis** of notification delivery
+- **Training data collection** for agent improvement
+- **System monitoring** and health checks
+
+Example log entry format:
+```
+=== 2025-09-14T19:04:30.406Z ===
+│   🤖 VCorp Monitoring System - Automated Message │
+│   You have 1 unread message assigned to you.     │
+│   🔧 Simple function to check your messages:      │
+│   inbox                                           │
+╰──────────────────────────────────────────────────╯
+```
+
 ## Troubleshooting & Common Issues
 
 ### Direct Messages Not Showing
@@ -243,6 +383,32 @@ If send message dialog shows incorrect roles:
 - Verify `/api/projects/{id}/role-types` excludes "Human Director"
 - Check agent table for proper role type assignments
 - Ensure role-based channel permissions are correctly configured
+
+### Terminal Logging Issues
+
+#### Logs Not Being Captured
+- Verify monitoring service is running: `curl -X GET /api/monitoring/status`
+- Check agent tmux sessions are active and accessible
+- Ensure log directory permissions: `/tmp/vcorp_terminal_logs`
+- Review monitoring service logs for capture errors
+
+#### Log File Access Problems
+- Confirm log directory exists and is readable
+- Check file permissions on log files
+- Verify date format in API requests (YYYY-MM-DD)
+- Ensure agent IDs match exactly (case-sensitive)
+
+#### Large Log Files
+- Log files automatically rotate at 10MB by default
+- Adjust `MAX_LOG_FILE_SIZE` in config if needed
+- Use `tail` parameter to get recent entries only
+- Consider log cleanup if disk space is limited
+
+#### Missing Timestamps or Garbled Content
+- tmux session capture occasionally fails - this is normal
+- Content represents live terminal state, may show partial messages
+- Use multiple timestamp entries to piece together conversation flow
+- Terminal display artifacts (escape sequences) are captured as-is
 
 ## Testing & Verification
 
@@ -299,6 +465,146 @@ curl -X POST http://localhost:5173/api/send-message \
 2. Verify reading assignments: Review `readingAssignments` and `readingAssignmentReads` tables
 3. Test message flow: Send messages and verify assignment creation
 4. Monitor real-time updates: Check polling responses for proper content grouping
+
+## VCorp Command System
+
+VCorp provides a comprehensive command-line interface for agents to interact with the system. All commands are accessible via the `vcorp` command once agents are launched.
+
+### 📚 **Help System**
+
+**Contextual Help - Discover & Learn:**
+```bash
+vcorp help                    # Master index of all help topics
+vcorp help role              # Your role description and responsibilities  
+vcorp help workflow          # Development process (git worktrees, testing)
+vcorp help communication     # Team protocols and communication guidelines
+vcorp help workspace         # File permissions and workspace boundaries  
+vcorp help commands          # Complete VCorp command reference
+```
+
+### 💬 **Communication Commands**
+
+**Send Messages:**
+```bash
+vcorp reply MESSAGE_ID CONTENT                    # Reply to any message/content
+vcorp message CHANNEL_ID CONTENT [--assign-*]    # Send message to channel
+vcorp dm CONTENT --to=AGENTS [--to-role=ROLES]   # Send direct message
+vcorp director CONTENT                           # Message Human Director  
+vcorp it CONTENT                                 # Message IT Administrator
+```
+
+**Assignment Options:**
+```bash
+--assign-agent=agent1,agent2     # Assign to specific agents
+--assign-role=role1,role2        # Assign to role types
+--assign-squad=squad1,squad2     # Assign to squads
+```
+
+### 📄 **Content Creation**
+
+```bash
+vcorp document TITLE CONTENT [--assign-*]       # Create project documents
+vcorp ticket TITLE DESCRIPTION [--assign-*]     # Create work tickets
+```
+
+### 🔍 **Information Commands**
+
+**Check Status & Assignments:**
+```bash
+vcorp inbox                   # Check assigned messages (MOST IMPORTANT)
+vcorp inbox --all            # Show all messages (read + unread)  
+vcorp inbox --json           # Raw JSON output
+vcorp phase                  # Check current work assignment
+vcorp phase --json           # Raw JSON output
+```
+
+**Explore Team & Channels:**
+```bash
+vcorp agents                 # List project team members with status
+vcorp agents --json          # Raw JSON output
+vcorp channels               # List accessible channels  
+vcorp channels --json        # Raw JSON output
+vcorp channel CHANNEL_ID     # View messages in specific channel
+vcorp channel CHANNEL_ID --json  # Raw JSON output
+vcorp thread MESSAGE_ID      # View conversation thread context
+vcorp thread MESSAGE_ID --json   # Raw JSON output
+```
+
+**System Information:**
+```bash
+vcorp permissions            # View access permissions summary
+vcorp permissions --detailed # Full allow/deny rules
+vcorp permissions --workspace # Show workspace path only
+vcorp permissions --level    # Show permission level only
+```
+
+### 🏗️ **Command Examples**
+
+**Daily Workflow:**
+```bash
+# 1. Check your current assignment
+vcorp phase
+
+# 2. Check for new messages (do this frequently!)
+vcorp inbox
+
+# 3. Reply to messages using commands shown in inbox
+vcorp reply 123 "Sounds good, I'll work on this"
+
+# 4. Create deliverables as needed
+vcorp document "API Specification" "Complete REST API documentation..." --assign-role=backend-developer
+
+# 5. Check team status
+vcorp agents
+```
+
+**Communication Examples:**
+```bash
+# Reply to specific message
+vcorp reply 456 "I've completed the authentication system"
+
+# Send message to channel with assignments  
+vcorp message 61 "Ready for review" --assign-agent=alice,bob
+
+# Direct message to specific agents
+vcorp dm "Quick question about the database" --to=alice --to-role=backend-developer
+
+# Escalate to leadership
+vcorp director "Need decision on architecture approach"
+
+# Get platform help
+vcorp it "Having issues with git worktree setup"
+```
+
+**Content Creation Examples:**
+```bash
+# Create project document
+vcorp document "User Requirements" "Complete user story documentation" --assign-role=product-manager
+
+# Create work ticket
+vcorp ticket "Fix login bug" "Users cannot authenticate with special characters" --assign-role=backend-developer
+```
+
+### 🎯 **Command Patterns**
+
+**All commands support:**
+- `--help` flag for detailed usage information
+- `--json` flag for raw API responses (where applicable)
+- Consistent error handling and validation
+- Agent authentication via environment variables
+
+**Environment Variables (automatically set):**
+- `$AGENT_ID` - Your unique agent identifier
+- `$AGENT_ROLE` - Your role type  
+- `$PROJECT_ID` - Your project ID
+
+### 💡 **Tips for Success**
+
+1. **Use `vcorp inbox` constantly** - Check every few minutes for new assignments
+2. **Start with `vcorp help`** - Discover all available help topics
+3. **Use reply commands from inbox** - Easiest way to respond in context
+4. **Check `vcorp phase`** - Understand your current work priorities
+5. **Use `--help` on any command** - Get detailed usage information
 
 ## Developing
 
