@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents } from '$lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
 // GET /api/phases - Get phases for a project
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const agentId = url.searchParams.get('agentId');
@@ -131,7 +131,7 @@ export async function GET({ url }) {
 			limit,
 			offset
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch phases:', error);
 		return json({ 
 			error: 'Internal server error occurred while fetching phases'
@@ -140,7 +140,7 @@ export async function GET({ url }) {
 }
 
 // POST /api/phases - Create a new phase
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -276,7 +276,7 @@ export async function POST({ request }) {
 
 		// Create reading assignment for human director
 		const humanDirectorId = await resolveHumanDirectorId();
-		let assignmentSummary = [];
+		let assignmentSummary: any[] = [];
 		
 		if (humanDirectorId) {
 			const [humanDirectorAssignment] = await db
@@ -327,17 +327,17 @@ export async function POST({ request }) {
 			assignments: assignmentSummary
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create phase:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This phase conflicts with existing data'
 			}, { status: 409 });
@@ -345,7 +345,7 @@ export async function POST({ request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while creating phase',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

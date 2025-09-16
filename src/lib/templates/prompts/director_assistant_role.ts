@@ -1,7 +1,6 @@
 export const director_assistant_role = {
   name: 'Director Assistant Role',
   type: 'role_description',
-  slug: 'director-assistant-role',
   content: `# Director Assistant Role
 
 ## 🎯 Core Purpose

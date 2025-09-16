@@ -1,12 +1,12 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { rolePromptCompositions, prompts, roles, squadRoleAssignments, squadPromptAssignments, rolePromptOrders, squads } from '$lib/db/schema';
 import { eq, inArray, and } from 'drizzle-orm';
 import { generatePremadeContent } from '$lib/premade-prompts';
 
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const roleId = parseInt(params.id);
+		const roleId = parseInt(params.id!);
 		
 		if (isNaN(roleId)) {
 			return json({ error: 'Invalid role ID' }, { status: 400 });
@@ -129,9 +129,11 @@ export async function GET({ params }) {
 			// Use default template ordering
 			finalPromptsList = Array.from(allPrompts.values()).sort((a, b) => {
 				// Sort by source priority: role > squad > global
-				const sourcePriority = { role: 1, squad: 2, global: 3 };
-				if (sourcePriority[a.source] !== sourcePriority[b.source]) {
-					return sourcePriority[a.source] - sourcePriority[b.source];
+				const sourcePriority: Record<string, number> = { role: 1, squad: 2, global: 3 };
+				const aSource = a.source as string;
+				const bSource = b.source as string;
+				if (sourcePriority[aSource] !== sourcePriority[bSource]) {
+					return sourcePriority[aSource] - sourcePriority[bSource];
 				}
 				// Within same source, sort by orderIndex
 				return (a.orderIndex || 0) - (b.orderIndex || 0);
@@ -157,7 +159,7 @@ export async function GET({ params }) {
 						console.error(`Failed to generate premade content for ${prompt.premade}:`, error);
 						return {
 							...prompt,
-							content: `[Error generating dynamic content: ${error.message}]`,
+							content: `[Error generating dynamic content: ${error instanceof Error ? error.message : String(error)}]`,
 							isPremade: true
 						};
 					}
@@ -176,9 +178,9 @@ export async function GET({ params }) {
 	}
 }
 
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const roleId = parseInt(params.id);
+		const roleId = parseInt(params.id!);
 		const { prompts: reorderedPrompts } = await request.json();
 		
 		if (isNaN(roleId)) {
@@ -250,7 +252,7 @@ export async function PUT({ params, request }) {
 						});
 					} catch (error) {
 						console.error(`Failed to generate premade content for ${prompt.premade}:`, error);
-						return `[Error generating dynamic content: ${error.message}]`;
+						return `[Error generating dynamic content: ${error instanceof Error ? error.message : String(error)}]`;
 					}
 				}
 				return prompt.content;

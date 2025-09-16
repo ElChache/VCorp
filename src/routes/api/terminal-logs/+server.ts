@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { CONFIG } from '$lib/config';
 
 // GET /api/terminal-logs?agentId=pm_001&date=2025-09-14 - Get terminal logs for an agent
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const agentId = url.searchParams.get('agentId');
 		const date = url.searchParams.get('date') || new Date().toISOString().split('T')[0];
@@ -70,7 +70,7 @@ export async function GET({ url }) {
 }
 
 // GET /api/terminal-logs/list?projectId=3 - List available terminal logs
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { action, projectId } = await request.json();
 

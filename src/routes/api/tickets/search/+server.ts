@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and, or, like, desc, sql } from 'drizzle-orm';
 
 // GET /api/tickets/search - Search tickets with relevance scoring
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const query = url.searchParams.get('q');
 		const projectId = url.searchParams.get('projectId');
@@ -47,11 +47,10 @@ export async function GET({ url }) {
 
 		// Search in title and body
 		const searchPattern = `%${query}%`;
+		const titleCondition = like(content.title, searchPattern);
+		const bodyCondition = like(content.body, searchPattern);
 		conditions.push(
-			or(
-				like(content.title, searchPattern),
-				like(content.body, searchPattern)
-			)
+			or(titleCondition, bodyCondition)!
 		);
 
 		// Get matching tickets
@@ -153,7 +152,7 @@ export async function GET({ url }) {
 		console.error('Failed to search tickets:', error);
 		return json({ 
 			error: 'Failed to search tickets',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

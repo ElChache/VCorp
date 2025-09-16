@@ -2,12 +2,17 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, projects } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
 // GET /api/agents/[agentId]/help - Comprehensive agent help index
-export async function GET({ params, url }) {
+export const GET = async ({ params, url }: RequestEvent) => {
 	try {
 		const agentId = params.agentId;
 		const baseUrl = `${url.protocol}//${url.host}`;
+
+		if (!agentId) {
+			return json({ error: 'Agent ID is required' }, { status: 400 });
+		}
 
 		// Get agent information
 		const [agent] = await db

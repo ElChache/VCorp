@@ -1,7 +1,6 @@
 export const visual_testing_instructions = {
   name: 'Visual Testing Instructions',
   type: 'squad_workflow',
-  slug: 'visual-testing-instructions',
   content: `# Visual Testing Instructions
 
 ## Core Concept

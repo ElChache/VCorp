@@ -1,7 +1,6 @@
 export const system_architect_role = {
   name: 'System Architect Role',
   type: 'role_description',
-  slug: 'system-architect-role',
   content: `# System Architect
 
 ## Your Role

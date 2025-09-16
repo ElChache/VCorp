@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { readingAssignmentReads } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/reading-assignments/mark-read - Mark a reading assignment as read by an agent
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { assignmentId, agentId } = await request.json();
 

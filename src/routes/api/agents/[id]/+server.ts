@@ -1,12 +1,16 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // Get agent details
-export async function GET({ params }) {
+export const GET: RequestHandler = async ({ params }) => {
 	try {
 		const agentId = params.id;
+
+		if (!agentId) {
+			return json({ error: 'Agent ID is required' }, { status: 400 });
+		}
 
 		const [agent] = await db
 			.select()
@@ -26,9 +30,13 @@ export async function GET({ params }) {
 }
 
 // Terminate agent
-export async function DELETE({ params }) {
+export const DELETE: RequestHandler = async ({ params }) => {
 	try {
 		const agentId = params.id;
+		
+		if (!agentId) {
+			return json({ error: 'Agent ID is required' }, { status: 400 });
+		}
 
 		const [agent] = await db
 			.select()
@@ -42,7 +50,7 @@ export async function DELETE({ params }) {
 
 		// Kill tmux session
 		const { spawn } = await import('child_process');
-		spawn('tmux', ['kill-session', '-t', agent.tmuxSession], {
+		spawn('tmux', ['kill-session', '-t', agent.tmuxSession || ''], {
 			stdio: 'ignore'
 		});
 

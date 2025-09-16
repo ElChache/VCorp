@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, projects } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/roles/[roleType]/current-phase?projectId=<id> - Get current active phase for a role type
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
 		const { roleType } = params;
 		const projectId = url.searchParams.get('projectId');

@@ -1,12 +1,12 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { scheduledReminders } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/scheduled-reminders/[id] - Get a specific scheduled reminder
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const reminderId = parseInt(params.id);
+		const reminderId = parseInt(params.id || '');
 		
 		const [reminder] = await db
 			.select()
@@ -27,9 +27,9 @@ export async function GET({ params }) {
 }
 
 // PUT /api/scheduled-reminders/[id] - Update a scheduled reminder
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const reminderId = parseInt(params.id);
+		const reminderId = parseInt(params.id || '');
 		const { name, targetRoleType, message, frequencyMinutes, isActive } = await request.json();
 
 		if (!name || !targetRoleType || !message || !frequencyMinutes) {
@@ -62,9 +62,9 @@ export async function PUT({ params, request }) {
 }
 
 // DELETE /api/scheduled-reminders/[id] - Delete a scheduled reminder
-export async function DELETE({ params }) {
+export async function DELETE({ params }: RequestEvent) {
 	try {
-		const reminderId = parseInt(params.id);
+		const reminderId = parseInt(params.id || '');
 		
 		const [deletedReminder] = await db
 			.delete(scheduledReminders)

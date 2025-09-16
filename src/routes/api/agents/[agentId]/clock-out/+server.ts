@@ -3,8 +3,9 @@ import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
-export async function POST({ params }) {
+export const POST = async ({ params }: RequestEvent) => {
 	try {
 		const { agentId } = params;
 		console.log(`⏰ CLOCK OUT request from agent: ${agentId}`);
@@ -32,8 +33,8 @@ export async function POST({ params }) {
 				console.log(`⏰ Gracefully ending tmux session: ${agent.tmuxSession}`);
 				execSync(`tmux kill-session -t "${agent.tmuxSession}"`, { stdio: 'ignore' });
 				console.log(`✅ Agent successfully clocked out`);
-			} catch (tmuxError) {
-				console.log(`⚠️ Failed to end tmux session (might already be gone):`, tmuxError.message);
+			} catch (tmuxError: unknown) {
+				console.log(`⚠️ Failed to end tmux session (might already be gone):`, (tmuxError as Error).message);
 				// Continue anyway - agent called clock-out so we should mark them as offline
 			}
 		}

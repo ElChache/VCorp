@@ -1,13 +1,17 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { channelRoleAssignments, channels, roles, content, readingAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // DELETE /api/channels/[channelId]/roles/[assignmentId] - Remove a role assignment from a channel
-export async function DELETE({ params }) {
+export const DELETE: RequestHandler = async ({ params }) => {
 	try {
-		const channelId = parseInt(params.channelId);
-		const assignmentId = parseInt(params.assignmentId);
+		if (!params.channelId || !params.assignmentId) {
+			return json({ error: 'Channel ID and assignment ID are required' }, { status: 400 });
+		}
+
+		const channelId = parseInt(params.channelId || '');
+		const assignmentId = parseInt(params.assignmentId || '');
 
 		if (isNaN(channelId)) {
 			return json({ error: 'Invalid channel ID' }, { status: 400 });

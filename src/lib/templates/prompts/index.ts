@@ -21,6 +21,7 @@ export { system_architect_role as system_architect } from './system_architect_ro
 export { it_administrator } from './it-administrator';
 export { human_director_role as human_director } from './human_director_role';
 export { phase_creator } from './phase_creator';
+export { agent_workspace } from './agent_workspace';
 
 // Re-create the CORE_PROMPT_TEMPLATES object from individual templates
 import { general_communication } from './general_communication';
@@ -45,6 +46,7 @@ import { system_architect_role } from './system_architect_role';
 import { it_administrator } from './it-administrator';
 import { human_director_role } from './human_director_role';
 import { phase_creator } from './phase_creator';
+import { agent_workspace } from './agent_workspace';
 
 export const CORE_PROMPT_TEMPLATES = {
   general_communication,
@@ -68,5 +70,6 @@ export const CORE_PROMPT_TEMPLATES = {
   'system-architect': system_architect_role,
   'it-administrator': it_administrator,
   'human-director': human_director_role,
-  phase_creator
+  phase_creator,
+  agent_workspace
 };

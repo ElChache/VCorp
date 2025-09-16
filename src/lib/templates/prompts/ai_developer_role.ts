@@ -1,7 +1,6 @@
 export const ai_developer_role = {
   name: "AI Developer Role", 
   type: "role_description",
-  slug: "ai-developer-role",
   content: `# AI Developer
 
 ## Your Role
@@ -24,5 +23,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 Build AI features that work reliably in production, not just impressive demos.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 3
 };

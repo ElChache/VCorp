@@ -3,11 +3,16 @@ import { spawn } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
 		const agentId = params.id;
 		const { command, sendEnter = true } = await request.json();
+
+		if (!agentId) {
+			return json({ error: 'Agent ID is required' }, { status: 400 });
+		}
 
 		if (!command?.trim()) {
 			return json({ error: 'Command is required' }, { status: 400 });

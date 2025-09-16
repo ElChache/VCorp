@@ -1,9 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = parseInt(url.searchParams.get('projectId') || '');
 		const slug = url.searchParams.get('slug');
@@ -42,7 +42,7 @@ export async function GET({ url }) {
 		}
 
 		return json(document);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch document by slug:', error);
 		return json({ error: 'Failed to fetch document' }, { status: 500 });
 	}

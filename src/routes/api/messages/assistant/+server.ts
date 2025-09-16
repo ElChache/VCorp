@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, agents, roles } from '$lib/db/schema';
 import { eq, desc, or, and, isNull } from 'drizzle-orm';
 
 // GET /api/messages/assistant?projectId=<id> - Get messages between director and director assistant
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -32,7 +32,7 @@ export async function GET({ url }) {
 		const assistantAgentIds = assistantAgents.map(a => a.id);
 
 		// Get all DM messages from assistant agents
-		let messages = [];
+		let messages: any[] = [];
 		
 		if (assistantAgentIds.length > 0) {
 			messages = await db
@@ -69,7 +69,7 @@ export async function GET({ url }) {
 			}))
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load assistant messages:', error);
 		return json({ error: 'Failed to load assistant messages' }, { status: 500 });
 	}

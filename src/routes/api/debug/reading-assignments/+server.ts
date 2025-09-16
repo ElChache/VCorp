@@ -1,9 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { readingAssignments, content } from '$lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -34,7 +34,7 @@ export async function GET({ url }) {
 			total: assignments.length,
 			assignments
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch reading assignments:', error);
 		return json({ error: 'Failed to fetch reading assignments' }, { status: 500 });
 	}

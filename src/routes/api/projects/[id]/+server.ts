@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { projects, roles, prompts, rolePromptCompositions, channels, content, readingAssignments, readingAssignmentReads, agents, tasks, roleAssignments, channelRoleAssignments, squads, squadPromptAssignments, rolePromptOrders, scheduledReminders, phases } from '$lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 
 // GET /api/projects/[id] - Get project details
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		
 		if (isNaN(projectId)) {
 			return json({ error: 'Invalid project ID' }, { status: 400 });
@@ -23,15 +26,18 @@ export async function GET({ params }) {
 		}
 
 		return json(project);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get project:', error);
 		return json({ error: 'Failed to get project' }, { status: 500 });
 	}
 }
 
-export async function DELETE({ params }) {
+export async function DELETE({ params }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		
 		if (isNaN(projectId)) {
 			return json({ error: 'Invalid project ID' }, { status: 400 });
@@ -118,15 +124,18 @@ export async function DELETE({ params }) {
 			.returning();
 
 		return json({ success: true, message: 'Project and all related data deleted successfully' });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to delete project:', error);
 		return json({ error: 'Failed to delete project' }, { status: 500 });
 	}
 }
 
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		const body = await request.json();
 		const { name, description, path } = body;
 		
@@ -158,7 +167,7 @@ export async function PUT({ params, request }) {
 		}
 
 		return json(updated[0]);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to update project:', error);
 		return json({ error: 'Failed to update project' }, { status: 500 });
 	}

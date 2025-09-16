@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ params }) => {
     }
 
     return json(ticket[0]);
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error fetching ticket:', error);
     return json({ error: 'Internal server error' }, { status: 500 });
   }
@@ -107,9 +107,9 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 
     // Parse request body
     const updateData = await request.json();
-    const { title, body: content, status, priority, assignedToRoleType, claimedByAgent } = updateData;
+    const { title, body: contentBody, status, priority, assignedToRoleType, claimedByAgent } = updateData;
 
-    if (!title && !content && !status && !priority && assignedToRoleType === undefined && claimedByAgent === undefined) {
+    if (!title && !contentBody && !status && !priority && assignedToRoleType === undefined && claimedByAgent === undefined) {
       return json({ error: 'Must provide at least one field to update' }, { status: 400 });
     }
 
@@ -131,7 +131,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
     };
 
     if (title) updateFields.title = title;
-    if (content) updateFields.body = content;
+    if (contentBody) updateFields.body = contentBody;
     if (status) updateFields.status = status;
     if (priority) updateFields.priority = priority;
     if (assignedToRoleType !== undefined) updateFields.assignedToRoleType = assignedToRoleType;

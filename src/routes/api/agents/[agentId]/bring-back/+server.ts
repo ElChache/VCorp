@@ -1,11 +1,11 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { spawn, execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents, projects } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateWelcomeBackPrompt } from '$lib/utils/agentStartup';
 
-export async function POST({ params, request }) {
+export const POST: RequestHandler = async ({ params, request }) => {
 	try {
 		const { agentId } = params;
 		const { projectId } = await request.json();
@@ -63,8 +63,8 @@ export async function POST({ params, request }) {
 		// Create workspace directory if it doesn't exist
 		try {
 			execSync(`mkdir -p "${workspacePath}"`, { stdio: 'inherit' });
-		} catch (error) {
-			console.error('❌ Failed to create workspace directory:', error.message);
+		} catch (error: unknown) {
+			console.error('❌ Failed to create workspace directory:', (error as Error).message);
 			return json({ error: 'Failed to create workspace directory' }, { status: 500 });
 		}
 

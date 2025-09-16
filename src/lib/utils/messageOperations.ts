@@ -12,6 +12,10 @@ import {
 } from './humanDirectorClientHelpers';
 import { contentActions } from '../stores/contentStore';
 
+// Re-export the function with the name expected by components
+export const isUnreadByHumanDirector = isContentUnreadByHumanDirector;
+export const hasUnreadAssignmentForHumanDirector = isContentUnreadByHumanDirector;
+
 // Helper function to check if a message is fully read by all assigned agents
 export function isMessageFullyRead(message: any): boolean {
 	if (!message.readingAssignments) return false;

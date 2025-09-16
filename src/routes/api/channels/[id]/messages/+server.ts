@@ -1,15 +1,21 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles, channels, channelRoleAssignments } from '$lib/db/schema';
 import { eq, sql, desc } from 'drizzle-orm';
 
 // GET /api/channels/[id]/messages - Get messages for a channel
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
-		const channelId = parseInt(params.id);
+		if (!params.id) {
+			return json({ 
+				error: 'Channel ID is required'
+			}, { status: 400 });
+		}
+		
+		const channelId = parseInt(params.id || '');
 		const showAll = url.searchParams.get('showAll') === 'true'; // Default to false (limit 50)
 		
-		if (!channelId || channelId < 0) {
+		if (isNaN(channelId) || channelId < 0) {
 			return json({ 
 				error: 'Invalid channel ID: must be a positive integer to retrieve messages for that channel'
 			}, { status: 400 });
@@ -17,7 +23,7 @@ export async function GET({ params, url }) {
 
 		// Get messages for this channel, ordered by creation time
 		// Limit to last 50 messages unless showAll is true
-		let messagesQuery = db
+		const baseQuery = db
 			.select({
 				id: content.id,
 				type: content.type,
@@ -38,11 +44,7 @@ export async function GET({ params, url }) {
 			.orderBy(desc(content.createdAt));
 		
 		// Apply limit if not showing all messages
-		if (!showAll) {
-			messagesQuery = messagesQuery.limit(20);
-		}
-		
-		const messages = await messagesQuery;
+		const messages = await (showAll ? baseQuery : baseQuery.limit(20));
 
 		// For each message, get the reading assignments with read status
 		const messagesWithAssignments = await Promise.all(
@@ -60,7 +62,7 @@ export async function GET({ params, url }) {
 				// For each assignment, determine which agents should read it and who has read it
 				const assignmentsWithStatus = await Promise.all(
 					assignments.map(async (assignment) => {
-						let targetAgents = [];
+						let targetAgents: string[] = [];
 						
 						// Get agents that should read this assignment based on type
 						if (assignment.assignedToType === 'agent') {
@@ -138,11 +140,11 @@ export async function GET({ params, url }) {
 				showingAll: showAll
 			}
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load channel messages:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: The channel may not exist or may be invalid. Please verify the channel ID is correct.'
 			}, { status: 404 });
@@ -150,15 +152,21 @@ export async function GET({ params, url }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while loading channel messages. Please try again or contact support if the problem persists.',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }
 
 // POST /api/channels/[id]/messages - Create a message or ticket in a channel
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const channelId = parseInt(params.id);
+		if (!params.id) {
+			return json({ 
+				error: 'Channel ID is required'
+			}, { status: 400 });
+		}
+		
+		const channelId = parseInt(params.id || '');
 		
 		// Allow channelId = 0 for DM messages (treat as null)
 		if (isNaN(channelId) || channelId < 0) {
@@ -392,24 +400,24 @@ export async function POST({ params, request }) {
 					}
 				}
 			}
-		} catch (error) {
+		} catch (error: unknown) {
 			console.error('Failed to create auto reading assignments:', error);
 			// Don't fail the entire request if reading assignment creation fails
 		}
 
 
 		return json(newContent);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create content:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities (project, channel, agent, or parent content) may not exist or may be invalid. Please verify all IDs are correct.'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This message conflicts with existing data. Please check for duplicate entries.'
 			}, { status: 409 });
@@ -417,7 +425,7 @@ export async function POST({ params, request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while creating message. Please try again or contact support if the problem persists.',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

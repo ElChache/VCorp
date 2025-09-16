@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, channels, channelRoleAssignments, roles } from '$lib/db/schema';
 import { eq, and, isNull, or, desc, sql, like } from 'drizzle-orm';
 
 // GET /api/messages - Get messages with various filters
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const channelId = url.searchParams.get('channelId');
@@ -30,7 +31,7 @@ export async function GET({ url }) {
 		}
 
 		// Build query conditions
-		let conditions = [
+		const conditions = [
 			eq(content.projectId, parsedProjectId),
 			eq(content.type, 'message')
 		];
@@ -59,12 +60,13 @@ export async function GET({ url }) {
 		// Add search filter
 		if (search) {
 			const searchPattern = `%${search}%`;
-			conditions.push(
-				or(
-					like(content.title, searchPattern),
-					like(content.body, searchPattern)
-				)
+			const searchCondition = or(
+				like(content.title, searchPattern),
+				like(content.body, searchPattern)
 			);
+			if (searchCondition) {
+				conditions.push(searchCondition);
+			}
 		}
 		
 		// Add time filter
@@ -72,7 +74,7 @@ export async function GET({ url }) {
 			conditions.push(sql`${content.createdAt} > ${since}`);
 		}
 		
-		let whereCondition = and(...conditions);
+		const whereCondition = conditions.length === 1 ? conditions[0] : and(...conditions);
 
 		// Get messages
 		let messages = await db
@@ -196,7 +198,7 @@ export async function GET({ url }) {
 		const [countResult] = await db
 			.select({ count: sql`count(*)` })
 			.from(content)
-			.where(and(...totalConditions));
+			.where(totalConditions.length === 1 ? totalConditions[0] : and(...totalConditions));
 		
 		return json({
 			messages: messagesWithAssignments,
@@ -204,7 +206,7 @@ export async function GET({ url }) {
 			limit,
 			offset
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch messages:', error);
 		return json({ 
 			error: 'Internal server error occurred while fetching messages'
@@ -213,7 +215,7 @@ export async function GET({ url }) {
 }
 
 // POST /api/messages - Create a new message (channel or DM)
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -359,11 +361,11 @@ export async function POST({ request }) {
 		};
 
 		// Create reading assignments
-		let assignmentSummary = [];
+		let assignmentSummary: any[] = [];
 		
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
-			const assignmentPromises = assignTo.map(async (assignment) => {
+			const assignmentPromises = assignTo.map(async (assignment: {type: string, target: string}) => {
 				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
 				
 				return await db
@@ -379,7 +381,7 @@ export async function POST({ request }) {
 			const createdAssignments = await Promise.all(assignmentPromises);
 
 			// Get summary of who was assigned
-			assignmentSummary = assignTo.map((assignment, index) => ({
+			assignmentSummary = assignTo.map((assignment: {type: string, target: string}, index: number) => ({
 				type: assignment.type,
 				target: assignment.target,
 				assignmentId: createdAssignments[index][0].id
@@ -452,17 +454,17 @@ export async function POST({ request }) {
 			isDM: !channelId
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create message:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This message conflicts with existing data'
 			}, { status: 409 });
@@ -470,7 +472,7 @@ export async function POST({ request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while creating message',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

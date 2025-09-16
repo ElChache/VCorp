@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and, or, desc, sql, like } from 'drizzle-orm';
 
 // GET /api/tickets - List tickets with filters
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const agentId = url.searchParams.get('agentId');
@@ -47,12 +47,13 @@ export async function GET({ url }) {
 
 		if (search) {
 			const searchPattern = `%${search}%`;
-			conditions.push(
-				or(
-					like(content.title, searchPattern),
-					like(content.body, searchPattern)
-				)
-			);
+			const titleCondition = like(content.title, searchPattern);
+			const bodyCondition = like(content.body, searchPattern);
+			if (titleCondition && bodyCondition) {
+				conditions.push(
+					or(titleCondition, bodyCondition)!
+				);
+			}
 		}
 
 		// Handle assignedTo filter - check both direct assignment and reading assignments
@@ -82,12 +83,13 @@ export async function GET({ url }) {
 					)
 				);
 
-			conditions.push(
-				or(
-					eq(content.claimedByAgent, assignedTo),
-					sql`${content.id} IN (${assignedTicketsSubquery})`
-				)
-			);
+			const claimedCondition = eq(content.claimedByAgent, assignedTo);
+			const assignedCondition = sql`${content.id} IN (${assignedTicketsSubquery})`;
+			if (claimedCondition && assignedCondition) {
+				conditions.push(
+					or(claimedCondition, assignedCondition)!
+				);
+			}
 		}
 
 		// Query tickets
@@ -107,7 +109,7 @@ export async function GET({ url }) {
 				updatedAt: content.updatedAt
 			})
 			.from(content)
-			.where(and(...conditions))
+			.where(conditions.length === 1 ? conditions[0] : and(...conditions))
 			.orderBy(desc(content.createdAt))
 			.limit(limit)
 			.offset(offset);
@@ -116,7 +118,7 @@ export async function GET({ url }) {
 		const [countResult] = await db
 			.select({ count: sql`count(*)` })
 			.from(content)
-			.where(and(...conditions));
+			.where(conditions.length === 1 ? conditions[0] : and(...conditions));
 
 		return json({
 			tickets,
@@ -125,17 +127,17 @@ export async function GET({ url }) {
 			offset
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch tickets:', error);
 		return json({ 
 			error: 'Failed to fetch tickets',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as any).message : undefined
 		}, { status: 500 });
 	}
 }
 
 // POST /api/tickets - Create a work ticket
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -283,7 +285,7 @@ export async function POST({ request }) {
 		
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
-			const assignmentPromises = assignTo.map(async (assignment) => {
+			const assignmentPromises = assignTo.map(async (assignment: any) => {
 				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
 				
 				return await db
@@ -299,7 +301,7 @@ export async function POST({ request }) {
 			const createdAssignments = await Promise.all(assignmentPromises);
 
 			// Get summary of who was assigned
-			assignmentSummary = assignTo.map((assignment, index) => ({
+			assignmentSummary = assignTo.map((assignment: any, index: number) => ({
 				type: assignment.type,
 				target: assignment.target,
 				assignmentId: createdAssignments[index][0].id
@@ -341,17 +343,17 @@ export async function POST({ request }) {
 			assignments: assignmentSummary
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create ticket:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This ticket conflicts with existing data'
 			}, { status: 409 });
@@ -359,7 +361,7 @@ export async function POST({ request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while creating ticket',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as any).message : undefined
 		}, { status: 500 });
 	}
 }

@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, channels } from '$lib/db/schema';
 import { eq, or, and, isNull, desc, sql } from 'drizzle-orm';
 
 // GET /api/director/inbox - Get all messages for human director with priority organization
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -221,7 +221,7 @@ export async function GET({ url }) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load director inbox:', error);
 		return json({ error: 'Failed to load director inbox' }, { status: 500 });
 	}

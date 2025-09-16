@@ -1,11 +1,14 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // PUT /api/content/[id]/read - Mark content as read for an agent
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
 		const contentId = params.id;
 		const { 
 			agentId,
@@ -13,7 +16,7 @@ export async function PUT({ params, request }) {
 		} = await request.json();
 
 		// Validate contentId
-		const parsedContentId = parseInt(contentId);
+		const parsedContentId = parseInt(contentId!);
 		if (isNaN(parsedContentId) || parsedContentId <= 0) {
 			return json({ 
 				error: 'Invalid content ID: must be a positive integer'
@@ -152,24 +155,27 @@ export async function PUT({ params, request }) {
 			acknowledged: acknowledged
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to mark content as read:', error);
 		
 		return json({ 
 			error: 'Internal server error occurred while marking content as read',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as any).message : undefined
 		}, { status: 500 });
 	}
 }
 
 // GET /api/content/[id]/read?agentId=be_001 - Check if content is read by agent  
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
 		const contentId = params.id;
 		const agentId = url.searchParams.get('agentId');
 
 		// Validate contentId
-		const parsedContentId = parseInt(contentId);
+		const parsedContentId = parseInt(contentId!);
 		if (isNaN(parsedContentId) || parsedContentId <= 0) {
 			return json({ 
 				error: 'Invalid content ID: must be a positive integer'
@@ -226,12 +232,12 @@ export async function GET({ params, url }) {
 			}))
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get read status:', error);
 		
 		return json({ 
 			error: 'Internal server error occurred while getting read status',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as any).message : undefined
 		}, { status: 500 });
 	}
 }

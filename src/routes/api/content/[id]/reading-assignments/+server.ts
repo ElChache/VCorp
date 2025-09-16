@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/content/[id]/reading-assignments - Get reading assignments for content
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id!);
 		
 		if (!contentId) {
 			return json({ error: 'Content ID is required' }, { status: 400 });
@@ -26,7 +29,7 @@ export async function GET({ params }) {
 		// For each assignment, determine which agents should read it and who has read it
 		const assignmentsWithStatus = await Promise.all(
 			assignments.map(async (assignment) => {
-				let targetAgents = [];
+				let targetAgents: string[] = [];
 				
 				// Get agents that should read this assignment based on type
 				if (assignment.assignedToType === 'agent') {
@@ -75,16 +78,19 @@ export async function GET({ params }) {
 		);
 
 		return json(assignmentsWithStatus);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load reading assignments:', error);
 		return json({ error: 'Failed to load reading assignments' }, { status: 500 });
 	}
 }
 
 // POST /api/content/[id]/reading-assignments - Add reading assignments to existing content
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id!);
 		
 		if (!contentId) {
 			return json({ error: 'Content ID is required' }, { status: 400 });
@@ -148,7 +154,7 @@ export async function POST({ params, request }) {
 			message: `${assignments.length} reading assignment(s) created successfully`
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create reading assignments:', error);
 		return json({ error: 'Failed to create reading assignments' }, { status: 500 });
 	}

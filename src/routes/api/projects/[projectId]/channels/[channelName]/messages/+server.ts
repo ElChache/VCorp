@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { channels, content } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/projects/[projectId]/channels/[channelName]/messages - Post message to channel by name
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	console.log('🔥 ALTERNATIVE API HIT: /api/projects/[projectId]/channels/[channelName]/messages');
 	try {
 		const { projectId, channelName } = params;
@@ -47,14 +47,14 @@ export async function POST({ params, request }) {
 			.returning();
 
 		return json(newMessage, { status: 201 });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to post message:', error);
 		return json({ error: 'Failed to post message' }, { status: 500 });
 	}
 }
 
 // GET /api/projects/[projectId]/channels/[channelName]/messages - Get messages from channel by name
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
 		const { projectId, channelName } = params;
 		const limit = parseInt(url.searchParams.get('limit') || '50');
@@ -100,7 +100,7 @@ export async function GET({ params, url }) {
 				count: messages.length
 			}
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get messages:', error);
 		return json({ error: 'Failed to get messages' }, { status: 500 });
 	}

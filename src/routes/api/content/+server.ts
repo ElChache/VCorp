@@ -1,41 +1,47 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const type = url.searchParams.get('type');
 		const projectId = url.searchParams.get('projectId');
 		
-		let query = db.select().from(content);
+		// Build conditions array
+		const conditions: any[] = [];
 		
 		// Filter by type if specified
 		if (type) {
-			query = query.where(eq(content.type, type));
+			conditions.push(eq(content.type, type));
 		}
 		
 		// Filter by project if specified
 		if (projectId) {
 			const projectIdInt = parseInt(projectId);
 			if (!isNaN(projectIdInt)) {
-				query = query.where(eq(content.projectId, projectIdInt));
+				conditions.push(eq(content.projectId, projectIdInt));
 			}
 		}
 		
-		// Order by created date (newest first)
-		query = query.orderBy(desc(content.createdAt));
+		// Build final query
+		const baseQuery = db.select().from(content);
+		const queryWithConditions = conditions.length > 0 
+			? baseQuery.where(conditions.length === 1 ? conditions[0] : and(...conditions))
+			: baseQuery;
+		const finalQuery = queryWithConditions.orderBy(desc(content.createdAt));
 		
-		const results = await query;
+		const results = await finalQuery;
 		
 		return json(results);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch content:', error);
 		return json({ error: 'Failed to fetch content' }, { status: 500 });
 	}
 }
 
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const body = await request.json();
 		const { 
@@ -46,7 +52,6 @@ export async function POST({ request }) {
 			assignedToRoleType,
 			status,
 			priority,
-			acceptanceCriteria,
 			documentSlug,
 			channelId,
 			parentContentId,
@@ -72,7 +77,6 @@ export async function POST({ request }) {
 				assignedToRoleType,
 				status,
 				priority,
-				acceptanceCriteria,
 				documentSlug,
 				channelId: channelId || null,
 				parentContentId: parentContentId || null,
@@ -88,7 +92,7 @@ export async function POST({ request }) {
 			.returning();
 
 		return json(newContent[0]);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create content:', error);
 		return json({ error: 'Failed to create content' }, { status: 500 });
 	}

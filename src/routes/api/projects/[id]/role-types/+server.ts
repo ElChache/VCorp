@@ -1,11 +1,14 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		
 		if (isNaN(projectId)) {
 			return json({ error: 'Invalid project ID' }, { status: 400 });
@@ -25,7 +28,7 @@ export async function GET({ params }) {
 			.orderBy(content.assignedToRoleType);
 
 		return json(roleTypesFromPhases);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch role types:', error);
 		return json({ error: 'Failed to fetch role types' }, { status: 500 });
 	}

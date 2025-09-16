@@ -1,7 +1,6 @@
 export const core_team_to_human_comms = {
   name: "Core Team to Human Communication Instructions",
   type: "team_communication",
-  slug: "core-team-to-human-comms",
   content: `# Core Team to Human Communication Protocol
 
 ## IMPORTANT: Limited Communication Scope
@@ -107,5 +106,6 @@ Problem: Button alignment not working as expected
 
 The Director trusts you to handle development work autonomously. Only escalate when the tools and systems you need to do your job are fundamentally broken.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 6
 };

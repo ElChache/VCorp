@@ -1,7 +1,6 @@
 export const ux_expert_role = {
   name: "UX Expert Role",
   type: "role_description",
-  slug: "ux-expert-role",
   content: `# UX Expert
 
 ## Your Role
@@ -24,5 +23,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 Design experiences that users genuinely love, not just tolerate.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 4
 };

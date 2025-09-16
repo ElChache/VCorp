@@ -1,12 +1,16 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, channels } from '$lib/db/schema';
 import { eq, sql, and } from 'drizzle-orm';
 
 // POST /api/channels/[id]/archive - Archive first N messages from a channel to a markdown document
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const channelId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Channel ID is required' }, { status: 400 });
+		}
+		
+		const channelId = parseInt(params.id || '');
 		
 		if (!channelId || channelId <= 0) {
 			return json({ 
@@ -95,7 +99,7 @@ export async function POST({ params, request }) {
 			.filter(id => id && id !== 'human-director')
 		)];
 
-		const agentNames = {};
+		const agentNames: Record<string, string> = {};
 		if (agentIds.length > 0) {
 			const agentsData = await db
 				.select({ 
@@ -111,8 +115,8 @@ export async function POST({ params, request }) {
 		}
 
 		// Format messages as markdown
-		const formatDate = (dateString: string) => {
-			return new Date(dateString).toLocaleString();
+		const formatDate = (date: string | Date) => {
+			return new Date(date).toLocaleString();
 		};
 
 		const getAuthorName = (authorAgentId: string | null) => {
@@ -221,17 +225,17 @@ ${markdownContent}`;
 			}
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to archive channel messages:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: Archive document slug may already exist'
 			}, { status: 409 });
@@ -239,7 +243,7 @@ ${markdownContent}`;
 		
 		return json({ 
 			error: 'Internal server error occurred while archiving messages',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

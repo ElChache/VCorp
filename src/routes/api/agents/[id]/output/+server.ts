@@ -3,11 +3,16 @@ import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
 		const agentId = params.id;
 		const lines = parseInt(url.searchParams.get('lines') || '50');
+
+		if (!agentId) {
+			return json({ error: 'Agent ID is required' }, { status: 400 });
+		}
 
 		// Get agent to verify it exists and get tmux session
 		const [agent] = await db

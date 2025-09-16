@@ -1,4 +1,4 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents, projects } from '$lib/db/schema';
 import { eq, and, or, gte, desc, sql } from 'drizzle-orm';
@@ -6,7 +6,7 @@ import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 
 // GET /api/documents - List documents for a project with query options
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = parseInt(url.searchParams.get('projectId') || '');
 		const authorId = url.searchParams.get('authorId');
@@ -42,24 +42,9 @@ export async function GET({ url }) {
 			}
 		}
 
-		// Build query
-		let query = db
-			.select({
-				id: content.id,
-				title: content.title,
-				body: search ? content.body : sql`LEFT(${content.body}, 200) as body`, // Truncate body unless searching
-				documentSlug: content.documentSlug,
-				authorAgentId: content.authorAgentId,
-				createdAt: content.createdAt,
-				updatedAt: content.updatedAt
-			})
-			.from(content)
-			.where(and(...conditions))
-			.orderBy(desc(content.updatedAt))
-			.limit(limit)
-			.offset(offset);
-
-		// Add search filter if provided
+		// Build query based on whether we're searching or not
+		let query: any;
+		
 		if (search) {
 			const searchConditions = [
 				...conditions,
@@ -84,6 +69,22 @@ export async function GET({ url }) {
 				.orderBy(desc(content.updatedAt))
 				.limit(limit)
 				.offset(offset);
+		} else {
+			query = db
+				.select({
+					id: content.id,
+					title: content.title,
+					body: sql`LEFT(${content.body}, 200)`.as('body'), // Truncate body unless searching
+					documentSlug: content.documentSlug,
+					authorAgentId: content.authorAgentId,
+					createdAt: content.createdAt,
+					updatedAt: content.updatedAt
+				})
+				.from(content)
+				.where(and(...conditions))
+				.orderBy(desc(content.updatedAt))
+				.limit(limit)
+				.offset(offset);
 		}
 
 		const documents = await query;
@@ -102,14 +103,14 @@ export async function GET({ url }) {
 				since: since || null
 			}
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch documents:', error);
 		return json({ error: 'Failed to fetch documents' }, { status: 500 });
 	}
 }
 
 // POST /api/documents - Create a new document
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -260,7 +261,7 @@ export async function POST({ request }) {
 		
 		// Only manual assignments for documents (no automatic channel assignments)
 		if (assignTo && assignTo.length > 0) {
-			const assignmentPromises = assignTo.map(async (assignment) => {
+			const assignmentPromises = assignTo.map(async (assignment: any) => {
 				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
 				
 				return await db
@@ -276,7 +277,7 @@ export async function POST({ request }) {
 			const createdAssignments = await Promise.all(assignmentPromises);
 
 			// Get summary of who was assigned
-			assignmentSummary = assignTo.map((assignment, index) => ({
+			assignmentSummary = assignTo.map((assignment: any, index: number) => ({
 				type: assignment.type,
 				target: assignment.target,
 				assignmentId: createdAssignments[index][0].id
@@ -293,7 +294,7 @@ export async function POST({ request }) {
 				.limit(1);
 
 			if (project?.path) {
-				let filePath: string;
+				let filePath: string | null = null;
 				let fileContent = `# ${newDocument.title}\n\n${newDocument.body}`;
 
 				if (newDocument.documentSlug) {
@@ -311,7 +312,7 @@ export async function POST({ request }) {
 						
 						if (agent?.worktreePath) {
 							// Generate a filename from title or use timestamp
-							const safeTitle = newDocument.title
+							const safeTitle = (newDocument.title || '')
 								.toLowerCase()
 								.replace(/[^a-z0-9]+/g, '-')
 								.replace(/^-+|-+$/g, '')
@@ -326,7 +327,7 @@ export async function POST({ request }) {
 							);
 						} else {
 							// Fallback to agent workspace if no worktree
-							const safeTitle = newDocument.title
+							const safeTitle = (newDocument.title || 'untitled')
 								.toLowerCase()
 								.replace(/[^a-z0-9]+/g, '-')
 								.replace(/^-+|-+$/g, '')
@@ -378,25 +379,30 @@ export async function POST({ request }) {
 			assignments: assignmentSummary
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create document:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
-			return json({ 
-				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
-			}, { status: 400 });
-		}
-		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
-			return json({ 
-				error: 'Constraint violation: Document slug may already exist or other unique constraint failed'
-			}, { status: 409 });
+		if (error && typeof error === 'object' && 'code' in error) {
+			const dbError = error as { code: string };
+			if (dbError.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || dbError.code === '23503') {
+				return json({ 
+					error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
+				}, { status: 400 });
+			}
+			
+			if (dbError.code === 'SQLITE_CONSTRAINT_UNIQUE' || dbError.code === '23505') {
+				return json({ 
+					error: 'Constraint violation: Document slug may already exist or other unique constraint failed'
+				}, { status: 409 });
+			}
 		}
 		
 		return json({ 
 			error: 'Internal server error occurred while creating document',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' && error && typeof error === 'object' && 'message' in error 
+				? (error as { message: string }).message 
+				: undefined
 		}, { status: 500 });
 	}
 }

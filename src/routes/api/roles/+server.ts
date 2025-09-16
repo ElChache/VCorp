@@ -1,11 +1,11 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { roles, prompts, rolePromptCompositions } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { standardDeveloperPermissions } from '$lib/templates/permissions';
 
 // Get roles for a project
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -26,7 +26,7 @@ export async function GET({ url }) {
 }
 
 // Create a role for a project
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId, name, content } = await request.json();
 
@@ -50,9 +50,14 @@ export async function POST({ request }) {
 			.insert(prompts)
 			.values({
 				name: `${name} Prompt`,
+				slug: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_prompt`,
+				type: 'role_prompt',
 				content: content,
 				projectId: parseInt(projectId),
-				version: 1
+				templateId: null,
+				premade: null,
+				isGlobal: false,
+				orderIndex: 0
 			})
 			.returning();
 

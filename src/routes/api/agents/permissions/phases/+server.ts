@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, roles } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/agents/permissions/phases - Get agents with phase creation permissions
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		

@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/projects/[id]/message-director - Send a direct message to the human director for a project
-export async function POST({ request, params }) {
+export async function POST({ request, params }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		const {
 			authorAgentId,
 			title,
@@ -79,10 +82,10 @@ export async function POST({ request, params }) {
 			message: 'Message sent to human director'
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to send message to human director:', error);
 		return json({ 
-			error: 'Failed to send message to human director: ' + error.message 
+			error: 'Failed to send message to human director: ' + (error as Error).message 
 		}, { status: 500 });
 	}
 }

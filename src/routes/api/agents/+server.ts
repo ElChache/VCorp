@@ -1,11 +1,11 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // Get all agents with status monitoring
-export async function GET({ url }) {
+export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		console.log(`🔍 GET /api/agents - projectId: ${projectId}`);

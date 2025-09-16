@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { promptTemplates, prompts } from '$lib/db/schema';
 import { eq, count } from 'drizzle-orm';
 
 // GET /api/templates/[id] - Get a specific template
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const templateId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Template ID is required' }, { status: 400 });
+		}
+		const templateId = parseInt(params.id || '');
 		
 		if (isNaN(templateId)) {
 			return json({ error: 'Invalid template ID' }, { status: 400 });
@@ -41,16 +44,19 @@ export async function GET({ params }) {
 			...template,
 			promptCount: promptCount.count || 0
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch template:', error);
 		return json({ error: 'Failed to fetch template' }, { status: 500 });
 	}
 }
 
 // PUT /api/templates/[id] - Update a template
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const templateId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Template ID is required' }, { status: 400 });
+		}
+		const templateId = parseInt(params.id || '');
 		const { name, type, content } = await request.json();
 		
 		if (isNaN(templateId)) {
@@ -99,7 +105,7 @@ export async function PUT({ params, request }) {
 			message: `Template updated successfully. ${promptCount.count || 0} existing prompts use this template.`
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to update template:', error);
 		return json({ error: 'Failed to update template' }, { status: 500 });
 	}

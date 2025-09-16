@@ -1,9 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId } = await request.json();
 		
@@ -92,8 +92,8 @@ export async function POST({ request }) {
 
 				for (const dependentPhase of dependentPhases) {
 					// Check if this dependent phase has no active siblings in its role
-					const dependentRolePhases = phasesByRole[dependentPhase.assignedToRoleType] || [];
-					const activeInRole = dependentRolePhases.filter(p => p.phaseStatus === 'active');
+					const dependentRolePhases = dependentPhase.assignedToRoleType ? phasesByRole[dependentPhase.assignedToRoleType] || [] : [];
+					const activeInRole = dependentRolePhases.filter((p: any) => p.phaseStatus === 'active');
 					
 					if (activeInRole.length === 0) {
 						// Check if ALL required inputs are now satisfied
@@ -138,7 +138,7 @@ export async function POST({ request }) {
 			message: `Auto-progression complete: ${progressionsMade} phases progressed, ${readingAssignmentsCreated} reading assignments created, ${notificationsCreated} notifications sent`
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to auto-progress phases:', error);
 		return json({ error: 'Failed to auto-progress phases' }, { status: 500 });
 	}

@@ -1,0 +1,4 @@
+ALTER TABLE "squad_prompt_assignments" DROP CONSTRAINT "squad_prompt_assignments_squad_id_prompt_id_unique";--> statement-breakpoint
+ALTER TABLE "squad_prompt_assignments" ADD COLUMN "project_id" integer NOT NULL;--> statement-breakpoint
+ALTER TABLE "squad_prompt_assignments" ADD CONSTRAINT "squad_prompt_assignments_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "squad_prompt_assignments" ADD CONSTRAINT "squad_prompt_assignments_project_id_squad_id_prompt_id_unique" UNIQUE("project_id","squad_id","prompt_id");

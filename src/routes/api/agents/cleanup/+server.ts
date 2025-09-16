@@ -2,9 +2,10 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
 // Delete all agents for a project (for testing/cleanup)
-export async function DELETE({ url }) {
+export async function DELETE({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		

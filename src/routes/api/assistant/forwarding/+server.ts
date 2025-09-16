@@ -1,7 +1,7 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { setForwardingEnabled, isForwardingEnabled } from '$lib/services/ForwardingService';
 
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { enabled, projectId } = await request.json();
 
@@ -20,13 +20,13 @@ export async function POST({ request }) {
 			message: `Assistant forwarding ${enabled ? 'enabled' : 'disabled'} for project ${projectId}`
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to toggle assistant forwarding:', error);
 		return json({ error: 'Failed to toggle assistant forwarding' }, { status: 500 });
 	}
 }
 
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -38,7 +38,7 @@ export async function GET({ url }) {
 
 		return json({ enabled });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get assistant forwarding status:', error);
 		return json({ error: 'Failed to get assistant forwarding status' }, { status: 500 });
 	}

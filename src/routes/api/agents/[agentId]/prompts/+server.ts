@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import pg from 'pg';
 
 const { Pool } = pg;
 
 // GET /api/agents/[agentId]/prompts - Get all prompts for this agent
-export async function GET({ params }) {
+export const GET: RequestHandler = async ({ params }) => {
 	const pool = new Pool({
 		host: 'localhost',
 		port: 5433,
@@ -101,14 +101,14 @@ export async function GET({ params }) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load agent prompts:', error);
-		console.error('Error stack:', error.stack);
+		console.error('Error stack:', (error as Error).stack);
 		console.error('Error details:', JSON.stringify(error, null, 2));
 		return json({ 
 			error: 'Failed to load agent prompts',
-			details: error.message,
-			stack: error.stack
+			details: (error as Error).message,
+			stack: (error as Error).stack
 		}, { status: 500 });
 	} finally {
 		await pool.end();

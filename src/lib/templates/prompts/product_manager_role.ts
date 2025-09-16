@@ -1,7 +1,6 @@
 export const product_manager_role = {
   name: "Product Manager Role",
   type: "role_description",
-  slug: "product-manager-role",
   content: `# Product Manager
 
 ## Your Role
@@ -38,5 +37,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 We're not building just another product - we're creating something users will genuinely love using. That requires excellence in every detail.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 0
 };

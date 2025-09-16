@@ -1,11 +1,11 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { readingAssignments, readingAssignmentReads } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const documentId = parseInt(params.id);
+		const documentId = parseInt(params.id!);
 		const { agentId, acknowledged = true } = await request.json();
 		
 		if (isNaN(documentId)) {
@@ -74,7 +74,7 @@ export async function POST({ params, request }) {
 		}
 
 		return json({ success: true, markedAssignments: applicableAssignments.length });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to mark document as read:', error);
 		return json({ error: 'Failed to mark document as read' }, { status: 500 });
 	}

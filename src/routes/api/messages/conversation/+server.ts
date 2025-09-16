@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments } from '$lib/db/schema';
 import { eq, and, or, isNull, sql, desc } from 'drizzle-orm';
 
 // GET /api/messages/conversation - Get all DM messages between two agents
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const agent1 = url.searchParams.get('agent1');
@@ -127,7 +127,7 @@ export async function GET({ url }) {
 				showingAll: showAll
 			}
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load conversation:', error);
 		return json({ error: 'Failed to load conversation' }, { status: 500 });
 	}

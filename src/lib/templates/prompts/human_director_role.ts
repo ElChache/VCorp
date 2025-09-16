@@ -1,7 +1,6 @@
 export const human_director_role = {
   name: 'human-director Role',
   type: 'role_description',
-  slug: 'human-director-role',
   content: `# human-director Role
 
 ## 🎯 Core Purpose

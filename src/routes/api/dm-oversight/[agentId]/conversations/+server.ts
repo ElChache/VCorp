@@ -1,12 +1,13 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments } from '$lib/db/schema';
 import { eq, and, or, desc, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 // GET /api/dm-oversight/[agentId]/conversations - Get all DM conversations for a specific agent
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
-		const agentId = params.agentId;
+		const agentId = params.agentId!;
 		const projectId = parseInt(url.searchParams.get('projectId') || '0');
 		
 		if (!projectId) {
@@ -33,6 +34,10 @@ export async function GET({ params, url }) {
 			return json({ error: 'Agent not found' }, { status: 404 });
 		}
 
+		// Create table aliases
+		const authorAgent = alias(agents, 'author_agent');
+		const recipientAgent = alias(agents, 'recipient_agent');
+
 		// Get all DMs involving this agent (sent by them or received by them) 
 		// but EXCLUDE any DMs involving the Human Director
 		const dmConversations = await db
@@ -43,25 +48,25 @@ export async function GET({ params, url }) {
 				authorAgentId: content.authorAgentId,
 				createdAt: content.createdAt,
 				// Get author info
-				authorRoleType: sql<string>`author_agent.role_type`,
+				authorRoleType: authorAgent.roleType,
 				// Get recipient info via reading assignments
-				recipientAgentId: sql<string>`recipient_agent.id`,
-				recipientRoleType: sql<string>`recipient_agent.role_type`
+				recipientAgentId: recipientAgent.id,
+				recipientRoleType: recipientAgent.roleType
 			})
 			.from(content)
 			.innerJoin(
-				agents.as('author_agent'),
-				eq(agents.id, content.authorAgentId)
+				authorAgent,
+				eq(authorAgent.id, content.authorAgentId)
 			)
 			.innerJoin(readingAssignments, eq(readingAssignments.contentId, content.id))
 			.innerJoin(
-				agents.as('recipient_agent'), 
-				eq(agents.id, readingAssignments.assignedTo)
+				recipientAgent, 
+				eq(recipientAgent.id, readingAssignments.assignedTo)
 			)
 			.where(and(
 				eq(content.projectId, projectId),
 				eq(content.type, 'message'),
-				eq(content.channelId, null), // DMs have null channelId
+				sql`${content.channelId} IS NULL`, // DMs have null channelId
 				eq(readingAssignments.assignedToType, 'agent'),
 				// Include DMs where this agent is either sender or recipient
 				or(
@@ -69,8 +74,8 @@ export async function GET({ params, url }) {
 					eq(readingAssignments.assignedTo, agentId)
 				),
 				// EXCLUDE any DMs involving Human Director
-				eq(sql`author_agent.is_human_director`, false),
-				eq(sql`recipient_agent.is_human_director`, false)
+				eq(authorAgent.isHumanDirector, false),
+				eq(recipientAgent.isHumanDirector, false)
 			))
 			.orderBy(desc(content.createdAt));
 
@@ -108,7 +113,7 @@ export async function GET({ params, url }) {
 			...conv,
 			messageCount: conv.messages.length,
 			lastMessageAt: conv.messages[0]?.createdAt,
-			messages: conv.messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+			messages: conv.messages.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
 		}));
 
 		// Sort conversations by most recent activity
@@ -126,8 +131,8 @@ export async function GET({ params, url }) {
 			conversationPartners: conversations.length
 		});
 
-	} catch (error) {
-		console.error(`Failed to get DM conversations for agent ${agentId}:`, error);
+	} catch (error: unknown) {
+		console.error(`Failed to get DM conversations for agent ${params.agentId}:`, error);
 		return json({ error: 'Failed to get DM conversations' }, { status: 500 });
 	}
 }

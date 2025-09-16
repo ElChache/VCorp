@@ -731,7 +731,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 
 		// Sort messages by priority (high first) for display
 		const sortedMessages = messagesToShow.sort((a, b) => {
-			const priorityOrder = { high: 3, medium: 2, low: 1 };
+			const priorityOrder: { [key: string]: number } = { high: 3, medium: 2, low: 1 };
 			return (priorityOrder[b.priority] || 2) - (priorityOrder[a.priority] || 2);
 		});
 
@@ -1591,8 +1591,8 @@ Status: ${phase.status}`;
 		const results: {agentId: string, success: boolean, error?: string}[] = [];
 
 		for (const agent of projectAgents) {
-			if (!agent.tmuxSession || agent.status === 'offline') {
-				continue; // Skip agents without sessions or offline
+			if (!agent.tmuxSession || agent.status === 'offline' || agent.isHumanDirector) {
+				continue; // Skip agents without sessions, offline, or human directors
 			}
 
 			try {
@@ -1780,7 +1780,7 @@ Status: ${phase.status}`;
 					console.error('📁 File watcher error:', error);
 					this.stats.errors++;
 				})
-				.on('raw', (event, path, details) => {
+				.on('raw', (event: string, path: string, details?: any) => {
 					console.log('🔍 DEBUG: Raw event:', event, 'path:', path, 'details:', details);
 				});
 

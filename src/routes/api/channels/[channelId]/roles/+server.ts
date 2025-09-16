@@ -1,12 +1,16 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { channels, roles, channelRoleAssignments, content, readingAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/channels/[channelId]/roles - Get roles assigned to a channel
-export async function GET({ params }) {
+export const GET: RequestHandler = async ({ params }) => {
 	try {
-		const channelId = parseInt(params.channelId);
+		if (!params.channelId) {
+			return json({ error: 'Channel ID is required' }, { status: 400 });
+		}
+
+		const channelId = parseInt(params.channelId || '');
 
 		if (isNaN(channelId)) {
 			return json({ error: 'Invalid channel ID' }, { status: 400 });
@@ -58,16 +62,20 @@ export async function GET({ params }) {
 			assignedRoles,
 			allRoles: rolesWithAssignment,
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get channel roles:', error);
 		return json({ error: 'Failed to get channel roles' }, { status: 500 });
 	}
 }
 
 // POST /api/channels/[channelId]/roles - Assign a role to a channel
-export async function POST({ params, request }) {
+export const POST: RequestHandler = async ({ params, request }) => {
 	try {
-		const channelId = parseInt(params.channelId);
+		if (!params.channelId) {
+			return json({ error: 'Channel ID is required' }, { status: 400 });
+		}
+
+		const channelId = parseInt(params.channelId || '');
 		const { roleId } = await request.json();
 
 		if (isNaN(channelId)) {
@@ -151,7 +159,7 @@ export async function POST({ params, request }) {
 			});
 
 		return json(newAssignment, { status: 201 });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to assign role to channel:', error);
 		return json({ error: 'Failed to assign role to channel' }, { status: 500 });
 	}

@@ -1,7 +1,6 @@
 export const technical_qa_role = {
   name: "Technical QA Role",
   type: "role_description",
-  slug: "technical-qa-role",
   content: `# Technical QA Engineer
 
 ## Professional Identity
@@ -36,5 +35,6 @@ Ensure application reliability, performance, and user satisfaction through compr
 - Provide testing feedback to development teams for improvement
 - Maintain testing environments and data for consistent validation`,
   premade: null,
+  isGlobal: false,
   orderIndex: 6
 };

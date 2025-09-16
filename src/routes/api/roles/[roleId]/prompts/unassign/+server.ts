@@ -1,12 +1,12 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { rolePromptCompositions, prompts, roles } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/roles/[roleId]/prompts/unassign - Remove a prompt assignment from a role
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const roleId = parseInt(params.roleId);
+		const roleId = parseInt(params.roleId!);
 		const { promptId } = await request.json();
 		
 		if (isNaN(roleId) || !promptId) {

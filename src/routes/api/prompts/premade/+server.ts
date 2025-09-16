@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { roles, channels, channelRoleAssignments, projects } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/prompts/premade?premade=channel-instructions&roleType=Backend Developer&projectId=123
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const premade = url.searchParams.get('premade');
 		const roleType = url.searchParams.get('roleType');
@@ -103,11 +103,11 @@ No channels are currently available to the ${roleType} role. Contact your projec
 
 	for (const channel of allChannels) {
 		const isPublic = mainChannels.some(mc => mc.id === channel.id);
-		content += `### #${channel.name}${isPublic ? ' - This is a public channel' : ''}
+		content += `### #${channel.name || 'unnamed'}${isPublic ? ' - This is a public channel' : ''}
 
-${channel.description || `The ${channel.name} channel for team coordination.`}
+${channel.description || `The ${channel.name || 'unnamed'} channel for team coordination.`}
 
-${channel.promptForAgents || `Use this channel for discussions related to ${channel.name.toLowerCase()}.`}
+${channel.promptForAgents || `Use this channel for discussions related to ${(channel.name || 'this channel').toLowerCase()}.`}
 
 **Quick Actions:**
 - Post messages: \`POST /api/messages\` with channelId: ${channel.id}

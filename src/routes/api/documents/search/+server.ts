@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq, and, or, desc, sql } from 'drizzle-orm';
 
 // GET /api/documents/search - Full-text search for documents
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = parseInt(url.searchParams.get('projectId') || '');
 		const query = url.searchParams.get('q') || url.searchParams.get('query');
@@ -81,7 +81,7 @@ export async function GET({ url }) {
 			return {
 				...doc,
 				snippet,
-				matchesInTitle: countMatches(doc.title, query),
+				matchesInTitle: countMatches(doc.title || '', query),
 				matchesInBody: countMatches(doc.body, query)
 			};
 		});
@@ -99,7 +99,7 @@ export async function GET({ url }) {
 				authorId: authorId || null
 			}
 		});
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to search documents:', error);
 		return json({ error: 'Failed to search documents' }, { status: 500 });
 	}

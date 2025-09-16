@@ -3,8 +3,9 @@ import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
-export async function POST({ params }) {
+export const POST = async ({ params }: RequestEvent) => {
 	try {
 		const { agentId } = params;
 		console.log(`🏠 SEND HOME request for agent: ${agentId}`);
@@ -46,8 +47,8 @@ Take your time to finish properly - no rush! 👋
 				execSync(tmuxCommand, { stdio: 'ignore' });
 				
 				console.log(`✅ Successfully sent wrap-up message to agent`);
-			} catch (tmuxError) {
-				console.log(`⚠️ Failed to send message to tmux session:`, tmuxError.message);
+			} catch (tmuxError: unknown) {
+				console.log(`⚠️ Failed to send message to tmux session:`, (tmuxError as Error).message);
 				return json({ error: 'Failed to send wrap-up message to agent' }, { status: 500 });
 			}
 		} else {

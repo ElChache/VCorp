@@ -11,13 +11,15 @@ export async function GET() {
 			.orderBy(desc(projects.createdAt));
 
 		return json(allProjects);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch projects:', error);
 		return json({ error: 'Failed to fetch projects' }, { status: 500 });
 	}
 }
 
-export async function POST({ request }) {
+import type { RequestEvent } from '@sveltejs/kit';
+
+export async function POST({ request }: RequestEvent) {
 	try {
 		const body = await request.json();
 		const { name, description, path } = body;
@@ -58,7 +60,7 @@ export async function POST({ request }) {
 			.leftJoin(promptTemplates, eq(rolePromptCompositionTemplates.promptTemplateId, promptTemplates.id));
 
 		// Create ALL project prompts from templates first
-		const createdPrompts = {};
+		const createdPrompts: Record<number, any> = {};
 		for (const promptTemplate of allPromptTemplates) {
 			const [newPrompt] = await db
 				.insert(prompts)
@@ -117,7 +119,7 @@ export async function POST({ request }) {
 						projectId: newProject.id,
 						templateId: roleTemplate.id,
 						name: roleTemplate.name,
-						content: primaryPrompt.promptTemplate.content,
+						content: primaryPrompt.promptTemplate?.content || '',
 						isHumanDirector: roleTemplate.isHumanDirector || false,
 						isItAdministrator: roleTemplate.isItAdministrator || false,
 						isAssistantToHumanDirector: roleTemplate.isAssistantToHumanDirector || false,
@@ -130,7 +132,7 @@ export async function POST({ request }) {
 
 				// Link assigned prompts to this role
 				for (const template of assignedPrompts) {
-					const projectPrompt = createdPrompts[template.promptTemplate.id];
+					const projectPrompt = template.promptTemplate?.id ? createdPrompts[template.promptTemplate.id] : null;
 					if (projectPrompt) {
 						await db
 							.insert(rolePromptCompositions)
@@ -285,11 +287,12 @@ export async function POST({ request }) {
 
 			// Create squad-prompt assignments based on templates
 			for (const assignmentTemplate of squadPromptAssignmentTemplateList) {
-				const projectPrompt = createdPrompts[assignmentTemplate.promptTemplateId];
+				const projectPrompt = assignmentTemplate.promptTemplateId ? createdPrompts[assignmentTemplate.promptTemplateId] : null;
 				if (projectPrompt) {
 					await db
 						.insert(squadPromptAssignments)
 						.values({
+							projectId: newProject.id,
 							squadId: newSquad.id,
 							promptId: projectPrompt.id,
 							orderIndex: assignmentTemplate.orderIndex,
@@ -435,7 +438,7 @@ export async function POST({ request }) {
 					console.log(`✅ Created human-director agent: ${agentId}`);
 				}
 			}
-		} catch (agentError) {
+		} catch (agentError: unknown) {
 			console.error('Failed to create human-director agent:', agentError);
 			// Don't fail the entire project creation if agent creation fails
 		}
@@ -448,10 +451,10 @@ export async function POST({ request }) {
 			phasesCreated: createdPhases.length,
 			humanDirectorCreated: !!createdHumanDirector
 		}, { status: 201 });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create project:', error);
-		console.error('Error message:', error.message);
-		return json({ error: 'Failed to create project: ' + error.message }, { status: 500 });
+		console.error('Error message:', (error as Error).message);
+		return json({ error: 'Failed to create project: ' + (error as Error).message }, { status: 500 });
 	}
 }
 

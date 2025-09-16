@@ -1,9 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { prompts } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const slug = url.searchParams.get('slug');
@@ -27,7 +27,7 @@ export async function GET({ url }) {
 		}
 
 		return json(prompt);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch prompt by slug:', error);
 		return json({ error: 'Failed to fetch prompt' }, { status: 500 });
 	}

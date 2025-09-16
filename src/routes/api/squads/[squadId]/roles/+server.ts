@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { squadRoleAssignments, roles } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // Get all roles assigned to a squad
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
 		const { squadId } = params;
 		
@@ -34,7 +34,7 @@ export async function GET({ params }) {
 }
 
 // Assign a role to a squad
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
 		const { squadId } = params;
 		const { roleId } = await request.json();
@@ -84,7 +84,7 @@ export async function POST({ params, request }) {
 }
 
 // Remove a role from a squad
-export async function DELETE({ params, request }) {
+export async function DELETE({ params, request }: RequestEvent) {
 	try {
 		const { squadId } = params;
 		const { roleId } = await request.json();

@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, roles, squads } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/team-members?projectId=123 - Get team structure for agent messaging
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -43,7 +43,7 @@ export async function GET({ url }) {
 			.where(eq(squads.projectId, parseInt(projectId)));
 
 		// Group agents by role type
-		const agentsByRole = {};
+		const agentsByRole: { [key: string]: any[] } = {};
 		projectRoles.forEach(role => {
 			agentsByRole[role.name] = allAgents
 				.filter(agent => agent.roleType === role.name)
@@ -54,7 +54,7 @@ export async function GET({ url }) {
 		});
 
 		// Group agents by squad
-		const agentsBySquad = {};
+		const agentsBySquad: { [key: string]: any[] } = {};
 		projectSquads.forEach(squad => {
 			agentsBySquad[squad.name] = allAgents
 				.filter(agent => agent.squadId === squad.id)
@@ -86,7 +86,7 @@ export async function GET({ url }) {
 			activeAgents: allAgents.filter(a => a.status === 'active').length
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load team members:', error);
 		return json({ error: 'Failed to load team members' }, { status: 500 });
 	}

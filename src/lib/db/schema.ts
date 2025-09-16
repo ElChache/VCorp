@@ -19,6 +19,7 @@ export const roleTemplates = pgTable('role_templates', {
 	prefix: text('prefix').notNull(), // Agent ID prefix like 'be', 'fe', 'pm'
 	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role template
 	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role template
+	isAssistantToHumanDirector: boolean('is_assistant_to_human_director').notNull().default(false), // true for director assistant role template
 	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for roles that can create development phases
 	permissions: text('permissions'), // JSON string of Claude Code permission rules
 	version: integer('version').notNull().default(1),
@@ -79,6 +80,7 @@ export const roles = pgTable('roles', {
 	content: text('content').notNull(), // Role-specific content (from role template file)
 	isHumanDirector: boolean('is_human_director').notNull().default(false), // true for human director role instances
 	isItAdministrator: boolean('is_it_administrator').notNull().default(false), // true for IT administrator role instances
+	isAssistantToHumanDirector: boolean('is_assistant_to_human_director').notNull().default(false), // true for director assistant role instances
 	canCreatePhases: boolean('can_create_phases').notNull().default(false), // true for role instances that can create development phases
 	permissions: text('permissions'), // JSON string of Claude Code permission rules (inherits from template)
 	isActive: boolean('is_active').notNull().default(true),
@@ -258,13 +260,14 @@ export const squadRoleAssignments = pgTable('squad_role_assignments', {
 // Squad-Prompt Assignments (project-level assignments of prompts to squads)
 export const squadPromptAssignments = pgTable('squad_prompt_assignments', {
 	id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
+	projectId: integer('project_id').notNull().references(() => projects.id),
 	squadId: text('squad_id').notNull().references(() => squads.id),
 	promptId: integer('prompt_id').notNull().references(() => prompts.id),
 	orderIndex: integer('order_index').notNull().default(0),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => ({
-	// Ensure unique squad-prompt combinations
-	uniqueSquadPrompt: unique().on(table.squadId, table.promptId)
+	// Ensure unique squad-prompt combinations per project
+	uniqueProjectSquadPrompt: unique().on(table.projectId, table.squadId, table.promptId)
 }));
 
 // Role-specific prompt ordering (defines custom order of ALL prompts for each role)

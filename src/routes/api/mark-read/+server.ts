@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { readingAssignmentReads, readingAssignments, content, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/mark-read - Mark a message as read by an agent
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { agentId, messageId, acknowledged = false } = await request.json();
 
@@ -106,7 +106,7 @@ export async function POST({ request }) {
 			});
 		}
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to mark message as read:', error);
 		return json({ error: 'Failed to mark message as read' }, { status: 500 });
 	}

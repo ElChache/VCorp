@@ -1,7 +1,6 @@
 export const frontend_role = {
   name: "Frontend Developer Role", 
   type: "role_description",
-  slug: "frontend-role",
   content: `# Frontend Developer
 
 ## Your Role
@@ -24,5 +23,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 Build interfaces that users love to interact with, not just functional screens.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 1
 };

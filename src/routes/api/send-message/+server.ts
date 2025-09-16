@@ -1,12 +1,26 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents, roles, channels, channelRoleAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { resolveAssignmentTarget, isHumanDirectorId, getHumanDirectorIdForProject } from '$lib/utils/humanDirectorHelpers';
 import { CONFIG } from '$lib/config';
 
+// Type definitions
+interface Assignment {
+	type: string;
+	target: string;
+}
+
+interface AssignmentSummary {
+	type: string;
+	target: string;
+	assignmentId: number;
+	auto?: boolean;
+	autoThread?: boolean;
+}
+
 // POST /api/send-message - Send a message with automatic reading assignments
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -144,7 +158,7 @@ export async function POST({ request }) {
 						assignTo[i] = await resolveAssignmentTarget(assignTo[i], parsedProjectId);
 					} catch (error) {
 						return json({ 
-							error: `Cannot assign to human director: ${error.message}`
+							error: `Cannot assign to human director: ${error instanceof Error ? error.message : String(error)}`
 						}, { status: 400 });
 					}
 				}
@@ -180,7 +194,7 @@ export async function POST({ request }) {
 
 		// Check if any assignments target the human director (after resolution)
 		const humanDirectorId = await getHumanDirectorIdForProject(parsedProjectId);
-		const hasDirectorAssignment = assignTo && assignTo.some(assignment => 
+		const hasDirectorAssignment = assignTo && assignTo.some((assignment: Assignment) => 
 			assignment.type === 'agent' && (
 				assignment.target === humanDirectorId ||
 				isHumanDirectorId(assignment.target)
@@ -333,12 +347,12 @@ export async function POST({ request }) {
 		};
 
 		// Create reading assignments
-		let createdAssignments = [];
-		let assignmentSummary = [];
+		let createdAssignments: any[] = [];
+		let assignmentSummary: AssignmentSummary[] = [];
 		
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
-			const assignmentPromises = assignTo.map(async (assignment) => {
+			const assignmentPromises = assignTo.map(async (assignment: Assignment) => {
 				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
 				
 				// Skip creating assignment if the author is assigning to themselves
@@ -361,8 +375,8 @@ export async function POST({ request }) {
 
 			// Get summary of who was assigned (excluding skipped assignments)
 			assignmentSummary = assignTo
-				.filter((assignment, index) => results[index] !== null)
-				.map((assignment, originalIndex) => {
+				.filter((assignment: Assignment, index: number) => results[index] !== null)
+				.map((assignment: Assignment, originalIndex: number) => {
 					const resultIndex = results.slice(0, originalIndex + 1).filter(r => r !== null).length - 1;
 					return {
 						type: assignment.type,
@@ -417,13 +431,13 @@ export async function POST({ request }) {
 							.values({
 								contentId: newMessage.id,
 								assignedToType: 'agent',
-								assignedTo: participantAgentId,
+								assignedTo: participantAgentId as string,
 							})
 							.returning();
 						
 						assignmentSummary.push({
 							type: 'agent',
-							target: participantAgentId,
+							target: participantAgentId as string,
 							assignmentId: threadAssignment.id,
 							autoThread: true
 						});
@@ -501,13 +515,13 @@ export async function POST({ request }) {
 		console.error('Failed to send message:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities (project, channel, agent, or parent content) may not exist or may be invalid. Please verify all IDs are correct.'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_UNIQUE' || (error as any).code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This message conflicts with existing data. Please check for duplicate entries.'
 			}, { status: 409 });
@@ -515,7 +529,7 @@ export async function POST({ request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while sending message. Please try again or contact support if the problem persists.',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }

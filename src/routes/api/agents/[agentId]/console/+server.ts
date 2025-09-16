@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { execSync } from 'child_process';
+import type { RequestEvent } from '@sveltejs/kit';
 
 // Get live console output from agent's tmux session
-export async function GET({ params }) {
+export const GET = async ({ params }: RequestEvent) => {
 	try {
 		const { agentId } = params;
 		

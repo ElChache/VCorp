@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignmentReads, roleAssignments, tasks } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { execSync } from 'child_process';
 
-export async function POST({ params }) {
+export const POST: RequestHandler = async ({ params }) => {
 	try {
 		const { agentId } = params;
 		console.log(`💀 KILL request for agent: ${agentId}`);
@@ -31,8 +31,8 @@ export async function POST({ params }) {
 			console.log(`💥 Killing tmux session: ${agent.tmuxSession}`);
 			execSync(`tmux kill-session -t "${agent.tmuxSession}"`, { stdio: 'ignore' });
 			console.log(`✅ Successfully killed tmux session`);
-		} catch (tmuxError) {
-			console.log(`⚠️ Failed to kill tmux session (might not exist):`, tmuxError.message);
+		} catch (tmuxError: unknown) {
+			console.log(`⚠️ Failed to kill tmux session (might not exist):`, (tmuxError as Error).message);
 			// Continue anyway - we still want to remove from database
 		}
 

@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, roles, rolePromptCompositions, prompts } from '$lib/db/schema';
 import { eq, asc, and } from 'drizzle-orm';
 import { generatePremadeContent } from '$lib/premade-prompts';
 
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	console.log(`🔥 REGISTER ENDPOINT CALLED!`);
 	try {
 		const { agentId } = await request.json();

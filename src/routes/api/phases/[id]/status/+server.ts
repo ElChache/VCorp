@@ -1,21 +1,26 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // PUT /api/phases/[id]/status - Update phase status (internal web app endpoint)
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	return updatePhaseStatus(params, request);
 }
 
 // PATCH /api/phases/[id]/status - Update phase status (internal web app endpoint)
-export async function PATCH({ params, request }) {
+export async function PATCH({ params, request }: RequestEvent) {
 	return updatePhaseStatus(params, request);
 }
 
-async function updatePhaseStatus(params: any, request: any) {
+async function updatePhaseStatus(params: {id?: string}, request: Request) {
 	try {
-		const phaseId = parseInt(params.id);
+		if (!params.id) {
+			return json({ 
+				error: 'Phase ID is required' 
+			}, { status: 400 });
+		}
+		const phaseId = parseInt(params.id || '');
 		const {
 			phaseStatus,
 			projectId
@@ -138,7 +143,7 @@ async function updatePhaseStatus(params: any, request: any) {
 				.from(agents)
 				.where(and(
 					eq(agents.projectId, parsedProjectId),
-					eq(agents.roleType, currentPhase.assignedToRoleType)
+					eq(agents.roleType, currentPhase.assignedToRoleType!)
 				));
 
 			// Create reading assignments for each agent in the role
@@ -179,7 +184,7 @@ async function updatePhaseStatus(params: any, request: any) {
 			}
 
 			// Send notifications for the status change
-			await sendStatusChangeNotifications(updatedPhase, oldStatus, phaseStatus);
+			await sendStatusChangeNotifications(updatedPhase, oldStatus || 'unknown', phaseStatus);
 
 			return json({
 				id: updatedPhase.id,
@@ -206,11 +211,11 @@ async function updatePhaseStatus(params: any, request: any) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to update phase status:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: Referenced entities may not exist'
 			}, { status: 400 });
@@ -218,7 +223,7 @@ async function updatePhaseStatus(params: any, request: any) {
 		
 		return json({ 
 			error: 'Internal server error occurred while updating phase status',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }
@@ -230,7 +235,7 @@ async function sendStatusChangeNotifications(phase: any, oldStatus: string, newS
 		// For now, just log the status change
 		
 		const phaseTitle = phase.title;
-		const roleType = phase.assignedToRoleType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+		const roleType = phase.assignedToRoleType?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 		
 		console.log(`🔄 Phase Status Change:
 			Phase: "${phaseTitle}"
@@ -247,7 +252,7 @@ async function sendStatusChangeNotifications(phase: any, oldStatus: string, newS
 		//   recipients: assignedAgents
 		// });
 		
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to send status change notifications:', error);
 		// Don't fail the main operation if notifications fail
 	}
@@ -288,7 +293,7 @@ async function validateRequiredInputs(phase: any, projectId: number): Promise<st
 
 		return missingInputs;
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Error validating required inputs:', error);
 		// If we can't parse or validate, assume all are missing for safety
 		return JSON.parse(phase.requiredInputs || '[]');
@@ -330,7 +335,7 @@ async function validateExpectedOutputs(phase: any, projectId: number): Promise<s
 
 		return missingOutputs;
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Error validating expected outputs:', error);
 		// If we can't parse or validate, assume all are missing for safety
 		return JSON.parse(phase.expectedOutputs || '[]');

@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { scheduledReminders } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/scheduled-reminders - Get all scheduled reminders
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -27,7 +27,7 @@ export async function GET({ url }) {
 }
 
 // POST /api/scheduled-reminders - Create a new scheduled reminder
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId, name, targetRoleType, message, frequencyMinutes, isActive = true } = await request.json();
 

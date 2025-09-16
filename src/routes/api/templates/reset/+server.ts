@@ -88,6 +88,6 @@ export async function DELETE() {
 		});
 	} catch (error) {
 		console.error('Failed to reset templates:', error);
-		return json({ error: `Failed to reset templates: ${error.message}` }, { status: 500 });
+		return json({ error: `Failed to reset templates: ${error instanceof Error ? error.message : String(error)}` }, { status: 500 });
 	}
 }

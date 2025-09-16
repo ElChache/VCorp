@@ -1,9 +1,9 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { readingAssignments } from '$lib/db/schema';
 
 // POST /api/reading-assignments - Create a new reading assignment
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { contentId, assignedToType, assignedTo } = await request.json();
 
@@ -32,7 +32,7 @@ export async function POST({ request }) {
 			assignment: newAssignment
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create reading assignment:', error);
 		return json({ error: 'Failed to create reading assignment' }, { status: 500 });
 	}

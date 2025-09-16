@@ -29,6 +29,20 @@
       "when": 1757961567996,
       "tag": "0003_certain_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1758056097706,
+      "tag": "0004_dark_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1758060427839,
+      "tag": "0005_graceful_ezekiel",
+      "breakpoints": true
     }
   ]
 }

@@ -1,42 +1,52 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, agents, phases, roles, readingAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		const type = url.searchParams.get('type');
 		
 		if (isNaN(projectId)) {
 			return json({ error: 'Invalid project ID' }, { status: 400 });
 		}
 
-		let query = db
+		const query = db
 			.select()
 			.from(content)
 			.where(eq(content.projectId, projectId));
 
 		// Filter by type if specified (e.g., "phase")
+		let results;
 		if (type) {
-			query = query.where(and(
-				eq(content.projectId, projectId),
-				eq(content.type, type)
-			));
+			results = await db
+				.select()
+				.from(content)
+				.where(and(
+					eq(content.projectId, projectId),
+					eq(content.type, type)
+				));
+		} else {
+			results = await query;
 		}
 
-		const results = await query;
-
 		return json(results);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch content:', error);
 		return json({ error: 'Failed to fetch content' }, { status: 500 });
 	}
 }
 
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		const body = await request.json();
 		
 		if (isNaN(projectId)) {
@@ -93,14 +103,14 @@ export async function POST({ params, request }) {
 							});
 					}
 				}
-			} catch (assignmentError) {
+			} catch (assignmentError: unknown) {
 				console.error('Failed to create reading assignments:', assignmentError);
 				// Don't fail the entire request if reading assignment creation fails
 			}
 		}
 
 		return json(newContent);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create content:', error);
 		return json({ error: 'Failed to create content' }, { status: 500 });
 	}

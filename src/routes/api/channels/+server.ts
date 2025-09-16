@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { channels } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/channels?projectId=123 - List channels for a project
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -26,7 +27,7 @@ export async function GET({ url }) {
 }
 
 // POST /api/channels - Create new channel
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { name, description, promptForAgents, isMainChannel, projectId } = await request.json();
 		

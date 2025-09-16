@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { squads, squadRoleAssignments, roles } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // Get all squads for a project
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -18,14 +18,14 @@ export async function GET({ url }) {
 			.where(eq(squads.projectId, parseInt(projectId)));
 
 		return json(projectSquads);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch squads:', error);
 		return json({ error: 'Failed to fetch squads' }, { status: 500 });
 	}
 }
 
 // Create a squad for a project  
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId, squadId, name } = await request.json();
 
@@ -44,14 +44,14 @@ export async function POST({ request }) {
 			.returning();
 
 		return json(newSquad);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create squad:', error);
 		return json({ error: 'Failed to create squad' }, { status: 500 });
 	}
 }
 
 // Update a squad
-export async function PUT({ request }) {
+export async function PUT({ request }: RequestEvent) {
 	try {
 		const { squadId, name } = await request.json();
 
@@ -70,14 +70,14 @@ export async function PUT({ request }) {
 		}
 
 		return json(updatedSquad);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to update squad:', error);
 		return json({ error: 'Failed to update squad' }, { status: 500 });
 	}
 }
 
 // Delete a squad
-export async function DELETE({ request }) {
+export async function DELETE({ request }: RequestEvent) {
 	try {
 		const { squadId } = await request.json();
 
@@ -101,7 +101,7 @@ export async function DELETE({ request }) {
 		}
 
 		return json({ success: true, deletedSquad });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to delete squad:', error);
 		return json({ error: 'Failed to delete squad' }, { status: 500 });
 	}

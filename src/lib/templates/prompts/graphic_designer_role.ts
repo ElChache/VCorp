@@ -1,7 +1,6 @@
 export const graphic_designer_role = {
   name: "Graphic Designer Role",
   type: "role_description",
-  slug: "graphic-designer-role",
   content: `# Graphic Designer
 
 ## Professional Identity
@@ -36,5 +35,6 @@ Create visually compelling, cohesive design language that enhances user experien
 - Provide visual feedback and iteration support during development
 - Ensure visual consistency across the entire user experience`,
   premade: null,
+  isGlobal: false,
   orderIndex: 5
 };

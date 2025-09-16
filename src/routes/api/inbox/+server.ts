@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles } from '$lib/db/schema';
 import { eq, or, and, isNull } from 'drizzle-orm';
@@ -6,7 +7,7 @@ import { isHumanDirectorId } from '$lib/utils/humanDirectorHelpers';
 import MonitoringManager from '$lib/services/MonitoringManager';
 
 // GET /api/inbox?agentId=be_001 - Get all messages assigned to an agent
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const agentId = url.searchParams.get('agentId');
 		
@@ -136,7 +137,7 @@ export async function GET({ url }) {
 				const unreadAssignmentIds = unreadMessages.map(msg => {
 					// Find the assignment ID for this message and agent
 					return assignedMessages.find(am => am.messageId === msg.messageId)?.assignmentId;
-				}).filter(Boolean);
+				}).filter((id): id is number => id != null);
 
 				// Batch create read records for all unread assignments
 				if (unreadAssignmentIds.length > 0) {
@@ -146,7 +147,9 @@ export async function GET({ url }) {
 						acknowledged: false,
 					}));
 
-					await db.insert(readingAssignmentReads).values(readRecordsToCreate);
+					if (readRecordsToCreate.length > 0) {
+						await db.insert(readingAssignmentReads).values(readRecordsToCreate);
+					}
 					console.log(`Auto-marked ${unreadAssignmentIds.length} messages as read for agent ${agentId}`);
 					
 					// Reset grace period for notification system
@@ -219,7 +222,7 @@ export async function GET({ url }) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load inbox:', error);
 		return json({ error: 'Failed to load inbox' }, { status: 500 });
 	}

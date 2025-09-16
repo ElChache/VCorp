@@ -1,13 +1,13 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { roles, channels, channelRoleAssignments } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET /api/roles/[roleId]/channels - Get channels accessible to a role
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
 		let role;
-		const roleParam = decodeURIComponent(params.roleId);
+		const roleParam = decodeURIComponent(params.roleId || '');
 		const roleId = parseInt(roleParam);
 
 		// Try to find role by ID first (numeric)

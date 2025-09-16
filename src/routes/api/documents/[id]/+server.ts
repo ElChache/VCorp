@@ -25,6 +25,9 @@ function checkDocumentDeletePermission(agent: any, document: any): boolean {
 // GET - Retrieve document by ID
 export const GET: RequestHandler = async ({ params }) => {
   try {
+    if (!params.id) {
+      return json({ error: 'Document ID is required' }, { status: 400 });
+    }
     const documentId = parseInt(params.id as string);
     if (isNaN(documentId)) {
       return json({ error: 'Invalid document ID' }, { status: 400 });
@@ -44,7 +47,7 @@ export const GET: RequestHandler = async ({ params }) => {
     }
 
     return json(document[0]);
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error fetching document:', error);
     return json({ error: 'Internal server error' }, { status: 500 });
   }
@@ -132,7 +135,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         .limit(1);
 
       if (project?.path) {
-        let filePath: string;
+        let filePath: string | undefined;
 
         if (updatedDocument[0].documentSlug) {
           // Document with slug in /docs/
@@ -140,7 +143,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
         } else if (updatedDocument[0].authorAgentId) {
           // Document without slug in agent workspace
           // Try to find existing file by checking if it exists
-          const safeTitle = document.title
+          const safeTitle = (updatedDocument[0].title || 'untitled')
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '')
@@ -181,7 +184,7 @@ export const PUT: RequestHandler = async ({ params, request }) => {
       message: 'Document updated successfully'
     });
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error updating document:', error);
     return json({ error: 'Internal server error' }, { status: 500 });
   }
@@ -269,7 +272,7 @@ export const DELETE: RequestHandler = async ({ params, request }) => {
       });
     }
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error deleting document:', error);
     return json({ error: 'Internal server error' }, { status: 500 });
   }

@@ -1,18 +1,21 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq, desc, asc, sql } from 'drizzle-orm';
 
 // GET /api/content/[id]/thread - Get paginated thread for a message/document
-export async function GET({ params, url }) {
+export async function GET({ params, url }: RequestEvent) {
 	try {
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
 		const contentId = params.id;
 		const page = parseInt(url.searchParams.get('page') || '1');
 		const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100); // Max 100 per page
 		const sort = url.searchParams.get('sort') || 'asc'; // 'asc' or 'desc'
 
 		// Validate contentId
-		const parsedContentId = parseInt(contentId);
+		const parsedContentId = parseInt(contentId!);
 		if (isNaN(parsedContentId) || parsedContentId <= 0) {
 			return json({ 
 				error: 'Invalid content ID: must be a positive integer'
@@ -145,11 +148,11 @@ export async function GET({ params, url }) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get thread:', error);
 		
 		// Provide specific error messages
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as any).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as any).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: The content may not exist or may be invalid.'
 			}, { status: 404 });
@@ -157,7 +160,7 @@ export async function GET({ params, url }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while fetching thread. Please try again or contact support if the problem persists.',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as any).message : undefined
 		}, { status: 500 });
 	}
 }

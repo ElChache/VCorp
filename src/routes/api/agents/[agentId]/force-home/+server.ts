@@ -3,8 +3,9 @@ import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
+import type { RequestEvent } from '@sveltejs/kit';
 
-export async function POST({ params }) {
+export const POST = async ({ params }: RequestEvent) => {
 	try {
 		const { agentId } = params;
 		console.log(`⚡ FORCE HOME request for agent: ${agentId}`);
@@ -32,8 +33,8 @@ export async function POST({ params }) {
 				console.log(`⚡ Forcefully ending tmux session for unresponsive agent: ${agent.tmuxSession}`);
 				execSync(`tmux kill-session -t "${agent.tmuxSession}"`, { stdio: 'ignore' });
 				console.log(`✅ Successfully forced agent home`);
-			} catch (tmuxError) {
-				console.log(`⚠️ Failed to kill tmux session (might not exist):`, tmuxError.message);
+			} catch (tmuxError: unknown) {
+				console.log(`⚠️ Failed to kill tmux session (might not exist):`, (tmuxError as Error).message);
 				// Continue anyway - we still want to update status
 			}
 		}

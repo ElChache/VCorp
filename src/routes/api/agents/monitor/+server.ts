@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents, scheduledReminders, content, readingAssignments } from '$lib/db/schema';
@@ -7,8 +8,8 @@ import { eq, and, lt } from 'drizzle-orm';
 let isMonitoring = false;
 let monitoringInterval: NodeJS.Timeout | null = null;
 
-// Start/stop monitoring
-export async function POST({ request }) {
+// Start/stop monitoring  
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { action } = await request.json();
 

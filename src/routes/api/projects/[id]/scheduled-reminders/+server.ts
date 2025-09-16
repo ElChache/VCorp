@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { scheduledReminders } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/projects/[id]/scheduled-reminders - Get all scheduled reminders for a project
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 
 		const reminders = await db
 			.select()
@@ -16,16 +19,19 @@ export async function GET({ params }) {
 
 		return json(reminders);
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch scheduled reminders for project:', error);
 		return json({ error: 'Failed to fetch scheduled reminders' }, { status: 500 });
 	}
 }
 
 // POST /api/projects/[id]/scheduled-reminders - Create a new scheduled reminder for a project
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const projectId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Project ID is required' }, { status: 400 });
+		}
+		const projectId = parseInt(params.id || '');
 		const { name, targetRoleType, message, frequencyMinutes, isActive = true } = await request.json();
 
 		if (!name || !targetRoleType || !message || !frequencyMinutes) {
@@ -46,7 +52,7 @@ export async function POST({ params, request }) {
 
 		return json(newReminder, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create scheduled reminder:', error);
 		return json({ error: 'Failed to create scheduled reminder' }, { status: 500 });
 	}

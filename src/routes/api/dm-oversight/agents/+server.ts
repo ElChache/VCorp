@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments } from '$lib/db/schema';
 import { eq, and, ne, sql, desc } from 'drizzle-orm';
 
 // GET /api/dm-oversight/agents - Get all agents with their inter-agent DM counts
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = parseInt(url.searchParams.get('projectId') || '0');
 		
@@ -48,7 +48,7 @@ export async function GET({ url }) {
 						eq(content.projectId, projectId),
 						eq(content.type, 'message'),
 						eq(content.authorAgentId, agent.id),
-						eq(content.channelId, null), // DMs have null channelId
+						sql`${content.channelId} IS NULL`, // DMs have null channelId
 						eq(readingAssignments.assignedToType, 'agent'),
 						eq(agents.isHumanDirector, false) // Recipient is not Human Director
 					));
@@ -65,7 +65,7 @@ export async function GET({ url }) {
 						eq(content.projectId, projectId),
 						eq(content.type, 'message'),
 						eq(content.authorAgentId, agent.id),
-						eq(content.channelId, null),
+						sql`${content.channelId} IS NULL`,
 						eq(readingAssignments.assignedToType, 'agent'),
 						eq(agents.isHumanDirector, false),
 						sql`${content.createdAt} >= NOW() - INTERVAL '24 hours'`
@@ -86,7 +86,7 @@ export async function GET({ url }) {
 
 		return json(agentsWithCounts);
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to get DM oversight data:', error);
 		return json({ error: 'Failed to get DM oversight data' }, { status: 500 });
 	}

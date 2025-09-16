@@ -1,7 +1,6 @@
 export const worktree_workflow = {
   name: "Developer Contribution Guidelines",
   type: "worktree_workflow",
-  slug: "worktree-workflow",
   content: `# VCorp Developer Contribution Guidelines
 
 ## 🚨 CRITICAL RULE: NEVER WORK OUTSIDE YOUR DESIGNATED WORKSPACE 🚨

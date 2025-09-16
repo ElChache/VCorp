@@ -1,11 +1,12 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq, ne } from 'drizzle-orm';
 
 // Background monitoring service that updates agent status
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId } = await request.json();
 		
@@ -59,8 +60,8 @@ export async function POST({ request }) {
 						newStatus: currentStatus
 					});
 				}
-			} catch (error) {
-				console.error(`❌ [Monitor] Failed to check agent ${agent.id}:`, error.message);
+			} catch (error: unknown) {
+				console.error(`❌ [Monitor] Failed to check agent ${agent.id}:`, (error as Error).message);
 				// Mark as offline if we can't check it
 				if (agent.status !== 'offline') {
 					await db

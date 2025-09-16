@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { spawn, execSync } from 'child_process';
 import { mkdir, writeFile } from 'fs/promises';
 import { db } from '$lib/db/index';
@@ -77,13 +78,13 @@ const HUMAN_NAMES = [
 	'pierre', 'marie', 'hans', 'greta', 'ivan', 'anya', 'dmitri', 'nina'
 ];
 
-function generateAgentId(rolePrefix) {
+function generateAgentId(rolePrefix: string) {
 	const humanName = HUMAN_NAMES[Math.floor(Math.random() * HUMAN_NAMES.length)];
 	const randomSuffix = Math.floor(1000 + Math.random() * 9000); // 4-digit number (1000-9999)
 	return `${rolePrefix}_${humanName}_${randomSuffix}`;
 }
 
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { roleType, model = 'sonnet', projectId } = await request.json();
 		console.log(`🚀 POST /api/agents/launch - roleType: ${roleType}, model: ${model}, projectId: ${projectId}`);
@@ -211,7 +212,7 @@ export async function POST({ request }) {
 				console.log(`🔒 Permission level: ${agentPermissions.permissionLevel}`);
 			} catch (error) {
 				console.error(`❌ Failed to parse permissions for role ${projectRole.name}:`, error);
-				return json({ error: `Failed to parse role permissions: ${error.message}` }, { status: 500 });
+				return json({ error: `Failed to parse role permissions: ${error instanceof Error ? error.message : 'Unknown error'}` }, { status: 500 });
 			}
 		} else {
 			console.log(`⚠️ No permissions configured for role ${projectRole.name}, defaulting to restricted access`);
@@ -264,7 +265,7 @@ export async function POST({ request }) {
 			console.log(`❌ Deny rules: ${agentPermissions.deny.length}`);
 			console.log(`📝 Description: ${agentPermissions.description}`);
 		}
-		const tmuxProcess = spawn('tmux', [
+		spawn('tmux', [
 			'new-session', '-d', '-s', sessionName, '-c', workingDirectory,
 			...claudeCommand
 		], {
@@ -428,7 +429,7 @@ exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=${projectId} --
 }
 
 // Endpoint to update startup prompt
-export async function PUT({ request }) {
+export async function PUT({ request }: RequestEvent) {
 	try {
 		const { startupPrompt } = await request.json();
 		

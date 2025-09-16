@@ -1,11 +1,14 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id || '');
 		
 		if (isNaN(contentId)) {
 			return json({ error: 'Invalid content ID' }, { status: 400 });
@@ -22,15 +25,18 @@ export async function GET({ params }) {
 		}
 
 		return json(result);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch content:', error);
 		return json({ error: 'Failed to fetch content' }, { status: 500 });
 	}
 }
 
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id || '');
 		const body = await request.json();
 		
 		if (isNaN(contentId)) {
@@ -59,15 +65,18 @@ export async function PUT({ params, request }) {
 		}
 
 		return json(updated[0]);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to update content:', error);
 		return json({ error: 'Failed to update content' }, { status: 500 });
 	}
 }
 
-export async function DELETE({ params }) {
+export async function DELETE({ params }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id || '');
 		
 		if (isNaN(contentId)) {
 			return json({ error: 'Invalid content ID' }, { status: 400 });
@@ -83,7 +92,7 @@ export async function DELETE({ params }) {
 		}
 
 		return json({ success: true, message: 'Content deleted successfully' });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to delete content:', error);
 		return json({ error: 'Failed to delete content' }, { status: 500 });
 	}

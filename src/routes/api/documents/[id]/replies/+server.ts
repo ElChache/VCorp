@@ -1,11 +1,11 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content } from '$lib/db/schema';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const documentId = parseInt(params.id);
+		const documentId = parseInt(params.id!);
 		
 		if (isNaN(documentId)) {
 			return json({ error: 'Invalid document ID' }, { status: 400 });
@@ -53,7 +53,7 @@ export async function GET({ params }) {
 		}
 
 		// Build nested structure
-		const buildReplyTree = (replies: any[], parentId: number | null = documentId) => {
+		const buildReplyTree = (replies: any[], parentId: number | null = documentId): any[] => {
 			return replies
 				.filter(reply => reply.parentContentId === parentId)
 				.map(reply => ({
@@ -65,15 +65,15 @@ export async function GET({ params }) {
 		const nestedReplies = buildReplyTree(allReplies);
 
 		return json(nestedReplies);
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch document replies:', error);
 		return json({ error: 'Failed to fetch document replies' }, { status: 500 });
 	}
 }
 
-export async function POST({ params, request }) {
+export async function POST({ params, request }: RequestEvent) {
 	try {
-		const documentId = parseInt(params.id);
+		const documentId = parseInt(params.id!);
 		const { body, authorAgentId, parentContentId } = await request.json();
 		
 		if (isNaN(documentId)) {
@@ -111,7 +111,7 @@ export async function POST({ params, request }) {
 			.returning();
 
 		return json(newReply, { status: 201 });
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create reply:', error);
 		return json({ error: 'Failed to create reply' }, { status: 500 });
 	}

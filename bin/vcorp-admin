@@ -3,6 +3,9 @@
 # VCorp Admin Command - Main script for all VCorp operations
 # Usage: vcorp-admin --project=ID --agent=AGENT_ID --role=ROLE_TYPE COMMAND
 
+# Set default port
+VCORP_PORT=5173
+
 # Parse command line arguments
 PROJECT_ID=""
 AGENT_ID=""
@@ -431,6 +434,8 @@ show_help_commands() {
     echo "   channels     List accessible channels"
     echo "   channel      View messages in specific channel"
     echo "   thread       View full conversation context"
+    echo "   documents    List and search project documents"
+    echo "   tickets      List and search work tickets"
     echo ""
     echo "💡 For detailed help on any command: vcorp COMMAND --help"
     echo "   Example: vcorp message --help"
@@ -1554,13 +1559,235 @@ case "$COMMAND" in
             echo "✅ Ticket '$ARG_title' created (unassigned)!"
         fi
         ;;
+
+    "documents")
+        # Query string parameters
+        SEARCH_PARAM=""
+        START_PARAM=""
+        END_PARAM=""
+        
+        # Parse arguments
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --start=*)
+                    START_VALUE="${1#*=}"
+                    START_PARAM="&start=$START_VALUE"
+                    shift
+                    ;;
+                --end=*)
+                    END_VALUE="${1#*=}"
+                    END_PARAM="&end=$END_VALUE"
+                    shift
+                    ;;
+                search)
+                    shift
+                    if [[ $# -gt 0 ]]; then
+                        SEARCH_PARAM="&search=${1// /%20}"
+                        shift
+                    else
+                        echo "❌ Error: search requires a query term"
+                        exit 1
+                    fi
+                    ;;
+                --help)
+                    echo "📄 vcorp documents - List and search project documents"
+                    echo ""
+                    echo "Usage:"
+                    echo "   vcorp documents                      List all project documents"
+                    echo "   vcorp documents search \"query\"       Search documents by title/content"
+                    echo "   vcorp documents --start=21 --end=40  Pagination support"
+                    echo ""
+                    echo "Examples:"
+                    echo "   vcorp documents                      # See all project documents"
+                    echo "   vcorp documents search \"api\"         # Find documents about API"
+                    echo "   vcorp documents --start=21 --end=40  # Show documents 21-40"
+                    echo ""
+                    echo "💡 Tips:"
+                    echo "   • Documents are always shown for ALL team members (full transparency)"
+                    echo "   • Use search to find specific documents quickly"
+                    echo "   • Use 'vcorp document show SLUG' to view a specific document"
+                    exit 0
+                    ;;
+                *)
+                    echo "❌ Error: Unknown argument '$1'"
+                    echo "Use 'vcorp documents --help' for usage information"
+                    exit 1
+                    ;;
+            esac
+        done
+        
+        # Build API URL
+        API_URL="http://localhost:$VCORP_PORT/api/documents?projectId=$PROJECT_ID$SEARCH_PARAM$START_PARAM$END_PARAM"
+        
+        echo "📄 Project Documents:"
+        echo ""
+        
+        # Make API call
+        RESPONSE=$(curl -s "$API_URL" 2>/dev/null)
+        
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Error: Could not connect to VCorp server at localhost:$VCORP_PORT"
+            exit 1
+        fi
+        
+        # Parse and display documents
+        echo "$RESPONSE" | jq -r '
+            if .documents and (.documents | length > 0) then
+                .documents[] | 
+                "📄 Document #\(.id)" +
+                (if .documentSlug then " (\(.documentSlug))" else "" end) +
+                "\n👤 Author: \(.authorAgentId // "system")" +
+                "\n📅 Created: \(.createdAt | split("T")[0])" +
+                "\n📝 Title: \(.title)" +
+                "\n💬 Content: \(.body | if length > 100 then .[0:100] + "..." else . end)" +
+                "\n🔧 View: vcorp document show " + (.documentSlug // (.id | tostring)) +
+                "\n"
+            else
+                "📭 No documents found."
+            end
+        '
+        ;;
+
+    "tickets")
+        # Role-based filtering logic
+        SHOW_ALL="false"
+        SEARCH_PARAM=""
+        START_PARAM=""
+        END_PARAM=""
+        STATUS_PARAM=""
+        PRIORITY_PARAM=""
+        
+        # Check if agent is a manager (should see all by default)
+        if [[ "$AGENT_ROLE" == "product-manager" || "$AGENT_ROLE" == "lead-developer" || "$AGENT_ROLE" == "system-architect" || "$AGENT_ROLE" == "it-administrator" || "$AGENT_ROLE" == "director-assistant" ]]; then
+            SHOW_ALL="true"
+        fi
+        
+        # Parse arguments
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --all)
+                    SHOW_ALL="true"
+                    shift
+                    ;;
+                --status=*)
+                    STATUS_VALUE="${1#*=}"
+                    STATUS_PARAM="&status=$STATUS_VALUE"
+                    shift
+                    ;;
+                --priority=*)
+                    PRIORITY_VALUE="${1#*=}"
+                    PRIORITY_PARAM="&priority=$PRIORITY_VALUE"
+                    shift
+                    ;;
+                --start=*)
+                    START_VALUE="${1#*=}"
+                    START_PARAM="&start=$START_VALUE"
+                    shift
+                    ;;
+                --end=*)
+                    END_VALUE="${1#*=}"
+                    END_PARAM="&end=$END_VALUE"
+                    shift
+                    ;;
+                search)
+                    shift
+                    if [[ $# -gt 0 ]]; then
+                        SEARCH_PARAM="&search=${1// /%20}"
+                        shift
+                    else
+                        echo "❌ Error: search requires a query term"
+                        exit 1
+                    fi
+                    ;;
+                --help)
+                    echo "🎫 vcorp tickets - List and search work tickets"
+                    echo ""
+                    echo "Usage:"
+                    echo "   vcorp tickets                        Your assigned tickets (managers see all)"
+                    echo "   vcorp tickets --all                  Force showing all project tickets"
+                    echo "   vcorp tickets --status=open          Filter by status"
+                    echo "   vcorp tickets --priority=high        Filter by priority"
+                    echo "   vcorp tickets search \"bug\"           Search tickets"
+                    echo "   vcorp tickets --start=21 --end=40    Pagination support"
+                    echo ""
+                    echo "Status Options: open, in_progress, blocked, ready_for_review, reviewing, review_passed, needs_attention, resolved, closed"
+                    echo "Priority Options: low, medium, high, critical"
+                    echo ""
+                    echo "Examples:"
+                    echo "   vcorp tickets                        # Your assigned tickets"
+                    echo "   vcorp tickets --all                  # All project tickets"
+                    echo "   vcorp tickets --status=open          # Open tickets only"
+                    echo "   vcorp tickets search \"database\"      # Find database-related tickets"
+                    echo ""
+                    echo "💡 Tips:"
+                    echo "   • Role-based filtering: Individual contributors see assigned tickets, managers see all"
+                    echo "   • Use --all to override default filtering"
+                    echo "   • Status and priority filters work with both assigned and all tickets"
+                    exit 0
+                    ;;
+                *)
+                    echo "❌ Error: Unknown argument '$1'"
+                    echo "Use 'vcorp tickets --help' for usage information"
+                    exit 1
+                    ;;
+            esac
+        done
+        
+        # Build query parameters based on role filtering
+        QUERY_PARAMS="projectId=$PROJECT_ID&type=ticket"
+        
+        if [[ "$SHOW_ALL" == "false" ]]; then
+            QUERY_PARAMS="$QUERY_PARAMS&agentId=$AGENT_ID"
+        fi
+        
+        # Add other parameters
+        QUERY_PARAMS="$QUERY_PARAMS$SEARCH_PARAM$STATUS_PARAM$PRIORITY_PARAM$START_PARAM$END_PARAM"
+        
+        # Build API URL
+        API_URL="http://localhost:$VCORP_PORT/api/content?$QUERY_PARAMS"
+        
+        if [[ "$SHOW_ALL" == "true" ]]; then
+            echo "🎫 All Project Tickets:"
+        else
+            echo "🎫 Your Assigned Tickets:"
+        fi
+        echo ""
+        
+        # Make API call
+        RESPONSE=$(curl -s "$API_URL" 2>/dev/null)
+        
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Error: Could not connect to VCorp server at localhost:$VCORP_PORT"
+            exit 1
+        fi
+        
+        # Parse and display tickets
+        echo "$RESPONSE" | jq -r '
+            if . and (. | length > 0) then
+                .[] | 
+                "🎫 Ticket #\(.id)" +
+                "\n👤 Author: \(.authorAgentId)" +
+                "\n📅 Created: \(.createdAt | split("T")[0])" +
+                "\n📝 Title: \(.title)" +
+                (if .status then "\n📊 Status: \(.status)" else "" end) +
+                (if .priority then "\n⚡ Priority: \(.priority)" else "" end) +
+                (if .assignedToRoleType then "\n👥 Assigned to: \(.assignedToRoleType)" else "" end) +
+                (if .claimedByAgent then "\n🔒 Claimed by: \(.claimedByAgent)" else "" end) +
+                "\n💬 Description: \(.body | if length > 100 then .[0:100] + "..." else . end)" +
+                "\n🔧 Reply: vcorp reply \(.id)" +
+                "\n"
+            else
+                "📭 No tickets found."
+            end
+        '
+        ;;
         
     *)
         echo "Unknown command: $COMMAND"
         echo ""
         echo "Available commands:"
         echo "  help, permissions, inbox, phase, agents, channels, channel, thread"
-        echo "  reply, message, dm, director, it, document, ticket"
+        echo "  reply, message, dm, director, it, document, ticket, documents, tickets"
         exit 1
         ;;
 esac

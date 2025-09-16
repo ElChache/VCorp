@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { prompts, projects } from '$lib/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // GET /api/prompts?projectId=123 - Get all prompts for a project
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -56,7 +56,7 @@ export async function GET({ url }) {
 }
 
 // POST /api/prompts - Create a new prompt
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const { projectId, name, type, content, premade, orderIndex } = await request.json();
 
@@ -77,6 +77,9 @@ export async function POST({ request }) {
 			return json({ error: 'Project not found' }, { status: 404 });
 		}
 
+		// Generate slug from name
+		const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+		
 		// Create the prompt
 		const [newPrompt] = await db
 			.insert(prompts)
@@ -84,9 +87,11 @@ export async function POST({ request }) {
 				projectId: parseInt(projectId),
 				templateId: null, // Custom prompt, no template
 				name: name.trim(),
+				slug: slug,
 				type: type.trim(),
 				content: content.trim(),
 				premade: premade || null,
+				isGlobal: false,
 				orderIndex: orderIndex || 0,
 			})
 			.returning();

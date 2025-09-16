@@ -1,7 +1,6 @@
 export const leads_worktree_workflow = {
   name: "Lead Developer & Architect Workflow",
   type: "worktree_workflow",
-  slug: "leads-worktree-workflow",
   content: `# Lead Developer & Architect Workflow
 
 ## 🏗️ YOU ARE THE MAIN BRANCH GUARDIANS 🏗️

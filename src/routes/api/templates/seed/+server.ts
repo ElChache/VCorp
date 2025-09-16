@@ -97,7 +97,7 @@ export async function POST() {
 						type: promptTemplate.type,
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
-						isGlobal: promptTemplate.isGlobal || false,
+						isGlobal: (promptTemplate as any).isGlobal || false,
 					})
 					.where(eq(promptTemplates.id, existing.id))
 					.returning();
@@ -114,7 +114,7 @@ export async function POST() {
 						type: promptTemplate.type,
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
-						isGlobal: promptTemplate.isGlobal || false,
+						isGlobal: (promptTemplate as any).isGlobal || false,
 						version: 1
 					})
 					.returning();

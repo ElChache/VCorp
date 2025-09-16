@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles, channels } from '$lib/db/schema';
 import { eq, desc, isNotNull, or, and } from 'drizzle-orm';
 
 // GET /api/messages/all?projectId=<id> - Get all messages with reading assignment status
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		
@@ -71,7 +71,7 @@ export async function GET({ url }) {
 				// For each assignment, determine which agents should read it and who has read it
 				const assignmentsWithStatus = await Promise.all(
 					assignments.map(async (assignment) => {
-						let targetAgents = [];
+						let targetAgents: string[] = [];
 						
 						// Get agents that should read this assignment based on type
 						if (assignment.assignedToType === 'agent') {
@@ -146,7 +146,7 @@ export async function GET({ url }) {
 			}
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to load all messages:', error);
 		return json({ error: 'Failed to load all messages' }, { status: 500 });
 	}

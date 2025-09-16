@@ -1,12 +1,15 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/content/[id]/replies - Get all replies to a specific content item
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const contentId = parseInt(params.id);
+		if (!params.id) {
+			return json({ error: 'Content ID is required' }, { status: 400 });
+		}
+		const contentId = parseInt(params.id!);
 		
 		if (isNaN(contentId)) {
 			return json({ error: 'Invalid content ID' }, { status: 400 });
@@ -92,7 +95,7 @@ export async function GET({ params }) {
 			totalReplies: replies.length
 		});
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to fetch replies:', error);
 		return json({ error: 'Failed to fetch replies' }, { status: 500 });
 	}

@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestHandler } from '@sveltejs/kit';
 import { execSync } from 'child_process';
 import { db } from '$lib/db/index';
 import { agents } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
-export async function POST({ params, request }) {
+export const POST: RequestHandler = async ({ params, request }) => {
 	try {
 		const { agentId } = params;
 		const { prompt } = await request.json();
@@ -70,19 +70,19 @@ export async function POST({ params, request }) {
 				promptLength: prompt.length
 			});
 
-		} catch (tmuxError) {
-			console.log(`⚠️ Failed to send prompt to tmux session:`, tmuxError.message);
+		} catch (tmuxError: unknown) {
+			console.log(`⚠️ Failed to send prompt to tmux session:`, (tmuxError as Error).message);
 			return json({ 
 				error: 'Failed to send prompt to agent session',
-				details: tmuxError.message 
+				details: (tmuxError as Error).message 
 			}, { status: 500 });
 		}
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('❌ Failed to send prompt to agent:', error);
 		return json({ 
 			error: 'Failed to send prompt to agent',
-			details: error.message 
+			details: (error as Error).message 
 		}, { status: 500 });
 	}
 }

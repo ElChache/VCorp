@@ -1,7 +1,6 @@
 export const lead_developer_role = {
   name: "Lead Developer Role",
   type: "role_description",
-  slug: "lead-developer-role",
   content: `# Lead Developer
 
 ## Your Role
@@ -24,5 +23,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 Ship code that works reliably in production, not just in demos.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 2
 };

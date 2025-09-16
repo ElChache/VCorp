@@ -5,10 +5,8 @@
  */
 
 import { 
-	isUnreadByHumanDirector, 
-	hasUnreadAssignmentForHumanDirector, 
-	markMessageAsReadWithoutRefresh, 
-	markMessageAsRead 
+	markMessageAsRead,
+	markMessageAsReadWithoutRefresh
 } from './messageOperations';
 
 import { 
@@ -78,12 +76,12 @@ export class DataManager {
 		
 		// Count unread channel messages (type "message" or "reply")
 		this.channelUnreadCount = updates.channelMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		).length || 0;
 
 		// Count unread direct messages (type "message" or "reply")
 		const unreadDMs = updates.directMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		) || [];
 		this.dmUnreadCount = unreadDMs.length;
 		
@@ -94,7 +92,7 @@ export class DataManager {
 
 		// Count unread documents  
 		const unreadDocs = updates.documents?.filter((doc: any) => 
-			isUnreadByHumanDirector(doc)
+			isContentUnreadByHumanDirector(doc)
 		) || [];
 		const documentsUnreadCount = unreadDocs.length;
 		
@@ -119,11 +117,11 @@ export class DataManager {
 
 		// Add new unread messages to existing counts
 		const newChannelUnread = updates.channelMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		).length || 0;
 
 		const newDmUnread = updates.directMessages?.filter((msg: any) => 
-			(msg.type === 'message' || msg.type === 'reply') && isUnreadByHumanDirector(msg)
+			(msg.type === 'message' || msg.type === 'reply') && isContentUnreadByHumanDirector(msg)
 		).length || 0;
 
 		if (newChannelUnread > 0 || newDmUnread > 0) {
@@ -166,7 +164,7 @@ export class DataManager {
 				}
 				
 				// Automatically mark all messages as read (batch operation to avoid multiple refreshes)
-				const unreadMessages = messages.filter((message: any) => hasUnreadAssignmentForHumanDirector(message));
+				const unreadMessages = messages.filter((message: any) => isContentUnreadByHumanDirector(message));
 				if (unreadMessages.length > 0) {
 					console.log(`📖 Auto-marking ${unreadMessages.length} unread messages as read for channel ${channel.name}`);
 					
@@ -216,7 +214,7 @@ export class DataManager {
 								const messages = await msgResponse.json();
 								
 								// Calculate unread messages for human-director only
-								const unreadCount = messages.filter((message: any) => isUnreadByHumanDirector(message)).length;
+								const unreadCount = messages.filter((message: any) => isContentUnreadByHumanDirector(message)).length;
 								
 								return {
 									...channel,
@@ -396,7 +394,7 @@ export class DataManager {
 
 					// Count unread messages from this agent to human-director
 					const unreadCount = directMessages.filter((dm: any) => 
-						dm.authorAgentId === agentId && isUnreadByHumanDirector(dm)
+						dm.authorAgentId === agentId && isContentUnreadByHumanDirector(dm)
 					).length;
 
 					// Determine role type from agent ID
@@ -481,30 +479,8 @@ export class DataManager {
 				// Automatically mark all messages as read
 				let markedAnyAsRead = false;
 				for (const message of dmMessages) {
-					if (hasUnreadAssignmentForHumanDirector(message)) {
-						await markMessageAsRead(message, {
-							updateCounts: (channelDecrement, dmDecrement) => {
-								this.channelUnreadCount = Math.max(0, this.channelUnreadCount - channelDecrement);
-								this.dmUnreadCount = Math.max(0, this.dmUnreadCount - dmDecrement);
-								this.totalUnreadCount = this.channelUnreadCount + this.dmUnreadCount;
-								
-								// Notify callback of count changes
-								if (this.callbacks.updateUnreadCounts) {
-									this.callbacks.updateUnreadCounts({
-										total: this.totalUnreadCount,
-										channel: this.channelUnreadCount,
-										dm: this.dmUnreadCount
-									});
-								}
-							},
-							refreshDM: () => this.loadDMMessages(agentId),
-							refreshChannel: this.selectedChannel ? () => this.loadChannelMessages(this.selectedChannel) : undefined,
-							triggerPolling: () => {
-								if (typeof window !== 'undefined' && window.dispatchEvent) {
-									window.dispatchEvent(new CustomEvent('refreshPolling'));
-								}
-							}
-						});
+					if (isContentUnreadByHumanDirector(message)) {
+						await markMessageAsRead(message);
 						markedAnyAsRead = true;
 					}
 				}

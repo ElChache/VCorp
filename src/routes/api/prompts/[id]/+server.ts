@@ -1,12 +1,12 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { prompts, rolePromptCompositions } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 
 // GET /api/prompts/[id] - Get a specific prompt
-export async function GET({ params }) {
+export async function GET({ params }: RequestEvent) {
 	try {
-		const promptId = parseInt(params.id);
+		const promptId = parseInt(params.id!);
 		
 		if (isNaN(promptId)) {
 			return json({ error: 'Invalid prompt ID' }, { status: 400 });
@@ -30,9 +30,9 @@ export async function GET({ params }) {
 }
 
 // PUT /api/prompts/[id] - Update a prompt
-export async function PUT({ params, request }) {
+export async function PUT({ params, request }: RequestEvent) {
 	try {
-		const promptId = parseInt(params.id);
+		const promptId = parseInt(params.id!);
 		const { name, type, content, premade, orderIndex } = await request.json();
 		
 		if (isNaN(promptId)) {
@@ -77,9 +77,9 @@ export async function PUT({ params, request }) {
 }
 
 // DELETE /api/prompts/[id] - Delete a prompt
-export async function DELETE({ params }) {
+export async function DELETE({ params }: RequestEvent) {
 	try {
-		const promptId = parseInt(params.id);
+		const promptId = parseInt(params.id!);
 		
 		if (isNaN(promptId)) {
 			return json({ error: 'Invalid prompt ID' }, { status: 400 });

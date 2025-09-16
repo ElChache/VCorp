@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 // POST /api/replies - Reply to any content (enforces flat threading)
-export async function POST({ request }) {
+export async function POST({ request }: RequestEvent) {
 	try {
 		const {
 			projectId,
@@ -184,12 +184,25 @@ export async function POST({ request }) {
 			return target;
 		};
 
+		// Define types for assignments
+		interface Assignment {
+			type: string;
+			target: string;
+		}
+
+		interface AssignmentSummary {
+			type: string;
+			target: string;
+			assignmentId: number;
+			autoThread?: boolean;
+		}
+
 		// Create reading assignments
-		let assignmentSummary = [];
+		let assignmentSummary: AssignmentSummary[] = [];
 		
 		// 1. Manual assignments (if provided)
 		if (assignTo && assignTo.length > 0) {
-			const assignmentPromises = assignTo.map(async (assignment) => {
+			const assignmentPromises = assignTo.map(async (assignment: Assignment) => {
 				const resolvedTarget = await resolveAgentId(assignment.target, assignment.type);
 				
 				return await db
@@ -205,7 +218,7 @@ export async function POST({ request }) {
 			const createdAssignments = await Promise.all(assignmentPromises);
 
 			// Get summary of who was assigned
-			assignmentSummary = assignTo.map((assignment, index) => ({
+			assignmentSummary = assignTo.map((assignment: Assignment, index: number) => ({
 				type: assignment.type,
 				target: assignment.target,
 				assignmentId: createdAssignments[index][0].id
@@ -226,7 +239,7 @@ export async function POST({ request }) {
 				.limit(1);
 
 			if (parentContent) {
-				const threadParticipants = new Set();
+				const threadParticipants = new Set<string>();
 
 				// Add original content author (if it's an agent, not the current replier)
 				if (parentContent.authorAgentId && 
@@ -288,17 +301,20 @@ export async function POST({ request }) {
 			actualParentId: actualParentContentId
 		}, { status: 201 });
 
-	} catch (error) {
+	} catch (error: unknown) {
 		console.error('Failed to create reply:', error);
 		
+		// Type guard for database errors
+		const dbError = error as { code?: string; message?: string };
+		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if (dbError.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || dbError.code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: One or more referenced entities may not exist or may be invalid'
 			}, { status: 400 });
 		}
 		
-		if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505') {
+		if (dbError.code === 'SQLITE_CONSTRAINT_UNIQUE' || dbError.code === '23505') {
 			return json({ 
 				error: 'Constraint violation: This reply conflicts with existing data'
 			}, { status: 409 });
@@ -306,7 +322,7 @@ export async function POST({ request }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while creating reply',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? dbError.message : undefined
 		}, { status: 500 });
 	}
 }

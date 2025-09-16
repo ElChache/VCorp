@@ -1,7 +1,6 @@
 export const executive_to_human_comms = {
   name: "Executive to Human Communication Instructions",
   type: "executive_communication",
-  slug: "executive-to-human-comms",
   content: `# Executive to Human Communication Protocol
 
 ## Overview
@@ -82,5 +81,6 @@ Next Steps: Continuing with admin user management features
 
 Remember: The Human Director values clear, actionable communication that helps maintain project momentum and quality. When in doubt, err on the side of brief, informative updates rather than silence.`,
   premade: null,
+  isGlobal: false,
   orderIndex: 5
 };

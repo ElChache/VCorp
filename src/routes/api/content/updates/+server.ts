@@ -1,10 +1,10 @@
-import { json } from '@sveltejs/kit';
+import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, readingAssignmentReads, agents, roles, channels, squadRoleAssignments } from '$lib/db/schema';
 import { eq, sql, or, and, gte } from 'drizzle-orm';
 
 // GET /api/content/updates - Get incremental content updates since a timestamp
-export async function GET({ url }) {
+export async function GET({ url }: RequestEvent) {
 	try {
 		const projectId = url.searchParams.get('projectId');
 		const since = url.searchParams.get('since'); // ISO timestamp
@@ -236,11 +236,11 @@ export async function GET({ url }) {
 			since: since || null
 		});
 
-	} catch (error: any) {
+	} catch (error: unknown) {
 		console.error('Failed to get content updates:', error);
 		
 		// Provide more specific error messages based on the error type
-		if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || error.code === '23503') {
+		if ((error as Error & { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || (error as Error & { code?: string }).code === '23503') {
 			return json({ 
 				error: 'Database constraint violation: The project may not exist or may be invalid. Please verify the project ID is correct.'
 			}, { status: 404 });
@@ -248,7 +248,7 @@ export async function GET({ url }) {
 		
 		return json({ 
 			error: 'Internal server error occurred while fetching content updates. Please try again or contact support if the problem persists.',
-			details: process.env.NODE_ENV === 'development' ? error.message : undefined
+			details: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined
 		}, { status: 500 });
 	}
 }
