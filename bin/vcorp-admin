@@ -81,6 +81,11 @@ show_global_help() {
     echo "   channels     List accessible channels"
     echo "   channel      View messages in specific channel"
     echo "   thread       View full conversation context"
+    echo "   documents    List and search project documents"
+    echo "   tickets      List and search work tickets"
+    echo ""
+    echo "🗑️  Management Commands:"
+    echo "   remove       Remove/delete resources from the system"
     echo ""
     echo "💡 For detailed help on any command: vcorp COMMAND --help"
     echo "   Example: vcorp message --help"
@@ -437,6 +442,9 @@ show_help_commands() {
     echo "   documents    List and search project documents"
     echo "   tickets      List and search work tickets"
     echo ""
+    echo "🗑️  Management Commands:"
+    echo "   remove       Remove/delete resources from the system"
+    echo ""
     echo "💡 For detailed help on any command: vcorp COMMAND --help"
     echo "   Example: vcorp message --help"
     echo ""
@@ -445,6 +453,51 @@ show_help_commands() {
     echo "   2. vcorp phase     # See your current work"
     echo "   3. vcorp agents    # Meet your team"
     echo "   4. vcorp channels  # Find communication channels"
+}
+
+show_remove_help() {
+    echo "🗑️  vcorp remove - Remove/delete resources from the system"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp remove RESOURCE_TYPE ID [--hard]"
+    echo "   vcorp remove --resource-type=TYPE --resource-id=ID [--hard]"
+    echo ""
+    echo "Resource Types:"
+    echo "   document             Project documents"
+    echo "   ticket               Work tickets and tasks"
+    echo "   message              Chat messages and replies"
+    echo "   phase                Development phases"
+    echo "   agent                AI agents (terminates session)"
+    echo "   channel              Communication channels"
+    echo "   reading-assignment   Reading assignment records"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp remove document 123               # Soft delete document #123"
+    echo "   vcorp remove ticket 456 --hard         # Permanently delete ticket #456"
+    echo "   vcorp remove message 789               # Soft delete message #789"
+    echo "   vcorp remove phase 101 --hard          # Permanently delete phase #101"
+    echo "   vcorp remove agent test_agent_001      # Terminate agent and remove"
+    echo "   vcorp remove channel 5                 # Delete communication channel #5"
+    echo "   vcorp remove reading-assignment 42     # Remove reading assignment #42"
+    echo ""
+    echo "Delete Types:"
+    echo "   Default (soft): Marks resource as deleted but keeps in database"
+    echo "   --hard:         Permanently removes resource from database"
+    echo ""
+    echo "⚠️  Permissions:"
+    echo "   • Documents: Author + leadership roles can delete"
+    echo "   • Tickets: Author + product manager can delete"
+    echo "   • Messages: Author + leadership + human director can delete"
+    echo "   • Phases: Author + leadership + human director can delete"
+    echo "   • Agents: Leadership roles can terminate agents"
+    echo "   • Channels: Leadership roles can delete channels"
+    echo "   • Reading Assignments: Leadership + human director can delete"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use soft delete (default) for audit trails"
+    echo "   • Use --hard delete only when permanent removal is needed"
+    echo "   • Check permissions before attempting deletion"
+    echo "   • Some deletions cascade (e.g., deleting phases removes assignments)"
 }
 
 show_document_help() {
@@ -1781,13 +1834,105 @@ case "$COMMAND" in
             end
         '
         ;;
+
+    remove)
+        # Parse arguments: vcorp remove RESOURCE_TYPE ID [--hard]
+        parse_args "resource-type" "resource-id" "hard"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_remove_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_resource_type" ]]; then
+            echo "❌ Error: Resource type is required"
+            echo ""
+            show_remove_help
+            exit 1
+        fi
+        
+        if [[ -z "$ARG_resource_id" ]]; then
+            echo "❌ Error: Resource ID is required"
+            echo ""
+            show_remove_help
+            exit 1
+        fi
+        
+        # Validate resource type
+        case "$ARG_resource_type" in
+            document|ticket|message|phase|agent|channel|reading-assignment)
+                ;;
+            *)
+                echo "❌ Error: Invalid resource type '$ARG_resource_type'"
+                echo "Valid types: document, ticket, message, phase, agent, channel, reading-assignment"
+                exit 1
+                ;;
+        esac
+        
+        echo "🗑️  Removing $ARG_resource_type #$ARG_resource_id..."
+        
+        # Build URL based on resource type
+        case "$ARG_resource_type" in
+            document)
+                API_URL="http://localhost:$VCORP_PORT/api/documents/$ARG_resource_id"
+                ;;
+            ticket)
+                API_URL="http://localhost:$VCORP_PORT/api/tickets/$ARG_resource_id"
+                ;;
+            message)
+                API_URL="http://localhost:$VCORP_PORT/api/messages/$ARG_resource_id"
+                ;;
+            phase)
+                API_URL="http://localhost:$VCORP_PORT/api/phases?id=$ARG_resource_id"
+                ;;
+            agent)
+                API_URL="http://localhost:$VCORP_PORT/api/agents/$ARG_resource_id"
+                ;;
+            channel)
+                API_URL="http://localhost:$VCORP_PORT/api/channels/$ARG_resource_id"
+                ;;
+            reading-assignment)
+                API_URL="http://localhost:$VCORP_PORT/api/reading-assignments/$ARG_resource_id"
+                ;;
+        esac
+        
+        # Add hard delete parameter if specified
+        if [[ "$ARG_hard" == "true" ]]; then
+            if [[ "$ARG_resource_type" == "phase" ]]; then
+                API_URL="$API_URL&hard=true"
+            else
+                API_URL="$API_URL?hard=true"
+            fi
+        fi
+        
+        # Make delete request with agent header
+        RESPONSE=$(curl -s -X DELETE "$API_URL" \
+            -H "X-Agent-ID: $AGENT_ID" \
+            2>/dev/null)
+        
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Error: Could not connect to VCorp server at localhost:$VCORP_PORT"
+            exit 1
+        fi
+        
+        # Parse response
+        if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
+            MESSAGE=$(echo "$RESPONSE" | jq -r '.message // "Resource removed successfully"')
+            echo "✅ $MESSAGE"
+        else
+            ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error occurred"')
+            echo "❌ Error: $ERROR"
+            exit 1
+        fi
+        ;;
         
     *)
         echo "Unknown command: $COMMAND"
         echo ""
         echo "Available commands:"
         echo "  help, permissions, inbox, phase, agents, channels, channel, thread"
-        echo "  reply, message, dm, director, it, document, ticket, documents, tickets"
+        echo "  reply, message, dm, director, it, document, ticket, documents, tickets, remove"
         exit 1
         ;;
 esac

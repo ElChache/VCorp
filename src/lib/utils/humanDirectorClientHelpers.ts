@@ -36,14 +36,21 @@ export function getHumanDirectorAgentId(): string | null {
 
 /**
  * Check if an assignment is for the human director
- * Only checks for actual agent IDs with isHumanDirector === true
+ * Checks for agent assignments AND role assignments that human director can see
  */
 export function isAssignmentForHumanDirector(assignment: any): boolean {
 	if (!assignment) return false;
 	
-	// Only check for agent-based assignment with actual human director agent
+	// Check for direct agent-based assignment
 	if (assignment.assignedToType === 'agent') {
 		return isHumanDirectorAgent(assignment.assignedTo);
+	}
+	
+	// Check for role-based assignment that human director can see
+	// Human director can see assignments for director-assistant, system-architect, etc.
+	if (assignment.assignedToType === 'role') {
+		const humanDirectorRoles = ['director-assistant', 'system-architect', 'it-administrator', 'human-director'];
+		return humanDirectorRoles.includes(assignment.assignedTo);
 	}
 	
 	return false;
@@ -69,7 +76,7 @@ export function isContentReadByHumanDirector(content: any): boolean {
 	return content.readingAssignments.some((assignment: any) => {
 		if (!isAssignmentForHumanDirector(assignment)) return false;
 		
-		const reads = assignment.reads || [];
+		const reads = assignment.readBy || [];
 		return reads.some((read: any) => isReadByHumanDirector(read));
 	});
 }
@@ -81,12 +88,33 @@ export function isContentReadByHumanDirector(content: any): boolean {
 export function isContentUnreadByHumanDirector(content: any): boolean {
 	if (!content?.readingAssignments) return false;
 	
+	// Debug logging for message 72
+	if (content.id === 72) {
+		console.log('🔍 isContentUnreadByHumanDirector for message 72:', {
+			contentId: content.id,
+			readingAssignments: content.readingAssignments,
+			humanDirectorAgentId: getHumanDirectorAgentId()
+		});
+	}
+	
 	// Check if there's any assignment for human director that hasn't been read
 	return content.readingAssignments.some((assignment: any) => {
 		if (!isAssignmentForHumanDirector(assignment)) return false;
 		
-		const reads = assignment.reads || [];
-		return !reads.some((read: any) => isReadByHumanDirector(read));
+		const reads = assignment.readBy || [];
+		const isUnread = !reads.some((read: any) => isReadByHumanDirector(read));
+		
+		// Debug logging for message 72
+		if (content.id === 72) {
+			console.log('🔍 Assignment check for message 72:', {
+				assignment,
+				reads,
+				isUnread,
+				humanDirectorAgentId: getHumanDirectorAgentId()
+			});
+		}
+		
+		return isUnread;
 	});
 }
 

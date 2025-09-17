@@ -8,8 +8,9 @@
 	import SquadsSection from '$lib/components/SquadsSection.svelte';
 		import ScheduledRemindersSection from '$lib/components/ScheduledRemindersSection.svelte';
 	import CommunicationsSection from '$lib/components/CommunicationsSection.svelte';
-	import { contentPollingStore } from '$lib/services/ContentPollingService';
+	import { contentPollingStore, contentPollingService } from '$lib/services/ContentPollingService';
 	import { isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
+	import { contentActions, totalUnreadCount } from '$lib/stores/contentStore';
 	
 	let projects: any[] = [];
 	let selectedProject: any = null;
@@ -41,9 +42,8 @@
 	// Monitoring variables
 	let monitoringStatus: any = { isRunning: false, stats: null };
 
-	// Communications Center unread count
-	$: pollingState = $contentPollingStore;
-	$: totalUnreadCount = calculateTotalUnreadCount(pollingState.updates);
+	// Communications Center unread count - use same source as messages for consistency
+	$: commsCenterUnreadCount = $totalUnreadCount;
 
 	function calculateTotalUnreadCount(updates: any): number {
 		if (!updates) return 0;
@@ -64,6 +64,7 @@
 	onMount(async () => {
 		await loadProjects();
 		
+		
 		// Add global debug functions for testing
 		(window as any).debugChannels = () => {
 			console.log('Current channels:', channels);
@@ -82,6 +83,8 @@
 				projects = await response.json();
 				if (projects.length > 0 && !selectedProject) {
 					selectedProject = projects[0];
+					// Start polling for the initial project
+					await onProjectChange();
 				}
 			}
 		} catch (error) {
@@ -102,6 +105,17 @@
 
 	async function onProjectChange() {
 		currentSection = 'overview';
+		
+		// Start polling for the selected project to get unread counts
+		if (selectedProject) {
+			console.log(`🔄 Main page: Starting polling for project ${selectedProject.id}`);
+			try {
+				await contentActions.loadContent(selectedProject.id);
+				await contentPollingService.startPolling(selectedProject.id);
+			} catch (error) {
+				console.error('Failed to start polling on project change:', error);
+			}
+		}
 	}
 
 
@@ -123,6 +137,9 @@
 				selectedProject = project;
 				showCreateDialog = false;
 				newProject = { name: '', description: '', path: '' };
+				
+				// Trigger project change to reinitialize polling
+				await onProjectChange();
 			}
 		} catch (error) {
 			console.error('Failed to create project:', error);
@@ -337,8 +354,8 @@
 				>
 					<span class="btn-content">
 						📬 Communications Center
-						{#if totalUnreadCount > 0}
-							<span class="unread-badge">{totalUnreadCount}</span>
+						{#if commsCenterUnreadCount > 0}
+							<span class="unread-badge">{commsCenterUnreadCount}</span>
 						{/if}
 					</span>
 				</button>

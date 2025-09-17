@@ -39,7 +39,7 @@
 	import PhasesSection from './PhasesSection.svelte';
 	import DMOversightSection from './DMOversightSection.svelte';
 	import { toggleReadStatusTooltip } from '$lib/utils/tooltipManager';
-	import { getHumanDirectorAgentId, isMessageFromHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
+	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
 	import { 
 		isMessageFullyRead, 
 		isMessagePartiallyRead, 
@@ -88,33 +88,36 @@
 	$: selectedChannelMessagesStore = selectedChannel ? messagesForChannel(selectedChannel.id) : null;
 	$: storeChannelMessages = selectedChannelMessagesStore ? $selectedChannelMessagesStore : [];
 	
-	// Load paginated channel messages when needed
+	// Always use polling data for consistency (like DMs)
 	let paginatedChannelMessages: any[] = [];
 	let finalChannelMessages: any[] = [];
 	let channelMessagesLoaded = false;
-	$: finalChannelMessages = channelMessagesLoaded ? paginatedChannelMessages : storeChannelMessages;
+	$: finalChannelMessages = storeChannelMessages; // Always use polling data
 	
-	// Enhance channels with message counts - simplified
+	// Enhance channels with message counts and unread counts
 	$: allChannelMessages = $channelMessages;
 	$: enhancedChannels = storeChannels.map(channel => {
 		const channelMessages = allChannelMessages.filter(msg => msg.channelId === channel.id);
 		const messageCount = channelMessages.length;
 		
-		// Individual channel unread count will be handled by the ChannelList component if needed
+		// Calculate unread count for this channel (like DM agents)
+		const unreadCount = channelMessages.filter(msg => isContentUnreadByHumanDirector(msg)).length;
+		
 		return {
 			...channel,
-			messageCount
+			messageCount,
+			unreadCount
 		};
 	});
 	// Create reactive DM messages store for selected agent
 	$: dmMessagesStore = selectedDMAgent ? dmConversationWith(selectedDMAgent.id) : null;
 	$: storeDMMessages = dmMessagesStore ? $dmMessagesStore : [];
 	
-	// Load paginated DM messages when needed
+	// Always use polling data for consistency
 	let paginatedDMMessages: any[] = [];
 	let finalDMMessages: any[] = [];
 	let dmMessagesLoaded = false;
-	$: finalDMMessages = dmMessagesLoaded ? paginatedDMMessages : storeDMMessages;
+	$: finalDMMessages = storeDMMessages; // Always use polling data
 	$: storeIsLoading = $isLoading;
 	$: storeError = $error;
 	
@@ -130,6 +133,9 @@
 				dm.authorAgentId === agent.id
 			);
 			
+			// Count unread messages from this agent
+			const unreadCount = agentDMs.filter(dm => isContentUnreadByHumanDirector(dm)).length;
+			
 			// Find most recent message timestamp for sorting
 			const lastMessage = agentDMs.length > 0 ? 
 				agentDMs.reduce((latest, dm) => 
@@ -139,7 +145,8 @@
 			return {
 				...agent,
 				lastMessageAt: lastMessage?.createdAt || null,
-				lastMessage: lastMessage?.body || null
+				lastMessage: lastMessage?.body || null,
+				unreadCount
 			};
 		});
 		
@@ -166,7 +173,7 @@
 	$: pollingState = $contentPollingStore;
 
 	// Use centralized unread counts from store
-	$: storeChanelUnreadCount = $channelUnreadCount;
+	$: storeChannelUnreadCount = $channelUnreadCount;
 	$: storeDmUnreadCount = $dmUnreadCount;
 	$: storeDocumentsUnreadCount = $documentsUnreadCount;
 	$: storeTicketsUnreadCount = $ticketsUnreadCount;
@@ -243,7 +250,8 @@
 		channelMessagesPagination = null;
 		showAllChannelMessages = false;
 		channelMessagesLoaded = false;
-		loadChannelMessagesDefault();
+		// DON'T load from API - use polling data only
+		// loadChannelMessagesDefault();
 		// Channel messages are available via reactive store
 	}
 
@@ -276,7 +284,8 @@
 		dmMessagesPagination = null;
 		showAllDMMessages = false;
 		dmMessagesLoaded = false;
-		loadDMMessagesDefault();
+		// DON'T load from API - use polling data only
+		// loadDMMessagesDefault();
 		// DM messages are available via reactive store dmConversationWith
 	}
 
@@ -525,9 +534,14 @@
 
 	// Load data when project changes
 	$: if (selectedProject) {
+		console.log(`🔄 Project changed to:`, selectedProject);
+		console.log(`🔄 Starting polling for project ID: ${selectedProject.id}`);
+		// Stop any existing polling first
+		stopPolling();
 		// Set project context in content store and load content
 		contentActions.loadContent(selectedProject.id);
-		startPolling(); // Start real-time polling for the new project
+		// Start real-time polling for the new project
+		contentPollingService.startPolling(selectedProject.id);
 	}
 
 	// Lifecycle management
@@ -566,7 +580,7 @@
 
 	<CommunicationsNavigation 
 		{commsViewMode}
-		channelUnreadCount={storeChanelUnreadCount}
+		channelUnreadCount={storeChannelUnreadCount}
 		dmUnreadCount={storeDmUnreadCount}
 		documentsUnreadCount={storeDocumentsUnreadCount}
 		ticketsUnreadCount={storeTicketsUnreadCount}

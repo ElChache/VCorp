@@ -75,7 +75,7 @@ class ContentPollingService {
 		}
 
 		this.projectId = projectId;
-		this.lastTimestamp = new Date().toISOString(); // Start from now
+		this.lastTimestamp = null; // Start from beginning to get all unread messages
 
 		console.log(`🔄 Starting content polling for project ${projectId}`);
 

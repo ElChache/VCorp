@@ -392,37 +392,37 @@ export const contentActions = {
 				return state;
 			}
 
-			console.log('📝 Original content:', content);
-
-			const updatedContent = { ...content };
-			if (updatedContent.readingAssignments) {
-				updatedContent.readingAssignments = updatedContent.readingAssignments.map(assignment => {
+			// Create completely new content object to ensure Svelte detects the change
+			const updatedContent = {
+				...content,
+				readingAssignments: content.readingAssignments ? content.readingAssignments.map(assignment => {
 					if (assignment.id === assignmentId) {
-						const updatedAssignment = {
+						return {
 							...assignment,
-							reads: [
-								...(assignment.reads || []),
+							readBy: [
+								...(assignment.readBy || []),
 								{ agentId: agentId, readAt: new Date().toISOString() }
 							]
 						};
-						console.log('✅ Updated assignment:', updatedAssignment);
-						return updatedAssignment;
 					}
 					return assignment;
-				});
-			}
+				}) : []
+			};
 
-			const newState = {
+			// Create completely new state - rebuild everything to ensure reactivity
+			return {
 				...state,
 				contentById: {
 					...state.contentById,
 					[contentId]: updatedContent
 				}
 			};
-
-			console.log('💾 New state after optimistic update:', newState);
-			return newState;
 		});
+		
+		// Force a second update to trigger reactivity
+		setTimeout(() => {
+			contentStore.update(state => ({ ...state }));
+		}, 0);
 	},
 
 	// DM Oversight data loading
@@ -536,7 +536,10 @@ export const unreadPhases = derived(phases, $phases =>
 
 // Centralized badge counts
 export const channelUnreadCount = derived(unreadChannelMessages, $messages => $messages.length);
-export const dmUnreadCount = derived(unreadDirectMessages, $messages => $messages.length);
+export const dmUnreadCount = derived(unreadDirectMessages, $messages => {
+	console.log('📧 dmUnreadCount recalculated:', $messages.length, 'unread DMs');
+	return $messages.length;
+});
 export const documentsUnreadCount = derived(unreadDocuments, $docs => $docs.length);
 export const ticketsUnreadCount = derived(unreadTickets, $tickets => $tickets.length);
 export const phasesUnreadCount = derived(unreadPhases, $phases => $phases.length);
@@ -544,7 +547,11 @@ export const phasesUnreadCount = derived(unreadPhases, $phases => $phases.length
 // Total unread count (sum of all types)
 export const totalUnreadCount = derived(
 	[channelUnreadCount, dmUnreadCount, documentsUnreadCount, ticketsUnreadCount, phasesUnreadCount],
-	([$channels, $dms, $docs, $tickets, $phases]) => $channels + $dms + $docs + $tickets + $phases
+	([$channels, $dms, $docs, $tickets, $phases]) => {
+		const total = $channels + $dms + $docs + $tickets + $phases;
+		console.log('📊 totalUnreadCount recalculated:', { $channels, $dms, $docs, $tickets, $phases, total });
+		return total;
+	}
 );
 
 // Legacy assignments (keeping for compatibility but using simpler logic)

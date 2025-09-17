@@ -22,7 +22,7 @@ export function isMessageFullyRead(message: any): boolean {
 	
 	// Simple logic: all assignments have reads
 	return message.readingAssignments.every((assignment: any) => {
-		return assignment.reads && assignment.reads.length > 0;
+		return assignment.readBy && assignment.readBy.length > 0;
 	});
 }
 
@@ -34,10 +34,10 @@ export function isMessagePartiallyRead(message: any): boolean {
 	
 	// Simple logic: some assignments have reads, some don't
 	const hasReadAssignments = assignments.some((assignment: any) => 
-		assignment.reads && assignment.reads.length > 0
+		assignment.readBy && assignment.readBy.length > 0
 	);
 	const hasUnreadAssignments = assignments.some((assignment: any) => 
-		!assignment.reads || assignment.reads.length === 0
+		!assignment.readBy || assignment.readBy.length === 0
 	);
 	
 	return hasReadAssignments && hasUnreadAssignments;
@@ -59,7 +59,7 @@ export async function markMessageAsReadWithoutRefresh(message: any): Promise<voi
 		
 		// Mark each unread assignment as read
 		for (const assignment of humanDirectorAssignments) {
-			const hasRead = assignment.reads?.some((read: any) => 
+			const hasRead = assignment.readBy?.some((read: any) => 
 				isReadByHumanDirector(read)
 			) || false;
 			
@@ -80,30 +80,40 @@ export async function markMessageAsReadWithoutRefresh(message: any): Promise<voi
 }
 
 // Mark message as read - simplified, relies on store reactivity
-export async function markMessageAsRead(message: any): Promise<void> {
-	if (!message.readingAssignments) return;
+// Mark all unread messages as read (bulk operation)
+export async function markAllMessagesAsRead(messages: any[]): Promise<void> {
+	console.log('🔄 Marking all messages as read:', messages.length, 'messages');
 	
-	try {
-		const humanDirectorId = getHumanDirectorAgentId();
-		if (!humanDirectorId) {
-			console.warn('No human director found in store');
-			return;
-		}
+	const unreadMessages = messages.filter(msg => isUnreadByHumanDirector(msg));
+	console.log('📝 Found', unreadMessages.length, 'unread messages to mark');
+	
+	if (unreadMessages.length === 0) {
+		console.log('✅ No unread messages to mark');
+		return;
+	}
+	
+	const humanDirectorId = getHumanDirectorAgentId();
+	if (!humanDirectorId) {
+		console.warn('❌ No human director found in store');
+		return;
+	}
+	
+	// Process all unread messages
+	for (const message of unreadMessages) {
+		if (!message.readingAssignments) continue;
 		
-		// Find assignments for human director
 		const humanDirectorAssignments = getHumanDirectorAssignments(message);
 		
-		// Mark each unread assignment as read
 		for (const assignment of humanDirectorAssignments) {
-			const hasRead = assignment.reads?.some((read: any) => 
+			const hasRead = assignment.readBy?.some((read: any) => 
 				isReadByHumanDirector(read)
 			) || false;
 			
 			if (!hasRead) {
-				// Optimistically update the store immediately
+				// Optimistic update first
 				contentActions.optimisticallyMarkAsRead(message.id, assignment.id, humanDirectorId);
 				
-				// Make API call (fire and forget)
+				// API call in background (don't await - let them happen in parallel)
 				fetch('/api/reading-assignments/mark-read', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -112,8 +122,70 @@ export async function markMessageAsRead(message: any): Promise<void> {
 						agentId: humanDirectorId
 					})
 				}).catch(error => {
-					console.error('Failed to mark message as read on server:', error);
+					console.error('❌ Failed to mark assignment as read:', assignment.id, error);
+					// TODO: Revert optimistic update on failure
 				});
+			}
+		}
+	}
+	
+	console.log('✅ Bulk mark as read completed (optimistically)');
+}
+
+export async function markMessageAsRead(message: any): Promise<void> {
+	if (!message.readingAssignments) {
+		console.log('❌ No reading assignments found for message:', message.id);
+		return;
+	}
+	
+	try {
+		const humanDirectorId = getHumanDirectorAgentId();
+		console.log('🔍 Mark as read debug:', {
+			messageId: message.id,
+			humanDirectorId,
+			readingAssignments: message.readingAssignments,
+			hasAssignments: message.readingAssignments?.length > 0
+		});
+		
+		if (!humanDirectorId) {
+			console.warn('❌ No human director found in store');
+			return;
+		}
+		
+		// Find assignments for human director
+		const humanDirectorAssignments = getHumanDirectorAssignments(message);
+		
+		// Mark each unread assignment as read
+		for (const assignment of humanDirectorAssignments) {
+			const hasRead = assignment.readBy?.some((read: any) => 
+				isReadByHumanDirector(read)
+			) || false;
+			
+			if (!hasRead) {
+				// Optimistically update the store immediately
+				contentActions.optimisticallyMarkAsRead(message.id, assignment.id, humanDirectorId);
+				
+				// Make API call with proper error handling
+				const response = await fetch('/api/reading-assignments/mark-read', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						assignmentId: assignment.id,
+						agentId: humanDirectorId
+					})
+				});
+				
+				if (!response.ok) {
+					const errorText = await response.text();
+					console.error('❌ API call failed:', response.status, errorText);
+					throw new Error(`API call failed: ${response.status} - ${errorText}`);
+				} else {
+					console.log('✅ Successfully marked as read on server');
+					// Trigger a manual refresh of polling to get updated data
+					if (typeof window !== 'undefined') {
+						window.dispatchEvent(new CustomEvent('refreshPolling'));
+					}
+				}
 			}
 		}
 		

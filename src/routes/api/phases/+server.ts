@@ -349,3 +349,112 @@ export async function POST({ request }: RequestEvent) {
 		}, { status: 500 });
 	}
 }
+
+// DELETE /api/phases - Delete a phase (by ID via query param)
+export async function DELETE({ url, request }: RequestEvent) {
+	try {
+		const phaseId = url.searchParams.get('id');
+		
+		if (!phaseId) {
+			return json({ 
+				error: 'Missing required parameter: id must be provided'
+			}, { status: 400 });
+		}
+
+		const parsedPhaseId = parseInt(phaseId);
+		if (isNaN(parsedPhaseId) || parsedPhaseId <= 0) {
+			return json({ 
+				error: 'Invalid phase ID: must be a positive integer'
+			}, { status: 400 });
+		}
+
+		// Get agent from header for permission check
+		const agentId = request.headers.get('x-agent-id');
+		if (!agentId) {
+			return json({ error: 'Missing X-Agent-ID header' }, { status: 400 });
+		}
+
+		// Get agent information
+		const [agent] = await db
+			.select()
+			.from(agents)
+			.where(eq(agents.id, agentId))
+			.limit(1);
+
+		if (!agent) {
+			return json({ error: 'Agent not found' }, { status: 404 });
+		}
+
+		// Get the phase
+		const [phase] = await db
+			.select()
+			.from(content)
+			.where(and(
+				eq(content.id, parsedPhaseId),
+				eq(content.type, 'phase')
+			))
+			.limit(1);
+
+		if (!phase) {
+			return json({ error: 'Phase not found' }, { status: 404 });
+		}
+
+		// Check permissions - only phase author, leadership roles, or human director can delete
+		const canDelete = 
+			phase.authorAgentId === agent.id ||
+			['product-manager', 'lead-developer', 'system-architect'].includes(agent.roleType) ||
+			agent.isHumanDirector;
+
+		if (!canDelete) {
+			return json({ 
+				error: 'Permission denied - only phase author, leadership roles, and human director can delete phases' 
+			}, { status: 403 });
+		}
+
+		// Check for hard delete flag
+		const hardDelete = url.searchParams.get('hard') === 'true';
+
+		if (hardDelete) {
+			// Hard delete - remove related reading assignments first
+			await db
+				.delete(readingAssignmentReads)
+				.where(sql`reading_assignment_id IN (SELECT id FROM reading_assignments WHERE content_id = ${parsedPhaseId})`);
+			
+			await db
+				.delete(readingAssignments)
+				.where(eq(readingAssignments.contentId, parsedPhaseId));
+
+			// Then delete the phase
+			await db
+				.delete(content)
+				.where(eq(content.id, parsedPhaseId));
+
+			return json({
+				success: true,
+				message: 'Phase permanently deleted'
+			});
+		} else {
+			// Soft delete - mark as cancelled and update status
+			await db
+				.update(content)
+				.set({
+					title: `[DELETED] ${phase.title}`,
+					body: '[This phase has been deleted]',
+					phaseStatus: 'cancelled',
+					updatedAt: new Date()
+				})
+				.where(eq(content.id, parsedPhaseId));
+
+			return json({
+				success: true,
+				message: 'Phase deleted (soft delete - status set to cancelled)'
+			});
+		}
+
+	} catch (error: unknown) {
+		console.error('Failed to delete phase:', error);
+		return json({ 
+			error: 'Internal server error occurred while deleting phase'
+		}, { status: 500 });
+	}
+}

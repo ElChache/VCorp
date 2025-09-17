@@ -1,0 +1,6 @@
+#!/bin/bash
+# VCorp agent wrapper - auto-generated for be_chen_9540
+# Available prompt slugs: 
+AVAILABLE_PROMPTS=""
+export AVAILABLE_PROMPTS
+exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=3 --agent=be_chen_9540 --role=backend-developer "$@"

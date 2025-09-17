@@ -1,0 +1,6 @@
+#!/bin/bash
+# VCorp agent wrapper - auto-generated for it_leticia_3740
+# Available prompt slugs: 
+AVAILABLE_PROMPTS=""
+export AVAILABLE_PROMPTS
+exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=15 --agent=it_leticia_3740 --role=it-administrator "$@"

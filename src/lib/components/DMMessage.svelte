@@ -18,9 +18,14 @@
 	$: isOutgoingMessage = isMessageFromHumanDirector(message);
 	$: isUnread = isUnreadByHumanDirector(message);
 	
-	// Debug logging for message 8
-	$: if (message.id === 8) {
-		console.log('Message 8 debug:', {
+	// Force reactivity - ensure UI updates when message prop changes
+	$: if (message.id === 72 || message.id === 73) {
+		console.log(`🔄 DMMessage reactivity for ${message.id}:`, { isUnread, readingAssignments: message.readingAssignments });
+	}
+	
+	// Debug logging for message 72 (the one we just sent)
+	$: if (message.id === 72) {
+		console.log('Message 72 debug:', {
 			id: message.id,
 			authorAgentId: message.authorAgentId,
 			isOutgoingMessage,
@@ -38,9 +43,10 @@
 	}
 
 	async function handleMarkAsRead() {
+		console.log('🔄 Marking message as read:', message.id);
 		await markMessageAsRead(message);
-		// The markMessageAsRead function now optimistically updates the store
-		// UI will update immediately due to reactive stores
+		console.log('✅ Mark as read completed for message:', message.id);
+		// Force UI update by triggering reactivity
 	}
 </script>
 

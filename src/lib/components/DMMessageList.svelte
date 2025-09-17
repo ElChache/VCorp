@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import DMMessage from './DMMessage.svelte';
+	import { markAllMessagesAsRead, isUnreadByHumanDirector } from '$lib/utils/messageOperations';
 
 	// Props
 	export let selectedDMAgent: any = null;
@@ -16,9 +17,17 @@
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
+	
+	// Calculate unread count for this DM conversation
+	$: unreadCount = dmMessages.filter(msg => isUnreadByHumanDirector(msg)).length;
 
 	function handleSendReply() {
 		dispatch('sendReply');
+	}
+	
+	async function handleMarkAllAsRead() {
+		console.log('🔄 Marking all DM messages as read for agent:', selectedDMAgent?.id);
+		await markAllMessagesAsRead(dmMessages);
 	}
 
 	function handleCancelReply() {
@@ -49,15 +58,28 @@
 {#if selectedDMAgent}
 	<div class="dm-messages-view">
 		<div class="dm-messages-container">
-			<!-- Show pagination info and see all button if applicable -->
-			{#if messagesPagination?.hasMore}
+			<!-- Show pagination info, see all button, and mark all as read button -->
+			{#if messagesPagination?.hasMore || unreadCount > 0}
 				<div class="pagination-banner">
-					<span class="pagination-info">
-						Showing last {messagesPagination.showing} of {messagesPagination.total} messages
-					</span>
-					<button class="see-all-btn" on:click={handleSeeAllMessages}>
-						See all messages
-					</button>
+					<div class="banner-left">
+						{#if messagesPagination?.hasMore}
+							<span class="pagination-info">
+								Showing last {messagesPagination.showing} of {messagesPagination.total} messages
+							</span>
+						{/if}
+					</div>
+					<div class="banner-right">
+						{#if unreadCount > 0}
+							<button class="mark-all-read-btn" on:click={handleMarkAllAsRead}>
+								📖 Mark all as read ({unreadCount})
+							</button>
+						{/if}
+						{#if messagesPagination?.hasMore}
+							<button class="see-all-btn" on:click={handleSeeAllMessages}>
+								See all messages
+							</button>
+						{/if}
+					</div>
 				</div>
 			{/if}
 			
@@ -329,5 +351,35 @@
 	.dm-placeholder p {
 		margin: 0;
 		font-size: 14px;
+	}
+
+	.banner-left {
+		display: flex;
+		align-items: center;
+	}
+
+	.banner-right {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.mark-all-read-btn {
+		background: #10b981;
+		color: white;
+		border: none;
+		padding: 6px 12px;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 12px;
+		font-weight: 500;
+		transition: background-color 0.2s ease;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.mark-all-read-btn:hover {
+		background: #059669;
 	}
 </style>
