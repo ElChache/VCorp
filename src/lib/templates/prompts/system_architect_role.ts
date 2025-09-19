@@ -45,5 +45,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 
 Build something that will still be impressive and maintainable years from now.`,
   premade: null,
-  isGlobal: false
+  isGlobal: false,
+  isRolePrompt: true
 };

@@ -12,25 +12,25 @@ export interface AgentPermissions {
 export const standardDeveloperPermissions: AgentPermissions = {
   allow: [
     // Complete agent workspace access
-    "Write(./agent_workspaces/{AGENT_ID}/**)",
-    "Edit(./agent_workspaces/{AGENT_ID}/**)",
-    "Read(./agent_workspaces/{AGENT_ID}/**)",
+    "Write(./**)",
+    "Edit(./**)",
+    "Read(./**)",
     
     // Read-only access to main project for reference
-    "Read(./project/**)",
+    "Read(../../project/**)",
     
     // Full access to shared docs folder (public documents)
-    "Write(./docs/**)",
-    "Edit(./docs/**)",
-    "Read(./docs/**)",
+    "Write(../../docs/**)",
+    "Edit(../../docs/**)",
+    "Read(../../docs/**)",
     
     // Read-only access to tickets (viewing only for developers)
-    "Read(./tickets/**)",
+    "Read(../../tickets/**)",
     
     // Directory navigation
-    "Bash(cd:./agent_workspaces/{AGENT_ID}/**)",
-    "Bash(cd:./docs/**)",
-    "Bash(cd:./tickets/**)",
+    "Bash(cd:./**)",
+    "Bash(cd:../../docs/**)",
+    "Bash(cd:../../tickets/**)",
     
     // Complete git workflow for worktrees
     "Bash(git worktree:*)",     // Create/manage worktrees
@@ -48,11 +48,11 @@ export const standardDeveloperPermissions: AgentPermissions = {
     "Bash(git checkout:*)",     // Switch branches in their workspace
     
     // GitHub CLI for cloning and PR management
-    "Bash(gh repo:clone*)",     // Clone repositories
-    "Bash(gh pr:create*)",      // Create pull requests
-    "Bash(gh pr:view*)",        // View pull requests
-    "Bash(gh pr:list*)",        // List pull requests
-    "Bash(gh pr:status*)",      // Check PR status
+    "Bash(gh repo:clone:*)",    // Clone repositories
+    "Bash(gh pr:create:*)",     // Create pull requests
+    "Bash(gh pr:view:*)",       // View pull requests
+    "Bash(gh pr:list:*)",       // List pull requests
+    "Bash(gh pr:status:*)",     // Check PR status
     
     // Development operations
     "Bash(npm:*)",
@@ -84,33 +84,55 @@ export const standardDeveloperPermissions: AgentPermissions = {
     "Bash(test:*)",
     "Bash(build:*)",
     "Bash(lint:*)",
-    "Bash(format:*)"
+    "Bash(format:*)",
+    
+    // File management in their own workspace
+    "Bash(rm:./**)",
+    "Bash(rmdir:./**)"
   ],
   deny: [
     // Block main project write access (SACRED RULE)
-    "Write(./project/**)",
-    "Edit(./project/**)",
-    "Bash(cd:./project/**)",
+    "Write(../../project/**)",
+    "Edit(../../project/**)",
+    "Bash(cd:../../project/**)",
+    
+    // Block file creation at project root
+    "Write(../../*)",
+    "Bash(touch:../../*)",
+    "Bash(mkdir:../../*)",
+    
+    // Block dangerous git operations outside workspace  
+    "Bash(git checkout:../../*)",
+    "Bash(git pull:../../*)", 
+    "Bash(git clone:../../*)",
+    "Bash(git reset:../../*)",
+    "Bash(git clean:../../*)",
     
     // Block direct main branch operations
-    "Bash(git push:*main*)",       // Cannot push to main
-    "Bash(git merge:*main*)",      // Cannot merge to main
+    "Bash(git push origin main)",  // Cannot push to main
+    "Bash(git push main)",         // Cannot push to main 
+    "Bash(git merge main)",        // Cannot merge to main
     "Bash(git checkout:main)",     // Cannot checkout main directly
-    "Bash(git push:origin main)",  // Cannot push to main
     
     // Block other agent workspace access
-    "Write(./agent_workspaces/*)",
-    "Edit(./agent_workspaces/*)",
-    "Read(./agent_workspaces/*)",
+    "Write(../*)",
+    "Edit(../*)",
+    "Read(../*)",
     
     // Block GitHub merge operations (leads only)
-    "Bash(gh pr:merge*)",
-    "Bash(gh pr:close*)",
-    "Bash(gh pr:edit*)",
+    "Bash(gh pr:merge:*)",
+    "Bash(gh pr:close:*)",
+    "Bash(gh pr:edit:*)",
     
-    // Block dangerous operations
-    "Bash(rm:*)",
-    "Bash(rmdir:*)",
+    // Block dangerous operations (except in own workspace)
+    "Bash(rm:../../project/**)",
+    "Bash(rm:../../docs/**)",
+    "Bash(rm:../../tickets/**)",
+    "Bash(rm:../*)",  // Block other agents' workspaces
+    "Bash(rmdir:../../project/**)",
+    "Bash(rmdir:../../docs/**)",
+    "Bash(rmdir:../../tickets/**)",
+    "Bash(rmdir:../*)",  // Block other agents' workspaces
     "Bash(sudo:*)",
     "Bash(su:*)",
     "Bash(chmod:*)",
@@ -139,21 +161,27 @@ export const standardDeveloperPermissions: AgentPermissions = {
 export const leadDeveloperPermissions: AgentPermissions = {
   allow: [
     // Full agent workspace access
-    "Write(./agent_workspaces/{AGENT_ID}/**)",
-    "Edit(./agent_workspaces/{AGENT_ID}/**)",
-    "Read(./agent_workspaces/{AGENT_ID}/**)",
+    "Write(./**)",
+    "Edit(./**)",
+    "Read(./**)",
     
     // LEAD PRIVILEGE: Full main project access (SACRED AUTHORITY)
-    "Write(./project/**)",
-    "Edit(./project/**)",
-    "Read(./project/**)",
-    "Bash(cd:./project/**)",
+    "Write(../../project/**)",
+    "Edit(../../project/**)",
+    "Read(../../project/**)",
+    "Bash(cd:../../project/**)",
+    
+    // Full access to shared docs folder
+    "Write(../../docs/**)",
+    "Edit(../../docs/**)",
+    "Read(../../docs/**)",
+    "Bash(cd:../../docs/**)",
     
     // LEAD PRIVILEGE: Full oversight access to all agent workspaces
-    "Read(./agent_workspaces/**)",
-    "Write(./agent_workspaces/**)",
-    "Edit(./agent_workspaces/**)",
-    "Bash(cd:./agent_workspaces/**)",
+    "Read(../**)",
+    "Write(../**)",
+    "Edit(../**)",
+    "Bash(cd:../**)",
     
     // LEAD PRIVILEGE: Complete git workflow including main branch
     "Bash(git:*)",                  // Full git access
@@ -215,13 +243,13 @@ export const leadDeveloperPermissions: AgentPermissions = {
     "Bash(deploy:*)",
     
     // LEAD PRIVILEGE: Selective file operations for maintenance
-    "Bash(rm:./project/node_modules/**)",    // Clean node_modules
-    "Bash(rm:./project/dist/**)",            // Clean build artifacts
-    "Bash(rm:./project/.next/**)",           // Clean Next.js cache
-    "Bash(rm:./project/build/**)",           // Clean build folder
-    "Bash(rm:./agent_workspaces/**)",        // Clean agent workspaces
-    "Bash(rmdir:./project/node_modules/**)", // Remove empty directories
-    "Bash(rmdir:./project/dist/**)",         // Remove empty build dirs
+    "Bash(rm:../../project/node_modules/**)",    // Clean node_modules
+    "Bash(rm:../../project/dist/**)",            // Clean build artifacts
+    "Bash(rm:../../project/.next/**)",           // Clean Next.js cache
+    "Bash(rm:../../project/build/**)",           // Clean build folder
+    "Bash(rm:../**)",                            // Clean agent workspaces
+    "Bash(rmdir:../../project/node_modules/**)", // Remove empty directories
+    "Bash(rmdir:../../project/dist/**)",         // Remove empty build dirs
   ],
   deny: [
     // Still block critical system operations
@@ -232,14 +260,19 @@ export const leadDeveloperPermissions: AgentPermissions = {
     "Bash(mount:*)",
     "Bash(umount:*)",
     
+    // Block file creation at project root (even for leads)
+    "Write(../../*)",
+    "Bash(touch:../../*)",
+    "Bash(mkdir:../../*)",
+    
     // Block dangerous file operations on critical files
-    "Bash(rm:./project/.git/**)",           // Protect git folder
-    "Bash(rm:./project/package.json)",      // Protect package files
-    "Bash(rm:./project/package-lock.json)",
-    "Bash(rm:./project/pnpm-lock.yaml)",
-    "Bash(rm:./project/yarn.lock)",
-    "Bash(rm:./project/.env*)",             // Protect environment files
-    "Bash(rm:./project/.claude/**)",        // Protect Claude settings
+    "Bash(rm:../../project/.git/**)",           // Protect git folder
+    "Bash(rm:../../project/package.json)",      // Protect package files
+    "Bash(rm:../../project/package-lock.json)",
+    "Bash(rm:../../project/pnpm-lock.yaml)",
+    "Bash(rm:../../project/yarn.lock)",
+    "Bash(rm:../../project/.env*)",             // Protect environment files
+    "Bash(rm:../../project/.claude/**)",        // Protect Claude settings
     
     // Block dangerous network operations
     "Bash(ssh:*)",
@@ -254,29 +287,29 @@ export const leadDeveloperPermissions: AgentPermissions = {
 export const managementPermissions: AgentPermissions = {
   allow: [
     // Agent workspace access for their own workspace
-    "Write(./agent_workspaces/{AGENT_ID}/**)",
-    "Edit(./agent_workspaces/{AGENT_ID}/**)",
-    "Read(./agent_workspaces/{AGENT_ID}/**)",
+    "Write(./**)",
+    "Edit(./**)",
+    "Read(./**)",
     
     // MANAGEMENT PRIVILEGE: Read access to all project areas for oversight
-    "Read(./project/**)",
-    "Read(./agent_workspaces/**)",
+    "Read(../../project/**)",
+    "Read(../**)",
     
     // Full access to shared docs folder (management needs to create/edit docs)
-    "Write(./docs/**)",
-    "Edit(./docs/**)",
-    "Read(./docs/**)",
+    "Write(../../docs/**)",
+    "Edit(../../docs/**)",
+    "Read(../../docs/**)",
     
     // Full access to tickets folder (management privilege for ticket management)
-    "Write(./tickets/**)",
-    "Edit(./tickets/**)",
-    "Read(./tickets/**)",
+    "Write(../../tickets/**)",
+    "Edit(../../tickets/**)",
+    "Read(../../tickets/**)",
     
     // Navigation permissions
-    "Bash(cd:./agent_workspaces/{AGENT_ID}/**)",
-    "Bash(cd:./project/**)",
-    "Bash(cd:./docs/**)",
-    "Bash(cd:./tickets/**)",
+    "Bash(cd:./**)",
+    "Bash(cd:../../project/**)",
+    "Bash(cd:../../docs/**)",
+    "Bash(cd:../../tickets/**)",
     
     // Git operations for oversight and coordination (read-only focus)
     "Bash(git status:*)",           // Check status
@@ -285,24 +318,24 @@ export const managementPermissions: AgentPermissions = {
     "Bash(git diff:*)",             // View diffs
     "Bash(git branch:*)",           // View branches
     "Bash(git fetch:*)",            // Get latest info
-    "Bash(git worktree:list*)",     // List worktrees for oversight
+    "Bash(git worktree:list:*)",    // List worktrees for oversight
     
     // GitHub CLI for project oversight
-    "Bash(gh repo:clone*)",         // Clone repositories for analysis
-    "Bash(gh pr:view*)",            // View pull requests
-    "Bash(gh pr:list*)",            // List pull requests
-    "Bash(gh pr:status*)",          // Check PR status
-    "Bash(gh issue:list*)",         // List issues
-    "Bash(gh issue:view*)",         // View issues
-    "Bash(gh workflow:list*)",      // View workflows
-    "Bash(gh workflow:view*)",      // View workflow details
+    "Bash(gh repo:clone:*)",        // Clone repositories for analysis
+    "Bash(gh pr:view:*)",           // View pull requests
+    "Bash(gh pr:list:*)",           // List pull requests
+    "Bash(gh pr:status:*)",         // Check PR status
+    "Bash(gh issue:list:*)",        // List issues
+    "Bash(gh issue:view:*)",        // View issues
+    "Bash(gh workflow:list:*)",     // View workflows
+    "Bash(gh workflow:view:*)",     // View workflow details
     
     // Development tool access for analysis
-    "Bash(npm:list*)",              // View dependencies
-    "Bash(npm:audit*)",             // Security audits
-    "Bash(npm:outdated*)",          // Check outdated packages
+    "Bash(npm:list:*)",             // View dependencies
+    "Bash(npm:audit:*)",            // Security audits
+    "Bash(npm:outdated:*)",         // Check outdated packages
     "Bash(node:--version)",         // Version checks
-    "Bash(pnpm:list*)",             // View pnpm dependencies
+    "Bash(pnpm:list:*)",            // View pnpm dependencies
     
     // Safe utility commands
     "Bash(ls:*)",
@@ -311,10 +344,10 @@ export const managementPermissions: AgentPermissions = {
     "Bash(grep:*)",
     "Bash(find:*)",
     "Bash(echo:*)",
-    "Bash(mkdir:./agent_workspaces/{AGENT_ID}/**)",
-    "Bash(touch:./agent_workspaces/{AGENT_ID}/**)",
+    "Bash(mkdir:./**)",
+    "Bash(touch:./**)",
     "Bash(cp:*)",
-    "Bash(mv:./agent_workspaces/{AGENT_ID}/**)",
+    "Bash(mv:./**)",
     
     // Development tools for review
     "Bash(code:*)",
@@ -325,39 +358,63 @@ export const managementPermissions: AgentPermissions = {
     "Bash(test:*)",
     "Bash(lint:*)",
     "Bash(build:*)",                // Can run builds for testing
+    
+    // File management in their own workspace
+    "Bash(rm:./**)",
+    "Bash(rmdir:./**)",
+    
+    // Git operations in their own workspace
+    "Bash(git add:./**)",
+    "Bash(git commit:./**)",
+    "Bash(git push:./**)"
   ],
   deny: [
     // Block direct project write access (management coordinates, not codes)
-    "Write(./project/**)",
-    "Edit(./project/**)",
+    "Write(../../project/**)",
+    "Edit(../../project/**)",
+    
+    // Block file creation at project root
+    "Write(../../*)",
+    "Bash(touch:../../*)",
+    "Bash(mkdir:../../*)",
+    
+    // Block dangerous git operations outside workspace  
+    "Bash(git checkout:../../*)",
+    "Bash(git pull:../../*)", 
+    "Bash(git clone:../../*)",
+    "Bash(git reset:../../*)",
+    "Bash(git clean:../../*)",
     
     // Block other agent workspace write access
-    "Write(./agent_workspaces/*)",
-    "Edit(./agent_workspaces/*)",
+    "Write(../*)",
+    "Edit(../*)",
     
     // Block git write operations (coordination role, not development)
-    "Bash(git add:*)",
-    "Bash(git commit:*)",
-    "Bash(git push:*)",
-    "Bash(git merge:*)",
-    "Bash(git rebase:*)",
-    "Bash(git reset:*)",
+    "Bash(git push origin main)",
+    "Bash(git push main)",
+    "Bash(git merge main)",
     "Bash(git checkout:*)",          // Prevent branch switching
-    "Bash(git worktree:add*)",       // Cannot create worktrees
-    "Bash(git worktree:remove*)",    // Cannot remove worktrees
+    "Bash(git worktree:add:*)",      // Cannot create worktrees
+    "Bash(git worktree:remove:*)",   // Cannot remove worktrees
     
     // Block GitHub write operations
-    "Bash(gh pr:create*)",
-    "Bash(gh pr:merge*)",
-    "Bash(gh pr:close*)",
-    "Bash(gh pr:edit*)",
-    "Bash(gh issue:create*)",
-    "Bash(gh issue:close*)",
-    "Bash(gh issue:edit*)",
+    "Bash(gh pr:create:*)",
+    "Bash(gh pr:merge:*)",
+    "Bash(gh pr:close:*)",
+    "Bash(gh pr:edit:*)",
+    "Bash(gh issue:create:*)",
+    "Bash(gh issue:close:*)",
+    "Bash(gh issue:edit:*)",
     
-    // Block dangerous operations
-    "Bash(rm:*)",
-    "Bash(rmdir:*)",
+    // Block dangerous operations (except in own workspace)
+    "Bash(rm:../../project/**)",
+    "Bash(rm:../../docs/**)",
+    "Bash(rm:../../tickets/**)",
+    "Bash(rm:../*)",  // Block other agents' workspaces
+    "Bash(rmdir:../../project/**)",
+    "Bash(rmdir:../../docs/**)",
+    "Bash(rmdir:../../tickets/**)",
+    "Bash(rmdir:../*)",  // Block other agents' workspaces
     "Bash(sudo:*)",
     "Bash(su:*)",
     "Bash(chmod:*)",
@@ -427,17 +484,21 @@ export function resolveAgentPermissions(permissions: AgentPermissions, agentId: 
     ...permissions,
     allow: permissions.allow.map(rule => 
       rule.replace('{AGENT_ID}', agentId)
-          .replace('./project/', `${projectPath}/project/`)
-          .replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
-          .replace('./docs/', `${projectPath}/docs/`)
-          .replace('./tickets/', `${projectPath}/tickets/`)
+          .replace('../../project/', `${projectPath}/project/`)
+          .replace('../../docs/', `${projectPath}/docs/`)
+          .replace('../../tickets/', `${projectPath}/tickets/`)
+          .replace('../**', `${projectPath}/agent_workspaces/**`)
+          .replace('../*', `${projectPath}/agent_workspaces/*`)
+          .replace('../../*', `${projectPath}/*`)
     ),
     deny: permissions.deny.map(rule => 
       rule.replace('{AGENT_ID}', agentId)
-          .replace('./project/', `${projectPath}/project/`)
-          .replace('./agent_workspaces/', `${projectPath}/agent_workspaces/`)
-          .replace('./docs/', `${projectPath}/docs/`)
-          .replace('./tickets/', `${projectPath}/tickets/`)
+          .replace('../../project/', `${projectPath}/project/`)
+          .replace('../../docs/', `${projectPath}/docs/`)
+          .replace('../../tickets/', `${projectPath}/tickets/`)
+          .replace('../**', `${projectPath}/agent_workspaces/**`)
+          .replace('../*', `${projectPath}/agent_workspaces/*`)
+          .replace('../../*', `${projectPath}/*`)
     )
   };
 }

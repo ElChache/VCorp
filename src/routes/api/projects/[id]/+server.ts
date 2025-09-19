@@ -137,7 +137,7 @@ export async function PUT({ params, request }: RequestEvent) {
 		}
 		const projectId = parseInt(params.id || '');
 		const body = await request.json();
-		const { name, description, path } = body;
+		const { name, description, path, gitOrigin, mainBranch } = body;
 		
 		if (isNaN(projectId)) {
 			return json({ error: 'Invalid project ID' }, { status: 400 });
@@ -151,12 +151,24 @@ export async function PUT({ params, request }: RequestEvent) {
 			return json({ error: 'Project path is required' }, { status: 400 });
 		}
 
+		// Validate git origin if provided (import validation function)
+		if (gitOrigin?.trim()) {
+			const gitUrlPattern = /^(https?:\/\/|git@)[\w.-]+[\/:][\w.-\/]+\.git$/;
+			if (!gitUrlPattern.test(gitOrigin.trim())) {
+				return json({ 
+					error: 'Invalid git origin URL. Must be in format: https://github.com/user/repo.git or git@github.com:user/repo.git' 
+				}, { status: 400 });
+			}
+		}
+
 		const updated = await db
 			.update(projects)
 			.set({
 				name: name.trim(),
 				description: description?.trim() || null,
 				path: path.trim(),
+				gitOrigin: gitOrigin?.trim() || null,
+				mainBranch: mainBranch?.trim() || 'main',
 				updatedAt: new Date()
 			})
 			.where(eq(projects.id, projectId))

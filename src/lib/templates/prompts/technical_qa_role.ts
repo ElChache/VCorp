@@ -36,5 +36,6 @@ Ensure application reliability, performance, and user satisfaction through compr
 - Maintain testing environments and data for consistent validation`,
   premade: null,
   isGlobal: false,
-  orderIndex: 6
+  orderIndex: 6,
+  isRolePrompt: true
 };

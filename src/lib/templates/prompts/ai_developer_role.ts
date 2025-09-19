@@ -24,5 +24,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 Build AI features that work reliably in production, not just impressive demos.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 3
+  orderIndex: 3,
+  isRolePrompt: true
 };

@@ -56,6 +56,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			const enterCommand = `tmux send-keys -t "${agent.tmuxSession}" Enter`;
 			execSync(enterCommand, { stdio: 'ignore' });
 			
+			// Send second Enter command to ensure message is processed
+			const secondEnterCommand = `tmux send-keys -t "${agent.tmuxSession}" Enter`;
+			execSync(secondEnterCommand, { stdio: 'ignore' });
+			
 			console.log(`✅ Successfully sent prompt to agent: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`);
 			
 			return json({ 

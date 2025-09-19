@@ -43,8 +43,16 @@ Take your time to finish properly - no rush! 👋
 `;
 
 				// Send the message to the tmux session
-				const tmuxCommand = `tmux send-keys -t "${agent.tmuxSession}" 'echo "${wrapUpMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"' Enter`;
+				const tmuxCommand = `tmux send-keys -t "${agent.tmuxSession}" 'echo "${wrapUpMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"'`;
 				execSync(tmuxCommand, { stdio: 'ignore' });
+				
+				// Send Enter key as separate command
+				const enterCommand = `tmux send-keys -t "${agent.tmuxSession}" Enter`;
+				execSync(enterCommand, { stdio: 'ignore' });
+				
+				// Send second Enter command to ensure message is processed
+				const secondEnterCommand = `tmux send-keys -t "${agent.tmuxSession}" Enter`;
+				execSync(secondEnterCommand, { stdio: 'ignore' });
 				
 				console.log(`✅ Successfully sent wrap-up message to agent`);
 			} catch (tmuxError: unknown) {

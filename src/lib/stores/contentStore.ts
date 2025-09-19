@@ -15,7 +15,8 @@ import {
 	getHumanDirectorAssignments,
 	isMessageFromHumanDirector,
 	getHumanDirectorAgentId,
-	isAssignmentForHumanDirector
+	isAssignmentForHumanDirector,
+	isHumanDirectorAgent
 } from '$lib/utils/humanDirectorClientHelpers';
 
 // ==================== Core State ====================
@@ -75,7 +76,7 @@ export const channelMessages = derived(contentStore, $store =>
 
 export const directMessages = derived(contentStore, $store => 
 	Object.values($store.contentById).filter(content => 
-		content.type === 'message' && content.channelId === null
+		(content.type === 'message' || content.type === 'reply') && content.channelId === null
 	)
 );
 
@@ -112,21 +113,34 @@ export const messagesForChannel = (channelId: number | null) => derived(
 // DM conversation between human-director and specific agent
 export const dmConversationWith = (agentId: string) => derived(
 	directMessages,
-	$dms => $dms.filter(dm => {
-		// Message from the agent to human-director
-		if (dm.authorAgentId === agentId) return true;
-		
-		// Message from human-director to the agent
-		if (isMessageFromHumanDirector(dm) && dm.readingAssignments) {
-			return dm.readingAssignments.some(assignment => 
-				(assignment.assignedToType === 'agent' && assignment.assignedTo === agentId) ||
-				(assignment.assignedToType === 'role' && assignment.targetAgents?.includes(agentId)) ||
-				(assignment.assignedToType === 'squad' && assignment.targetAgents?.includes(agentId))
-			);
+	$dms => {
+		const humanDirectorId = getHumanDirectorAgentId();
+		if (!humanDirectorId) {
+			console.log('❌ No human director ID found');
+			return [];
 		}
 		
-		return false;
-	})
+		return $dms.filter(dm => {
+			// Only agent-based assignments, no role logic
+			// Show messages that are part of the conversation between these two specific agents
+			
+			// Message from target agent to human director
+			if (dm.authorAgentId === agentId) {
+				return dm.readingAssignments?.some(assignment => 
+					assignment.assignedToType === 'agent' && assignment.assignedTo === humanDirectorId
+				) || false;
+			}
+			
+			// Message from human director to target agent  
+			if (dm.authorAgentId === humanDirectorId) {
+				return dm.readingAssignments?.some(assignment => 
+					assignment.assignedToType === 'agent' && assignment.assignedTo === agentId
+				) || false;
+			}
+			
+			return false;
+		});
+	}
 );
 
 // Metadata selectors

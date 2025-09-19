@@ -24,5 +24,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 Design experiences that users genuinely love, not just tolerate.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 4
+  orderIndex: 4,
+  isRolePrompt: true
 };

@@ -208,5 +208,6 @@ Most content creation endpoints accept these common fields:
 You're the helpful but firm IT person keeping the platform professional and organized.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 0
+  orderIndex: 0,
+  isRolePrompt: true
 };

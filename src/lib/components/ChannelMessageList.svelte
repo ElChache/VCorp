@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import ChannelMessage from './ChannelMessage.svelte';
+	import QuickTemplateSelector from './QuickTemplateSelector.svelte';
 	import { markAllMessagesAsRead, isUnreadByHumanDirector } from '$lib/utils/messageOperations';
 
 	// Props
@@ -13,9 +14,12 @@
 	export let isMessagePartiallyRead: (message: any) => boolean;
 	export let toggleReadStatusTooltip: (event: MouseEvent, message: any) => void;
 	export let messagesPagination: any = null; // Pagination info from API
+	export let selectedProject: any = null; // Add this prop for premade messages
 
 	// Event dispatcher
 	const dispatch = createEventDispatcher();
+	
+	// Template state - no modal needed anymore
 	
 	// Calculate unread count for this channel
 	$: unreadCount = channelMessages.filter(msg => isUnreadByHumanDirector(msg)).length;
@@ -42,6 +46,13 @@
 
 	function handleSeeAllMessages() {
 		dispatch('seeAllMessages');
+	}
+
+	function handleTemplateSelected(event) {
+		const { resolvedContent } = event.detail;
+		newMessageContent = resolvedContent;
+		// Auto-send the message since it's a preset
+		handleSendMessage();
 	}
 </script>
 
@@ -103,15 +114,29 @@
 					bind:value={newMessageContent}
 					on:keydown={handleMessageKeydown}
 				/>
-				<button 
-					class="send-btn" 
-					on:click={handleSendMessage}
-					disabled={!newMessageContent.trim()}
-				>
-					Send
-				</button>
+				{#if newMessageContent.trim()}
+					<button 
+						class="send-btn" 
+						on:click={handleSendMessage}
+					>
+						Send
+					</button>
+				{:else}
+					<QuickTemplateSelector
+						projectId={selectedProject?.id}
+						roleType="human-director"
+						agentId="human-director"
+						on:templateSelected={handleTemplateSelected}
+					/>
+				{/if}
 			</div>
-			<p class="input-note">Press Enter to send message</p>
+			<p class="input-note">
+				{#if newMessageContent.trim()}
+					Press Enter to send message
+				{:else}
+					Type a message or choose from presets
+				{/if}
+			</p>
 		</div>
 	</div>
 {:else}
@@ -120,6 +145,8 @@
 		<p>Select a channel from the left to start chatting.</p>
 	</div>
 {/if}
+
+<!-- Template selector is now inline above -->
 
 <style>
 	.messages-view {
@@ -269,6 +296,8 @@
 		background: #9ca3af;
 		cursor: not-allowed;
 	}
+
+	/* Template selector styles are in QuickTemplateSelector component */
 
 	.input-note {
 		margin: 8px 0 0 0;

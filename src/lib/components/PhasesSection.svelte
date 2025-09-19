@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { phases, documents, agents, roleTypes, isLoading, error, contentActions } from '$lib/stores/contentStore';
+	import PhaseContentEditor from './PhaseContentEditor.svelte';
+	import { getHumanDirectorAgentId } from '$lib/utils/humanDirectorClientHelpers';
 
 	export let selectedProject: any;
 
@@ -137,7 +139,8 @@
 				},
 				body: JSON.stringify({
 					phaseStatus: newStatus,
-					projectId: selectedProject.id
+					projectId: selectedProject.id,
+					authorAgentId: getHumanDirectorAgentId()  // Use actual human director agent ID
 				})
 			});
 
@@ -334,11 +337,10 @@
 						</div>
 					{/if}
 					
-					{#if selectedPhase.body}
-						<div class="phase-body">
-							{selectedPhase.body}
-						</div>
-					{/if}
+					<PhaseContentEditor 
+						{selectedPhase} 
+						{selectedProject} 
+					/>
 				</div>
 			{:else}
 				<div class="no-phase-selected">

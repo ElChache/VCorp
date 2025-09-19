@@ -176,6 +176,85 @@
 		}
 	}
 
+	async function sendAllAgentsHome() {
+		const activeAgents = agents.filter(agent => agent.status === 'active' || agent.status === 'idle');
+		
+		if (activeAgents.length === 0) {
+			alert('No active agents to send home.');
+			return;
+		}
+		
+		if (!confirm(`Send all ${activeAgents.length} active agents home?\n\nThis will ask all active agents to wrap up their work and clock out when ready.`)) {
+			return;
+		}
+		
+		try {
+			const promises = activeAgents.map(agent => 
+				fetch(`/api/agents/${agent.id}/send-home`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					}
+				})
+			);
+			
+			const results = await Promise.allSettled(promises);
+			const successCount = results.filter(result => result.status === 'fulfilled' && result.value.ok).length;
+			
+			console.log(`${successCount}/${activeAgents.length} agents sent home successfully`);
+			await contentActions.loadAgents(selectedProject.id);
+			
+			if (successCount === activeAgents.length) {
+				alert(`All ${successCount} agents asked to wrap up their day successfully!`);
+			} else {
+				alert(`${successCount}/${activeAgents.length} agents sent home successfully. Some may have failed.`);
+			}
+		} catch (error) {
+			console.error('Error sending agents home:', error);
+			alert('Failed to send agents home');
+		}
+	}
+
+	async function bringAllAgentsBack() {
+		const offlineAgents = agents.filter(agent => agent.status === 'offline');
+		
+		if (offlineAgents.length === 0) {
+			alert('No offline agents to bring back.');
+			return;
+		}
+		
+		if (!confirm(`Bring all ${offlineAgents.length} offline agents back?\n\nThis will start new sessions for all offline agents to continue their work.`)) {
+			return;
+		}
+		
+		try {
+			const promises = offlineAgents.map(agent => 
+				fetch(`/api/agents/${agent.id}/bring-back`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({ projectId: selectedProject.id })
+				})
+			);
+			
+			const results = await Promise.allSettled(promises);
+			const successCount = results.filter(result => result.status === 'fulfilled' && result.value.ok).length;
+			
+			console.log(`${successCount}/${offlineAgents.length} agents brought back successfully`);
+			await contentActions.loadAgents(selectedProject.id);
+			
+			if (successCount === offlineAgents.length) {
+				alert(`All ${successCount} agents brought back successfully!`);
+			} else {
+				alert(`${successCount}/${offlineAgents.length} agents brought back successfully. Some may have failed.`);
+			}
+		} catch (error) {
+			console.error('Error bringing agents back:', error);
+			alert('Failed to bring agents back');
+		}
+	}
+
 	async function killAgent() {
 		if (!selectedAgent) {
 			console.error('No agent selected');
@@ -408,9 +487,24 @@
 			<div class="agents-panel">
 				<div class="agents-header">
 					<h3>All Agents ({agents.length})</h3>
-					<button class="btn-secondary" on:click={() => { loadStartupPrompt(); showStartupPromptEditor = true; }}>
-						⚙️ Startup Prompt
-					</button>
+					<div class="bulk-actions">
+						<button 
+							class="btn-secondary bulk-btn" 
+							on:click={sendAllAgentsHome}
+							title="Send all active agents home"
+							disabled={!agents.some(a => a.status === 'active' || a.status === 'idle')}
+						>
+							🏠
+						</button>
+						<button 
+							class="btn-secondary bulk-btn" 
+							on:click={bringAllAgentsBack}
+							title="Bring all offline agents back"
+							disabled={!agents.some(a => a.status === 'offline')}
+						>
+							🌅
+						</button>
+					</div>
 				</div>
 				
 				<!-- Agent List -->
@@ -459,14 +553,44 @@
 					<div class="agent-details-header">
 						<h3>{selectedAgent.id}</h3>
 						<div class="agent-actions">
-							<button class="btn-secondary" on:click={openSendPromptModal}>💬 Send Prompt</button>
+							<button 
+								class="btn-secondary action-btn" 
+								on:click={openSendPromptModal}
+								title="Send prompt to agent"
+							>
+								💬
+							</button>
 							{#if selectedAgent.status === 'offline'}
-								<button class="btn-primary" on:click={bringAgentBack}>🔄 Bring Back</button>
+								<button 
+									class="btn-primary action-btn" 
+									on:click={bringAgentBack}
+									title="Bring agent back online"
+								>
+									🌅
+								</button>
 							{:else}
-								<button class="btn-warning" on:click={sendAgentHome}>🏠 Send Home</button>
-								<button class="btn-orange" on:click={forceAgentHome}>⚡ Force Home</button>
+								<button 
+									class="btn-warning action-btn" 
+									on:click={sendAgentHome}
+									title="Signal end of day - ask agent to wrap up work"
+								>
+									⏰
+								</button>
+								<button 
+									class="btn-orange action-btn" 
+									on:click={forceAgentHome}
+									title="Force agent offline immediately"
+								>
+									⚡
+								</button>
 							{/if}
-							<button class="btn-danger" on:click={killAgent}>🗲 Kill Agent</button>
+							<button 
+								class="btn-danger action-btn" 
+								on:click={killAgent}
+								title="Permanently delete agent"
+							>
+								🗲
+							</button>
 						</div>
 					</div>
 					
@@ -762,6 +886,35 @@
 		font-size: 16px;
 		font-weight: 600;
 		color: #111827;
+	}
+
+	.bulk-actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.bulk-btn, .action-btn {
+		min-width: 40px;
+		height: 40px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 16px;
+		padding: 8px;
+		border-radius: 6px;
+		transition: all 0.2s ease;
+		position: relative;
+	}
+
+	.bulk-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.bulk-btn:hover:not(:disabled),
+	.action-btn:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 	}
 
 	.agent-list {

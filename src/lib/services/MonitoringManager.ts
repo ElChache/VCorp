@@ -65,6 +65,7 @@ class MonitoringManager {
 	private intervalId: NodeJS.Timeout | null = null;
 	private fileWatcher: any | null = null;
 	private _isRunning = false;
+	private _currentProjectId: number | null = null;
 	
 	private stats: MonitoringStats = {
 		totalChecks: 0,
@@ -226,10 +227,31 @@ This is just a gentle reminder - no action needed if you're already working! �
 		return this._isRunning;
 	}
 
-	async start(): Promise<void> {
+	get currentProjectId(): number | null {
+		return this._currentProjectId;
+	}
+
+	async start(projectId?: number): Promise<void> {
 		if (this._isRunning) {
 			throw new Error('Monitoring service is already running');
 		}
+
+		if (!projectId) {
+			throw new Error('Project ID is required to start monitoring');
+		}
+
+		// Verify project exists
+		const project = await db
+			.select()
+			.from(projects)
+			.where(eq(projects.id, projectId))
+			.limit(1);
+
+		if (project.length === 0) {
+			throw new Error(`Project with ID ${projectId} not found`);
+		}
+
+		this._currentProjectId = projectId;
 
 		console.log('🚀 Starting VCorp Monitoring Service...');
 		console.log('═══════════════════════════════════════');
@@ -276,6 +298,8 @@ This is just a gentle reminder - no action needed if you're already working! �
 		}
 
 		this._isRunning = false;
+		this._currentProjectId = null;
+		
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
 			this.intervalId = null;
@@ -304,28 +328,27 @@ This is just a gentle reminder - no action needed if you're already working! �
 			this.stats.totalChecks++;
 			this.stats.lastCheck = new Date();
 
-			// Get all active projects
-			const activeProjects = await db
-				.select({ id: projects.id, name: projects.name })
-				.from(projects)
-				.where(eq(projects.status, 'active'));
-
-			if (activeProjects.length === 0) {
+			// Only process the current project
+			if (!this._currentProjectId) {
+				console.warn('⚠️ No project selected for monitoring');
 				return;
 			}
 
-			// Process all projects concurrently
-			const results = await Promise.allSettled(
-				activeProjects.map(project => this.processProject(project.id))
-			);
+			// Verify project still exists and is active
+			const project = await db
+				.select({ id: projects.id, name: projects.name, status: projects.status })
+				.from(projects)
+				.where(eq(projects.id, this._currentProjectId))
+				.limit(1);
 
-			// Handle results
-			results.forEach((result, index) => {
-				if (result.status === 'rejected') {
-					this.stats.errors++;
-					console.error(`❌ Error processing project ${activeProjects[index].id}:`, result.reason);
-				}
-			});
+			if (project.length === 0 || project[0].status !== 'active') {
+				console.warn(`⚠️ Project ${this._currentProjectId} not found or inactive, stopping monitoring`);
+				this.stop();
+				return;
+			}
+
+			// Process only the current project
+			await this.processProject(this._currentProjectId);
 
 		} catch (error) {
 			this.stats.errors++;
@@ -1136,7 +1159,23 @@ Consider reviewing during natural break points.
 					});
 
 					sendEnter.on('error', () => resolve(false));
-					sendEnter.on('close', (enterCode) => resolve(enterCode === 0));
+					sendEnter.on('close', (enterCode) => {
+						if (enterCode !== 0) {
+							resolve(false);
+							return;
+						}
+						
+						// Send second Enter command after another short delay
+						setTimeout(() => {
+							const sendSecondEnter = spawn('tmux', ['send-keys', '-t', tmuxSession, 'Enter'], {
+								detached: true,
+								stdio: 'ignore'
+							});
+
+							sendSecondEnter.on('error', () => resolve(false));
+							sendSecondEnter.on('close', (secondEnterCode) => resolve(secondEnterCode === 0));
+						}, 200);
+					});
 				}, 500);
 			});
 		});
@@ -1738,15 +1777,35 @@ Status: ${phase.status}`;
 		try {
 			console.log('🔍 DEBUG: Starting file watcher initialization...');
 			
-			// Watch for .md files in docs/, tickets/, and agent workspace directories
-			const watchPaths = [
-				'docs/',
-				'tickets/', 
-				'agent_workspaces/'
+			if (!this._currentProjectId) {
+				console.log('🔍 DEBUG: No project selected, skipping file watcher setup');
+				return;
+			}
+
+			// Get the current project's path
+			const currentProject = await db
+				.select({ id: projects.id, name: projects.name, path: projects.path })
+				.from(projects)
+				.where(eq(projects.id, this._currentProjectId))
+				.limit(1);
+			
+			if (currentProject.length === 0) {
+				console.log('🔍 DEBUG: Current project not found, skipping file watcher setup');
+				return;
+			}
+			
+			const project = currentProject[0];
+			const projectPath = project.path.endsWith('/') ? project.path.slice(0, -1) : project.path;
+			
+			// Build watch paths for the current project only
+			const watchPaths: string[] = [
+				`${projectPath}/docs`,
+				`${projectPath}/tickets`,
+				`${projectPath}/agent_workspaces`
 			];
 			
-			console.log('🔍 DEBUG: Watch paths:', watchPaths);
-			console.log('🔍 DEBUG: Current working directory:', process.cwd());
+			console.log('🔍 DEBUG: Watch paths for current project:', watchPaths);
+			console.log('🔍 DEBUG: Monitoring project:', `${project.name} (ID: ${project.id}, Path: ${project.path})`);
 			
 			this.fileWatcher = chokidar.watch(watchPaths, {
 				ignored: /(^|[\/\\])\../, // ignore dotfiles
@@ -1755,7 +1814,9 @@ Status: ${phase.status}`;
 				usePolling: true, // Force polling mode to ensure detection
 				interval: 1000, // 1-second polling interval
 				binaryInterval: 3000,
-				depth: 99 // Allow deep directory watching
+				depth: 99, // Allow deep directory watching
+				followSymlinks: false,
+				atomic: true // Helps with file detection
 			});
 
 			console.log('🔍 DEBUG: Chokidar watcher created, setting up event handlers...');
@@ -1763,6 +1824,7 @@ Status: ${phase.status}`;
 			this.fileWatcher
 				.on('ready', () => {
 					console.log('🔍 DEBUG: File watcher is ready and watching for changes');
+					console.log('🔍 DEBUG: Watched files:', this.fileWatcher.getWatched());
 				})
 				.on('add', (path: string) => {
 					console.log('🔍 DEBUG: File ADD event:', path);
@@ -1933,7 +1995,7 @@ Status: ${phase.status}`;
 				console.log(`📁 Updated ${fileType} "${slug}" in database`);
 			} else {
 				// Create new content - need to determine projectId and author
-				const projectId = await this.getCurrentProjectId();
+				const projectId = await this.getCurrentProjectId(filePath);
 				const authorAgentId = this.getAuthorFromPath(filePath);
 				
 				await db
@@ -1999,8 +2061,8 @@ Status: ${phase.status}`;
 	}
 
 	private getAuthorFromPath(filePath: string): string | null {
-		// Check if file is in agent workspace: agent_workspaces/AGENT_ID/docs/...
-		const workspaceMatch = filePath.match(/agent_workspaces\/([^\/]+)\//);
+		// Check if file is in agent workspace: .../agent_workspaces/AGENT_ID/docs/...
+		const workspaceMatch = filePath.match(/\/agent_workspaces\/([^\/]+)\//);
 		if (workspaceMatch) {
 			return workspaceMatch[1]; // Return the agent ID
 		}
@@ -2010,15 +2072,16 @@ Status: ${phase.status}`;
 	}
 
 	private isPublicDocument(filePath: string): boolean {
-		// Public documents are in root /docs or /tickets folders
+		// Public documents are in root /docs or /tickets folders (not in agent workspaces)
 		// These need well-known slugs for phase integration
-		return filePath.startsWith('docs/') || filePath.startsWith('tickets/');
+		return (filePath.includes('/docs/') || filePath.includes('/tickets/')) && 
+		       !filePath.includes('/agent_workspaces/');
 	}
 
 	private isPrivateDocument(filePath: string): boolean {
 		// Private documents are in agent workspaces
 		// Collisions are acceptable since they're private to the agent
-		return filePath.includes('agent_workspaces/');
+		return filePath.includes('/agent_workspaces/');
 	}
 
 	private async findContentBySlug(slug: string, type: 'document' | 'ticket'): Promise<any> {
@@ -2034,19 +2097,38 @@ Status: ${phase.status}`;
 		return results[0] || null;
 	}
 
-	private async getCurrentProjectId(): Promise<number> {
-		// For now, use the first active project
-		const activeProjects = await db
-			.select({ id: projects.id })
-			.from(projects)
-			.where(eq(projects.status, 'active'))
-			.limit(1);
-		
-		if (activeProjects.length === 0) {
-			throw new Error('No active projects found');
+	private async getCurrentProjectId(filePath?: string): Promise<number> {
+		// Always use the current project if monitoring is running
+		if (this._currentProjectId) {
+			return this._currentProjectId;
 		}
 		
-		return activeProjects[0].id;
+		// If we have a file path, try to determine the project from it
+		if (filePath) {
+			const projectId = await this.getProjectIdFromFilePath(filePath);
+			if (projectId) {
+				return projectId;
+			}
+		}
+		
+		throw new Error('No project selected for monitoring');
+	}
+
+	private async getProjectIdFromFilePath(filePath: string): Promise<number | null> {
+		// Get all active projects
+		const activeProjects = await db
+			.select({ id: projects.id, path: projects.path })
+			.from(projects)
+			.where(eq(projects.status, 'active'));
+		
+		// Find which project this file belongs to
+		for (const project of activeProjects) {
+			if (filePath.startsWith(project.path)) {
+				return project.id;
+			}
+		}
+		
+		return null;
 	}
 }
 

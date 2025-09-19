@@ -1,6 +1,0 @@
-#!/bin/bash
-# VCorp agent wrapper - auto-generated for fe_fernando_5465
-# Available prompt slugs: 
-AVAILABLE_PROMPTS=""
-export AVAILABLE_PROMPTS
-exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=1 --agent=fe_fernando_5465 --role=frontend-developer "$@"

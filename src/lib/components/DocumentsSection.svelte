@@ -3,6 +3,7 @@
 	import { marked } from 'marked';
 	import { documents, agents, roleTypes, squads, replies, isLoading, error, contentActions } from '$lib/stores/contentStore';
 	import { getHumanDirectorAgentId, isMessageFromHumanDirector, isContentUnreadByHumanDirector } from '$lib/utils/humanDirectorClientHelpers';
+	import DeleteDocumentDialog from './DeleteDocumentDialog.svelte';
 
 	export let selectedProject;
 
@@ -19,6 +20,8 @@
 	let selectedDocument = null;
 	let showCreateDocumentDialog = false;
 	let showAssignReadingDialog = false;
+	let showDeleteDialog = false;
+	let documentToDelete = null;
 	let newDocument = { 
 		title: '', 
 		body: '', 
@@ -229,6 +232,52 @@
 			}
 		} catch (err) {
 			console.error('Failed to assign reading:', err.message);
+		}
+	}
+
+	function openDeleteDialog(document) {
+		documentToDelete = document;
+		showDeleteDialog = true;
+	}
+
+	function handleDeleteCancel() {
+		showDeleteDialog = false;
+		documentToDelete = null;
+	}
+
+	async function handleDeleteConfirm(event) {
+		const { document } = event.detail;
+		
+		try {
+			const response = await fetch(`/api/documents/${document.id}`, {
+				method: 'DELETE',
+				headers: {
+					'Content-Type': 'application/json',
+					'X-Agent-ID': getHumanDirectorAgentId()
+				}
+			});
+
+			if (response.ok) {
+				const result = await response.json();
+				console.log('Document deleted:', result.message);
+				
+				// If the deleted document was selected, clear selection
+				if (selectedDocument?.id === document.id) {
+					selectedDocument = null;
+				}
+				
+				// ContentPollingService will automatically pick up the changes
+				handleDeleteCancel();
+			} else {
+				const errorData = await response.json();
+				console.error('Failed to delete document:', errorData.error);
+				// TODO: Show error to user in a proper way
+				alert(`Failed to delete document: ${errorData.error}`);
+			}
+		} catch (err) {
+			console.error('Failed to delete document:', err.message);
+			// TODO: Show error to user in a proper way
+			alert(`Failed to delete document: ${err.message}`);
 		}
 	}
 
@@ -501,6 +550,12 @@
 								on:click={() => openAssignReadingDialog(selectedDocument)}
 							>
 								📋 Assign Reading
+							</button>
+							<button 
+								class="btn-danger btn-sm"
+								on:click={() => openDeleteDialog(selectedDocument)}
+							>
+								🗑️ Delete
 							</button>
 						</div>
 					</div>
@@ -777,6 +832,14 @@
 		</div>
 	</div>
 {/if}
+
+<!-- Delete Document Dialog -->
+<DeleteDocumentDialog
+	show={showDeleteDialog}
+	document={documentToDelete}
+	on:confirm={handleDeleteConfirm}
+	on:cancel={handleDeleteCancel}
+/>
 
 <style>
 	.documents-section {
@@ -1659,5 +1722,13 @@
 	
 	:global(.read-status-tooltip .agent-unread) {
 		color: #f59e0b;
+	}
+
+	/* Delete confirmation dialog styles are now in DeleteDocumentDialog component */
+
+	.btn-danger:disabled {
+		background: #d1d5db;
+		color: #9ca3af;
+		cursor: not-allowed;
 	}
 </style>

@@ -2,6 +2,127 @@ import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { projects, roleTemplates, promptTemplates, rolePromptCompositionTemplates, roles, prompts, rolePromptCompositions, channelTemplates, channels, channelRoleAssignmentTemplates, channelRoleAssignments, squadTemplates, squads, squadRoleAssignmentTemplates, squadRoleAssignments, squadPromptAssignmentTemplates, squadPromptAssignments, phaseTemplates, phaseRoleAssignmentTemplates, content, agents } from '$lib/db/schema';
 import { desc, eq, and } from 'drizzle-orm';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
+/**
+ * Validates if a string is a valid git URL
+ */
+function isValidGitUrl(url: string): boolean {
+	const gitUrlPattern = /^(https?:\/\/|git@)[\w.-]+[\/:][\w.-\/]+\.git$/;
+	return gitUrlPattern.test(url);
+}
+
+/**
+ * Executes a git command and returns a promise
+ */
+function execGitCommand(command: string[], cwd: string, description: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const git = spawn('git', command, { 
+			cwd,
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+
+		let stdout = '';
+		let stderr = '';
+
+		git.stdout?.on('data', (data) => {
+			stdout += data.toString();
+		});
+
+		git.stderr?.on('data', (data) => {
+			stderr += data.toString();
+		});
+
+		git.on('close', (code) => {
+			if (code === 0) {
+				console.log(`✅ ${description} completed successfully`);
+				resolve();
+			} else {
+				console.error(`❌ ${description} failed with code ${code}`);
+				if (stderr) console.error(`Error output: ${stderr}`);
+				reject(new Error(`${description} failed with code: ${code}\n${stderr}`));
+			}
+		});
+
+		git.on('error', (error) => {
+			console.error(`❌ ${description} process error:`, error);
+			reject(new Error(`${description} process error: ${error.message}`));
+		});
+	});
+}
+
+/**
+ * Safely removes directory contents
+ */
+function clearDirectory(dirPath: string): void {
+	if (!fs.existsSync(dirPath)) return;
+	
+	const files = fs.readdirSync(dirPath);
+	for (const file of files) {
+		const filePath = path.join(dirPath, file);
+		try {
+			if (fs.statSync(filePath).isDirectory()) {
+				fs.rmSync(filePath, { recursive: true, force: true });
+			} else {
+				fs.unlinkSync(filePath);
+			}
+		} catch (error) {
+			console.warn(`Warning: Could not remove ${filePath}:`, error);
+		}
+	}
+}
+
+/**
+ * Initializes a git repository from a remote origin
+ */
+async function initializeGitRepository(gitOrigin: string, mainBranch: string): Promise<boolean> {
+	try {
+		// Validate git URL
+		if (!isValidGitUrl(gitOrigin)) {
+			throw new Error(`Invalid git URL format: ${gitOrigin}`);
+		}
+
+		const projectPath = path.resolve('./project');
+		console.log(`🔄 Initializing git repository at ${projectPath}`);
+
+		// Create project directory if it doesn't exist
+		if (!fs.existsSync(projectPath)) {
+			fs.mkdirSync(projectPath, { recursive: true });
+			console.log(`📁 Created project directory: ${projectPath}`);
+		}
+
+		// Clear existing contents
+		clearDirectory(projectPath);
+		console.log(`🧹 Cleared project directory`);
+
+		// Clone the repository
+		await execGitCommand(
+			['clone', gitOrigin, '.'], 
+			projectPath, 
+			`Git clone from ${gitOrigin}`
+		);
+
+		// Checkout the specified branch (if different from default)
+		const branchToCheckout = mainBranch?.trim() || 'main';
+		if (branchToCheckout !== 'main') {
+			await execGitCommand(
+				['checkout', branchToCheckout], 
+				projectPath, 
+				`Git checkout to branch ${branchToCheckout}`
+			);
+		}
+
+		console.log(`✅ Git repository initialized successfully at ${projectPath} from ${gitOrigin} on branch ${branchToCheckout}`);
+		return true;
+
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.error(`❌ Failed to initialize git repository:`, errorMessage);
+		return false;
+	}
+}
 
 export async function GET() {
 	try {
@@ -22,7 +143,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 export async function POST({ request }: RequestEvent) {
 	try {
 		const body = await request.json();
-		const { name, description, path } = body;
+		const { name, description, path, gitOrigin, mainBranch } = body;
 
 		if (!name?.trim()) {
 			return json({ error: 'Project name is required' }, { status: 400 });
@@ -32,6 +153,13 @@ export async function POST({ request }: RequestEvent) {
 			return json({ error: 'Project path is required' }, { status: 400 });
 		}
 
+		// Validate git origin if provided
+		if (gitOrigin?.trim() && !isValidGitUrl(gitOrigin.trim())) {
+			return json({ 
+				error: 'Invalid git origin URL. Must be in format: https://github.com/user/repo.git or git@github.com:user/repo.git' 
+			}, { status: 400 });
+		}
+
 		// Create project
 		const [newProject] = await db
 			.insert(projects)
@@ -39,6 +167,8 @@ export async function POST({ request }: RequestEvent) {
 				name: name.trim(),
 				description: description?.trim() || null,
 				path: path.trim(),
+				gitOrigin: gitOrigin?.trim() || null,
+				mainBranch: mainBranch?.trim() || 'main',
 			})
 			.returning();
 
@@ -443,13 +573,19 @@ export async function POST({ request }: RequestEvent) {
 			// Don't fail the entire project creation if agent creation fails
 		}
 
+		// Initialize git repository if git origin is provided
+		const gitInitialized = gitOrigin?.trim() 
+			? await initializeGitRepository(gitOrigin.trim(), mainBranch?.trim() || 'main')
+			: false;
+
 		return json({ 
 			...newProject, 
 			rolesCreated: createdRoles.length,
 			channelsCreated: createdChannels.length,
 			squadsCreated: createdSquads.length,
 			phasesCreated: createdPhases.length,
-			humanDirectorCreated: !!createdHumanDirector
+			humanDirectorCreated: !!createdHumanDirector,
+			gitInitialized
 		}, { status: 201 });
 	} catch (error: unknown) {
 		console.error('Failed to create project:', error);

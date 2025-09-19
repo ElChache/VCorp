@@ -17,8 +17,8 @@
 	let showCreateDialog = false;
 	let showDeleteDialog = false;
 	let showEditDialog = false;
-	let newProject = { name: '', description: '', path: '' };
-	let editProject = { name: '', description: '', path: '' };
+	let newProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
+	let editProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
 	let deleteProjectName = '';
 	let currentSection = 'overview'; // 'overview', 'roles', 'prompts', 'documents', 'scheduled-reminders'
 	let channels: any[] = [];
@@ -136,7 +136,7 @@
 				projects = [...projects, project];
 				selectedProject = project;
 				showCreateDialog = false;
-				newProject = { name: '', description: '', path: '' };
+				newProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
 				
 				// Trigger project change to reinitialize polling
 				await onProjectChange();
@@ -152,7 +152,7 @@
 
 	function closeCreateDialog() {
 		showCreateDialog = false;
-		newProject = { name: '', description: '', path: '' };
+		newProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
 	}
 
 	function openDeleteDialog() {
@@ -171,7 +171,9 @@
 			editProject = { 
 				name: selectedProject.name, 
 				description: selectedProject.description || '', 
-				path: selectedProject.path || '' 
+				path: selectedProject.path || '',
+				gitOrigin: selectedProject.gitOrigin || '',
+				mainBranch: selectedProject.mainBranch || 'main'
 			};
 			showEditDialog = true;
 		}
@@ -179,7 +181,7 @@
 
 	function closeEditDialog() {
 		showEditDialog = false;
-		editProject = { name: '', description: '', path: '' };
+		editProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
 	}
 
 	async function updateProject() {
@@ -201,7 +203,7 @@
 					selectedProject = updatedProject;
 				}
 				showEditDialog = false;
-				editProject = { name: '', description: '', path: '' };
+				editProject = { name: '', description: '', path: '', gitOrigin: '', mainBranch: 'main' };
 			}
 		} catch (error) {
 			console.error('Failed to update project:', error);
@@ -432,6 +434,28 @@
 				/>
 			</div>
 			
+			<div class="form-group">
+				<label for="gitOrigin">Git Repository URL:</label>
+				<input 
+					id="gitOrigin"
+					type="text" 
+					bind:value={newProject.gitOrigin} 
+					placeholder="git@github.com:username/repository.git or https://github.com/username/repository.git"
+				/>
+				<small class="form-help">Optional: If provided, the project will be automatically checked out to /project</small>
+			</div>
+			
+			<div class="form-group">
+				<label for="mainBranch">Main Branch:</label>
+				<input 
+					id="mainBranch"
+					type="text" 
+					bind:value={newProject.mainBranch} 
+					placeholder="main"
+				/>
+				<small class="form-help">The default branch to checkout (usually 'main' or 'master')</small>
+			</div>
+			
 			<div class="dialog-buttons">
 				<button class="cancel-btn" on:click={closeCreateDialog}>Cancel</button>
 				<button class="create-btn" on:click={createProject} disabled={!newProject.name.trim() || !newProject.path.trim()}>
@@ -507,6 +531,28 @@
 					bind:value={editProject.path} 
 					placeholder="Enter project path (e.g., /Users/username/Projects/myproject)"
 				/>
+			</div>
+			
+			<div class="form-group">
+				<label for="edit-gitOrigin">Git Repository URL:</label>
+				<input 
+					id="edit-gitOrigin"
+					type="text" 
+					bind:value={editProject.gitOrigin} 
+					placeholder="git@github.com:username/repository.git or https://github.com/username/repository.git"
+				/>
+				<small class="form-help">Optional: If provided, the project will be automatically checked out to /project</small>
+			</div>
+			
+			<div class="form-group">
+				<label for="edit-mainBranch">Main Branch:</label>
+				<input 
+					id="edit-mainBranch"
+					type="text" 
+					bind:value={editProject.mainBranch} 
+					placeholder="main"
+				/>
+				<small class="form-help">The default branch to checkout (usually 'main' or 'master')</small>
 			</div>
 			
 			<div class="dialog-buttons">
@@ -622,6 +668,14 @@
 		border: 1px solid #ccc;
 		border-radius: 4px;
 		font-size: 14px;
+	}
+
+	.form-help {
+		display: block;
+		margin-top: 4px;
+		font-size: 12px;
+		color: #666;
+		font-style: italic;
 	}
 
 	.dialog-buttons {

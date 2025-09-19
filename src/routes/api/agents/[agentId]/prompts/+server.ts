@@ -61,9 +61,9 @@ export const GET: RequestHandler = async ({ params }) => {
 			agentPrompts = promptsResult.rows;
 		}
 
-		// If no role-specific prompts, get basic prompts for the project
+		// If no role-specific prompts, get role prompt for this agent's role type
 		if (agentPrompts.length === 0) {
-			console.log('No role-specific prompts, getting project prompts...');
+			console.log('No role-specific prompt orders, getting role prompts for:', agent.roleType);
 			const promptsResult = await pool.query(`
 				SELECT 
 					id,
@@ -71,14 +71,23 @@ export const GET: RequestHandler = async ({ params }) => {
 					type,
 					content,
 					order_index as "orderIndex",
-					'project' as source,
-					is_global as "isGlobal"
+					'role' as source,
+					is_global as "isGlobal",
+					is_role_prompt as "isRolePrompt"
 				FROM prompts
-				WHERE project_id = $1
+				WHERE project_id = $1 
+				AND is_role_prompt = true
+				AND type = 'role_description'
+				AND LOWER(name) LIKE '%' || REPLACE($2, '-', ' ') || '%'
 				ORDER BY order_index
-			`, [agent.projectId]);
+			`, [agent.projectId, agent.roleType]);
 			
 			agentPrompts = promptsResult.rows;
+			
+			console.log(`✅ Found ${agentPrompts.length} role prompts for ${agent.roleType}`);
+			if (agentPrompts.length > 0) {
+				console.log('Using role prompt:', agentPrompts[0].name);
+			}
 		}
 
 		console.log(`✅ Loaded ${agentPrompts.length} prompts for agent ${agentId}`);

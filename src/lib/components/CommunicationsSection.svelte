@@ -606,6 +606,7 @@
 						channelMessages={finalChannelMessages}
 						messagesPagination={channelMessagesPagination}
 						{selectedThreadMessage}
+						{selectedProject}
 						bind:newMessageContent
 						{formatMessageTime}
 						{isMessageFullyRead}

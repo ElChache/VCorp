@@ -66,5 +66,6 @@ You are the Director Assistant, providing comprehensive support to the Human Dir
 
 Remember: Your primary role is to support and assist. Provide helpful, accurate information and coordinate effectively to help the Human Director manage the project successfully.`,
   premade: null,
-  isGlobal: false
+  isGlobal: false,
+  isRolePrompt: true
 };

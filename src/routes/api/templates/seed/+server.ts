@@ -1,9 +1,10 @@
 import { json } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
-import { roleTemplates, promptTemplates, rolePromptCompositionTemplates, squadTemplates, squadPromptAssignmentTemplates, squadRoleAssignmentTemplates, phaseTemplates, phaseRoleAssignmentTemplates, channelTemplates, channelRoleAssignmentTemplates } from '$lib/db/schema';
+import { roleTemplates, promptTemplates, rolePromptCompositionTemplates, squadTemplates, squadPromptAssignmentTemplates, squadRoleAssignmentTemplates, phaseTemplates, phaseRoleAssignmentTemplates, channelTemplates, channelRoleAssignmentTemplates, premadeMessageTemplates } from '$lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { CORE_ROLE_TEMPLATES, CORE_PROMPT_TEMPLATES, CORE_SQUAD_TEMPLATES, CORE_SQUAD_ROLE_ASSIGNMENTS, CORE_PHASE_TEMPLATES, CORE_PHASE_ROLE_ASSIGNMENTS, CORE_CHANNEL_TEMPLATES, CORE_CHANNEL_ROLE_ASSIGNMENTS } from '$lib/templates/core-templates';
 import { rolePermissionTemplates } from '$lib/templates/permissions';
+import { CORE_PREMADE_MESSAGE_TEMPLATES } from '$lib/templates/premade-messages';
 
 export async function POST() {
 	try {
@@ -98,6 +99,7 @@ export async function POST() {
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
 						isGlobal: (promptTemplate as any).isGlobal || false,
+						isRolePrompt: (promptTemplate as any).isRolePrompt || false,
 					})
 					.where(eq(promptTemplates.id, existing.id))
 					.returning();
@@ -115,6 +117,7 @@ export async function POST() {
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
 						isGlobal: (promptTemplate as any).isGlobal || false,
+						isRolePrompt: (promptTemplate as any).isRolePrompt || false,
 						version: 1
 					})
 					.returning();
@@ -402,6 +405,59 @@ export async function POST() {
 			console.log(`✅ Linked ${assignment.phaseName} -> ${assignment.roleName} (order: ${assignment.phaseOrder})`);
 		}
 
+		// Create premade message templates
+		console.log('💬 Creating premade message templates...');
+		const createdPremadeMessageTemplates: Record<string, any> = {};
+		for (const [key, messageTemplate] of Object.entries(CORE_PREMADE_MESSAGE_TEMPLATES)) {
+			console.log(`💬 Creating premade message template: ${messageTemplate.name}`);
+			
+			// Check if it already exists
+			const [existing] = await db
+				.select()
+				.from(premadeMessageTemplates)
+				.where(eq(premadeMessageTemplates.id, messageTemplate.id))
+				.limit(1);
+				
+			if (existing) {
+				// Update existing template
+				const [updated] = await db
+					.update(premadeMessageTemplates)
+					.set({
+						name: messageTemplate.name,
+						category: messageTemplate.category,
+						content: messageTemplate.content,
+						targetRoles: JSON.stringify(messageTemplate.targetRoles),
+						isSystemTemplate: messageTemplate.isSystemTemplate,
+						isActive: messageTemplate.isActive,
+						updatedAt: new Date()
+					})
+					.where(eq(premadeMessageTemplates.id, existing.id))
+					.returning();
+				
+				createdPremadeMessageTemplates[key] = updated;
+				console.log(`🔄 Updated existing premade message template: ${updated.name} (ID: ${updated.id})`);
+			} else {
+				// Create new template
+				const [created] = await db
+					.insert(premadeMessageTemplates)
+					.values({
+						id: messageTemplate.id,
+						name: messageTemplate.name,
+						category: messageTemplate.category,
+						content: messageTemplate.content,
+						targetRoles: JSON.stringify(messageTemplate.targetRoles),
+						isSystemTemplate: messageTemplate.isSystemTemplate,
+						isActive: messageTemplate.isActive
+					})
+					.returning();
+				
+				if (created) {
+					createdPremadeMessageTemplates[key] = created;
+					console.log(`✅ Created premade message template: ${created.name} (ID: ${created.id})`);
+				}
+			}
+		}
+
 		return json({ 
 			success: true, 
 			message: 'All templates seeded successfully',
@@ -411,6 +467,7 @@ export async function POST() {
 				squadTemplates: Object.keys(createdSquadTemplates).length,
 				channelTemplates: Object.keys(createdChannelTemplates).length,
 				phaseTemplates: Object.keys(createdPhaseTemplates).length,
+				premadeMessageTemplates: Object.keys(createdPremadeMessageTemplates).length,
 				roleCompositions: rolePromptMappings.reduce((acc, mapping) => acc + mapping.prompts.length, 0),
 				squadCompositions: squadPromptMappings.reduce((acc, mapping) => acc + mapping.prompts.length, 0),
 				squadRoleAssignments: CORE_SQUAD_ROLE_ASSIGNMENTS.length,

@@ -350,6 +350,115 @@ export async function POST({ request }: RequestEvent) {
 	}
 }
 
+// PUT /api/phases - Update a phase (by ID via query param)
+export async function PUT({ url, request }: RequestEvent) {
+	try {
+		const phaseId = url.searchParams.get('id');
+		
+		if (!phaseId) {
+			return json({ 
+				error: 'Missing required parameter: id must be provided'
+			}, { status: 400 });
+		}
+
+		const parsedPhaseId = parseInt(phaseId);
+		if (isNaN(parsedPhaseId) || parsedPhaseId <= 0) {
+			return json({ 
+				error: 'Invalid phase ID: must be a positive integer'
+			}, { status: 400 });
+		}
+
+		const {
+			title,
+			body,
+			assignedToRoleType,
+			requiredInputs,
+			expectedOutputs,
+		} = await request.json();
+
+		// At least one field must be provided for update
+		if (!title && !body && !assignedToRoleType && !requiredInputs && !expectedOutputs) {
+			return json({ 
+				error: 'At least one field must be provided for update (title, body, assignedToRoleType, requiredInputs, expectedOutputs)'
+			}, { status: 400 });
+		}
+
+		// Get the current phase to verify it exists
+		const [currentPhase] = await db
+			.select()
+			.from(content)
+			.where(and(
+				eq(content.id, parsedPhaseId),
+				eq(content.type, 'phase')
+			))
+			.limit(1);
+
+		if (!currentPhase) {
+			return json({ error: 'Phase not found' }, { status: 404 });
+		}
+
+		// Validate JSON arrays if provided
+		if (requiredInputs) {
+			try {
+				JSON.parse(requiredInputs);
+			} catch {
+				return json({ 
+					error: 'Invalid requiredInputs: must be a valid JSON string array'
+				}, { status: 400 });
+			}
+		}
+
+		if (expectedOutputs) {
+			try {
+				JSON.parse(expectedOutputs);
+			} catch {
+				return json({ 
+					error: 'Invalid expectedOutputs: must be a valid JSON string array'
+				}, { status: 400 });
+			}
+		}
+
+		// Build update object with only provided fields
+		const updateData: any = {
+			updatedAt: new Date()
+		};
+
+		if (title !== undefined) updateData.title = title;
+		if (body !== undefined) updateData.body = body;
+		if (assignedToRoleType !== undefined) updateData.assignedToRoleType = assignedToRoleType;
+		if (requiredInputs !== undefined) updateData.requiredInputs = requiredInputs;
+		if (expectedOutputs !== undefined) updateData.expectedOutputs = expectedOutputs;
+
+		// Update the phase
+		const [updatedPhase] = await db
+			.update(content)
+			.set(updateData)
+			.where(eq(content.id, parsedPhaseId))
+			.returning();
+
+		return json({
+			id: updatedPhase.id,
+			projectId: updatedPhase.projectId,
+			type: updatedPhase.type,
+			title: updatedPhase.title,
+			body: updatedPhase.body,
+			authorAgentId: updatedPhase.authorAgentId,
+			assignedToRoleType: updatedPhase.assignedToRoleType,
+			phaseStatus: updatedPhase.phaseStatus,
+			requiredInputs: updatedPhase.requiredInputs,
+			expectedOutputs: updatedPhase.expectedOutputs,
+			createdAt: updatedPhase.createdAt,
+			updatedAt: updatedPhase.updatedAt,
+		});
+
+	} catch (error: unknown) {
+		console.error('Failed to update phase:', error);
+		return json({ 
+			error: 'Internal server error occurred while updating phase'
+		}, { status: 500 });
+	}
+}
+
 // DELETE /api/phases - Delete a phase (by ID via query param)
 export async function DELETE({ url, request }: RequestEvent) {
 	try {

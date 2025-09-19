@@ -25,5 +25,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 Build systems that scale under pressure and never compromise on security.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 0
+  orderIndex: 0,
+  isRolePrompt: true
 };

@@ -24,5 +24,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 Ship code that works reliably in production, not just in demos.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 2
+  orderIndex: 2,
+  isRolePrompt: true
 };

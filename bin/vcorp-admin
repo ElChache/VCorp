@@ -87,6 +87,9 @@ show_global_help() {
     echo "🗑️  Management Commands:"
     echo "   remove       Remove/delete resources from the system"
     echo ""
+    echo "🌿 Git Commands:"
+    echo "   create-branch Create new git worktree branch"
+    echo ""
     echo "💡 For detailed help on any command: vcorp COMMAND --help"
     echo "   Example: vcorp message --help"
 }
@@ -445,6 +448,9 @@ show_help_commands() {
     echo "🗑️  Management Commands:"
     echo "   remove       Remove/delete resources from the system"
     echo ""
+    echo "🌿 Git Commands:"
+    echo "   create-branch Create new git worktree branch"
+    echo ""
     echo "💡 For detailed help on any command: vcorp COMMAND --help"
     echo "   Example: vcorp message --help"
     echo ""
@@ -453,6 +459,40 @@ show_help_commands() {
     echo "   2. vcorp phase     # See your current work"
     echo "   3. vcorp agents    # Meet your team"
     echo "   4. vcorp channels  # Find communication channels"
+}
+
+show_create_branch_help() {
+    echo "🌿 vcorp create-branch - Create new git worktree branch for feature development"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp create-branch BRANCH_NAME [--from=BASE_BRANCH]"
+    echo "   vcorp create-branch --branch=BRANCH_NAME [--from=BASE_BRANCH]"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp create-branch feature-auth               # Create 'feature-auth' branch from current main"
+    echo "   vcorp create-branch api-endpoints --from=main  # Create 'api-endpoints' branch from main"
+    echo "   vcorp create-branch bug-fix-login --from=develop # Create 'bug-fix-login' from develop"
+    echo ""
+    echo "How it works:"
+    echo "   1. Command runs from main project directory (../projects)"
+    echo "   2. Creates git worktree at ../agent_workspaces/\$AGENT_ID/BRANCH_NAME/"
+    echo "   3. New worktree tracks the new branch (created if doesn't exist)"
+    echo "   4. You can switch to the new workspace to work on the feature"
+    echo ""
+    echo "Options:"
+    echo "   --from=BASE_BRANCH    Create new branch based on BASE_BRANCH (default: current branch)"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Each branch gets its own isolated workspace"
+    echo "   • You can have multiple feature branches as separate workspaces"
+    echo "   • Use descriptive branch names (feature-*, bug-*, hotfix-*)"
+    echo "   • Branches are automatically pushed to origin when you commit"
+    echo ""
+    echo "🔧 Workspace Structure:"
+    echo "   agent_workspaces/\$AGENT_ID/"
+    echo "   ├── feature-auth/        # git worktree for feature-auth branch"
+    echo "   ├── api-endpoints/       # git worktree for api-endpoints branch"
+    echo "   └── bug-fix-login/       # git worktree for bug-fix-login branch"
 }
 
 show_remove_help() {
@@ -580,7 +620,7 @@ parse_args() {
     local expected_args=("$@")
     
     # Clear any existing ARG_ variables
-    unset ARG_message_id ARG_content ARG_channel_id ARG_to ARG_title ARG_description ARG_role ARG_priority ARG_slug ARG_assign_agent ARG_assign_role ARG_assign_squad ARG_to_role ARG_to_squad ARG_status ARG_help ARG_file ARG_detailed ARG_workspace ARG_level ARG_all ARG_json
+    unset ARG_message_id ARG_content ARG_channel_id ARG_to ARG_title ARG_description ARG_role ARG_priority ARG_slug ARG_assign_agent ARG_assign_role ARG_assign_squad ARG_to_role ARG_to_squad ARG_status ARG_help ARG_file ARG_detailed ARG_workspace ARG_level ARG_all ARG_json ARG_branch_name ARG_from
     
     for arg in "${COMMAND_ARGS[@]}"; do
         if [[ "$arg" == "--help" ]]; then
@@ -1927,12 +1967,121 @@ case "$COMMAND" in
         fi
         ;;
         
+    create-branch)
+        # Parse arguments: vcorp create-branch BRANCH_NAME [--from=BASE_BRANCH]
+        parse_args "branch-name" "from"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_create_branch_help
+            exit 0
+        fi
+        
+        if [[ -z "$ARG_branch_name" ]]; then
+            echo "❌ Error: Branch name is required"
+            echo ""
+            show_create_branch_help
+            exit 1
+        fi
+        
+        # Validate branch name (basic validation)
+        if [[ ! "$ARG_branch_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+            echo "❌ Error: Invalid branch name '$ARG_branch_name'"
+            echo "Branch names must start with alphanumeric character and contain only letters, numbers, hyphens, and underscores"
+            exit 1
+        fi
+        
+        echo "🌿 Creating git worktree branch '$ARG_branch_name'..."
+        
+        # Get current working directory (should be agent workspace)
+        CURRENT_DIR=$(pwd)
+        echo "📂 Current directory: $CURRENT_DIR"
+        
+        # Navigate to the projects directory (relative to agent workspace)
+        # Agent workspaces are at: /path/to/ROOT/agent_workspaces/AGENT_ID/
+        # Projects directory is at: /path/to/ROOT/project/ or /path/to/ROOT/projects/
+        PROJECT_DIR="../../project"
+        if [[ ! -d "$PROJECT_DIR" ]]; then
+            PROJECT_DIR="../../projects"
+        fi
+        
+        if [[ ! -d "$PROJECT_DIR" ]]; then
+            echo "❌ Error: Projects directory not found at $PROJECT_DIR"
+            echo "This command must be run from an agent workspace with the correct directory structure"
+            exit 1
+        fi
+        
+        # Check if it's a git repository
+        if [[ ! -d "$PROJECT_DIR/.git" ]]; then
+            echo "❌ Error: $PROJECT_DIR is not a git repository"
+            echo "Git worktrees can only be created from a git repository"
+            exit 1
+        fi
+        
+        # Determine base branch
+        BASE_BRANCH="${ARG_from:-}"
+        if [[ -z "$BASE_BRANCH" ]]; then
+            # Get current branch from projects directory
+            BASE_BRANCH=$(cd "$PROJECT_DIR" && git branch --show-current)
+            if [[ -z "$BASE_BRANCH" ]]; then
+                BASE_BRANCH="main"  # Fallback to main
+            fi
+        fi
+        
+        echo "📍 Base branch: $BASE_BRANCH"
+        
+        # Create the worktree path (in agent's workspace directory)
+        WORKTREE_PATH="../$ARG_branch_name"
+        
+        echo "🔧 Creating worktree at: $WORKTREE_PATH"
+        echo "💻 Running from projects directory: $PROJECT_DIR"
+        
+        # Create the git worktree
+        cd "$PROJECT_DIR" || {
+            echo "❌ Error: Failed to navigate to projects directory"
+            exit 1
+        }
+        
+        # Check if branch already exists
+        if git branch --list | grep -q "\\b$ARG_branch_name\\b"; then
+            echo "⚠️  Branch '$ARG_branch_name' already exists, checking it out in new worktree"
+            git worktree add "$CURRENT_DIR/$ARG_branch_name" "$ARG_branch_name"
+        else
+            echo "🆕 Creating new branch '$ARG_branch_name' based on '$BASE_BRANCH'"
+            git worktree add -b "$ARG_branch_name" "$CURRENT_DIR/$ARG_branch_name" "$BASE_BRANCH"
+        fi
+        
+        if [[ $? -eq 0 ]]; then
+            echo "✅ Git worktree created successfully!"
+            echo ""
+            echo "🎯 Next steps:"
+            echo "   cd $ARG_branch_name"
+            echo "   # Work on your feature"
+            echo "   git add ."
+            echo "   git commit -m \"Your commit message\""
+            echo "   git push origin $ARG_branch_name"
+            echo ""
+            echo "💡 Your new workspace:"
+            echo "   Location: $(realpath "$CURRENT_DIR/$ARG_branch_name")"
+            echo "   Branch: $ARG_branch_name"
+            echo "   Based on: $BASE_BRANCH"
+        else
+            echo "❌ Error: Failed to create git worktree"
+            echo "This could be due to:"
+            echo "  • Branch name conflicts"
+            echo "  • Directory already exists"
+            echo "  • Git repository issues"
+            echo "  • Permission problems"
+            exit 1
+        fi
+        ;;
+        
     *)
         echo "Unknown command: $COMMAND"
         echo ""
         echo "Available commands:"
         echo "  help, permissions, inbox, phase, agents, channels, channel, thread"
-        echo "  reply, message, dm, director, it, document, ticket, documents, tickets, remove"
+        echo "  reply, message, dm, director, it, document, ticket, documents, tickets, remove, create-branch"
         exit 1
         ;;
 esac

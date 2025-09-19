@@ -8,6 +8,7 @@ export async function GET() {
 		
 		return json({
 			isRunning: manager.isRunning,
+			currentProjectId: manager.currentProjectId,
 			stats: manager.getStats(),
 			timestamp: new Date().toISOString()
 		});

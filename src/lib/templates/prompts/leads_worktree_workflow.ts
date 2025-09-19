@@ -25,6 +25,23 @@ export const leads_worktree_workflow = {
 
 ## Lead-Specific Workflow
 
+### Understanding Developer Workflow
+**Important:** Developers now use `vcorp create-branch` to create their worktrees automatically. You should understand this workflow to guide and monitor them:
+
+**Developer Command:**
+\`\`\`bash
+# Developers use this from their agent workspace:
+vcorp create-branch feature-auth-system
+vcorp create-branch bug-fix-login --from=main
+\`\`\`
+
+**This automatically:**
+- Creates git worktree in their agent workspace
+- Sets up branch and directory structure  
+- Provides them with next steps
+
+**Monitor their compliance** - ensure they're using this command instead of manual git worktree setup.
+
 ### Working with Main Branch
 \`\`\`bash
 # Navigate to main project directory (LEADS ONLY)
@@ -192,9 +209,14 @@ PROJECT FOLDER VIOLATION DETECTED
 
 As a $AGENT_ROLE, you must ONLY work within your agent worktree folder: PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
 
+CORRECT WORKFLOW:
+1. Use: vcorp create-branch feature-name
+2. Work in the created worktree directory
+3. Submit PR for review
+
 Use /api/projects/$PROJECT_ID/message-director to notify: "Please note this serious workspace violation requiring immediate correction."
 
-The project folder is exclusively for Lead Developers and System Architects. All other developers must work within their isolated worktree environments.
+The project folder is exclusively for Lead Developers and System Architects. All other developers must work within their isolated worktree environments created with vcorp create-branch.
 
 Correct your workflow immediately to prevent project corruption.
 \`\`\`

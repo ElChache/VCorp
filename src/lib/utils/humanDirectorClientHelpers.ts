@@ -57,6 +57,17 @@ export function isAssignmentForHumanDirector(assignment: any): boolean {
 }
 
 /**
+ * Check if an assignment is for the human director (DM context only)
+ * Only checks for direct agent assignments - used for direct messages
+ */
+export function isDirectAssignmentForHumanDirector(assignment: any): boolean {
+	if (!assignment) return false;
+	
+	// For DMs, only check for direct agent-based assignments
+	return assignment.assignedToType === 'agent' && isHumanDirectorAgent(assignment.assignedTo);
+}
+
+/**
  * Check if a read record is from the human director
  * Only checks for actual agent IDs with isHumanDirector === true
  */

@@ -2,6 +2,7 @@ import { json, type RequestEvent } from '@sveltejs/kit';
 import { db } from '$lib/db/index';
 import { content, readingAssignments, agents } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getHumanDirectorIdForProject, resolveAgentId } from '$lib/utils/humanDirectorHelpers';
 
 // PUT /api/phases/[id]/status - Update phase status (internal web app endpoint)
 export async function PUT({ params, request }: RequestEvent) {
@@ -23,7 +24,8 @@ async function updatePhaseStatus(params: {id?: string}, request: Request) {
 		const phaseId = parseInt(params.id || '');
 		const {
 			phaseStatus,
-			projectId
+			projectId,
+			authorAgentId  // Optional: who is making this change
 		} = await request.json();
 
 		// Validate phase ID
@@ -161,26 +163,27 @@ async function updatePhaseStatus(params: {id?: string}, request: Request) {
 			const createdAssignments = await Promise.all(assignmentPromises);
 
 			// Also create reading assignment for human director
-			const [humanDirector] = await db
-				.select({ id: agents.id })
-				.from(agents)
-				.where(and(
-					eq(agents.projectId, parsedProjectId),
-					eq(agents.isHumanDirector, true)
-				))
-				.limit(1);
-
+			// BUT only if the requester is NOT the human director (avoid self-assignments)
+			const humanDirectorId = await getHumanDirectorIdForProject(parsedProjectId);
+			
 			let humanDirectorAssignment = null;
-			if (humanDirector) {
-				const [hdAssignment] = await db
-					.insert(readingAssignments)
-					.values({
-						contentId: phaseId,
-						assignedToType: 'agent',
-						assignedTo: humanDirector.id,
-					})
-					.returning();
-				humanDirectorAssignment = hdAssignment;
+			if (humanDirectorId && authorAgentId) {
+				// Resolve the author agent ID and check if it's the human director
+				const resolvedAuthorId = await resolveAgentId(authorAgentId, parsedProjectId);
+				const isRequestFromHumanDirector = resolvedAuthorId === humanDirectorId;
+				
+				if (!isRequestFromHumanDirector) {
+					// Only create assignment if the requester is NOT the human director
+					const [hdAssignment] = await db
+						.insert(readingAssignments)
+						.values({
+							contentId: phaseId,
+							assignedToType: 'agent',
+							assignedTo: humanDirectorId,
+						})
+						.returning();
+					humanDirectorAssignment = hdAssignment;
+				}
 			}
 
 			// Send notifications for the status change

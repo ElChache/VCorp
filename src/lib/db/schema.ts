@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, boolean, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, boolean, unique } from 'drizzle-orm/pg-core';
 
 // Core VCorp Tables
 export const projects = pgTable('projects', {
@@ -6,6 +6,8 @@ export const projects = pgTable('projects', {
 	name: text('name').notNull(),
 	description: text('description'),
 	path: text('path').notNull(),
+	gitOrigin: text('git_origin'), // Git repository URL like "git@github.com:user/repo.git"
+	mainBranch: text('main_branch').default('main'), // Main branch name, defaults to "main"
 	techStack: text('tech_stack'),
 	status: text('status').notNull().default('active'), // active, paused, completed, archived
 	createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -97,6 +99,7 @@ export const prompts = pgTable('prompts', {
 	content: text('content').notNull(),
 	premade: text('premade'), // null for normal prompts, inherited from template or custom
 	isGlobal: boolean('is_global').notNull().default(false), // inherited from template or custom
+	isRolePrompt: boolean('is_role_prompt').notNull().default(false), // true for role-specific prompts
 	orderIndex: integer('order_index').notNull().default(0),
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
@@ -340,3 +343,26 @@ export const phases = pgTable('phases', {
 	// Ensure unique phase per role per project per order
 	uniqueProjectRolePhaseOrder: unique().on(table.projectId, table.roleId, table.phaseOrder)
 }));
+
+// Premade Message Templates - Simple message templates
+export const premadeMessageTemplates = pgTable('premade_message_templates', {
+	id: text('id').primaryKey(),
+	name: text('name').notNull(),
+	category: text('category').notNull(),
+	content: text('content').notNull(),
+	targetRoles: text('target_roles'), // JSON array
+	isSystemTemplate: boolean('is_system_template').notNull().default(false),
+	isActive: boolean('is_active').notNull().default(true),
+	createdAt: timestamp('created_at').notNull().defaultNow(),
+	updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Premade Messages - Instances when templates are used
+export const premadeMessages = pgTable('premade_messages', {
+	id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
+	templateId: text('template_id').notNull().references(() => premadeMessageTemplates.id),
+	projectId: integer('project_id').notNull().references(() => projects.id),
+	authorAgentId: text('author_agent_id').notNull().references(() => agents.id),
+	content: text('content').notNull(), // Final message content
+	createdAt: timestamp('created_at').notNull().defaultNow()
+});

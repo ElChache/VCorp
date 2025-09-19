@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
+	import QuickTemplateSelector from './QuickTemplateSelector.svelte';
 
 	// Props
 	export let showSendMessageDialog: boolean = false;
@@ -18,6 +19,9 @@
 		body: '',
 		channelId: null as number | null
 	};
+
+	// Template selection
+	let selectedProjectId = 1;
 
 	let messageReadingAssignments: Array<{
 		assignedToType: 'role' | 'agent' | 'squad';
@@ -46,6 +50,27 @@
 		};
 		messageReadingAssignments = [];
 		dispatch('close');
+	}
+
+	function handleTemplateSelected(event) {
+		const { resolvedContent } = event.detail;
+		
+		// Set the resolved content as the message body
+		newMessage.body = resolvedContent;
+		
+		// If the template included a title in the first line, extract it
+		const lines = resolvedContent.split('\n');
+		if (lines[0] && lines[0].trim() && !newMessage.title) {
+			// Extract title from first line if it looks like a title
+			const firstLine = lines[0].trim();
+			if (firstLine.length < 100 && !firstLine.includes('\n')) {
+				newMessage.title = firstLine.replace(/^#+\s*/, ''); // Remove markdown headers
+				// Remove the title line from body if it was a header
+				if (firstLine.startsWith('#')) {
+					newMessage.body = lines.slice(1).join('\n').trim();
+				}
+			}
+		}
 	}
 
 	function handleSendMessage() {
@@ -91,11 +116,19 @@
 				</div>
 				
 				<div class="form-group">
-					<label for="message-body">Message:</label>
+					<div class="message-content-header">
+						<label for="message-body">Message:</label>
+						<QuickTemplateSelector
+							{selectedProjectId}
+							roleType="human-director"
+							agentId="human-director"
+							on:templateSelected={handleTemplateSelected}
+						/>
+					</div>
 					<textarea 
 						id="message-body"
 						bind:value={newMessage.body} 
-						placeholder="Type your message here..."
+						placeholder="Type your message here or use a template..."
 						rows="6"
 					></textarea>
 				</div>
@@ -169,6 +202,8 @@
 		</div>
 	</div>
 {/if}
+
+<!-- Template selector is now inline above -->
 
 <style>
 	/* Dialog overlay and base styles */
@@ -349,6 +384,15 @@
 	.remove-btn:hover {
 		background: #dc2626;
 	}
+
+	.message-content-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	/* Template selector styles are in QuickTemplateSelector component */
 
 	/* Dialog buttons */
 	.dialog-buttons {

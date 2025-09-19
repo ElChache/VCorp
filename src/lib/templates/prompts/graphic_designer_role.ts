@@ -36,5 +36,6 @@ Create visually compelling, cohesive design language that enhances user experien
 - Ensure visual consistency across the entire user experience`,
   premade: null,
   isGlobal: false,
-  orderIndex: 5
+  orderIndex: 5,
+  isRolePrompt: true
 };

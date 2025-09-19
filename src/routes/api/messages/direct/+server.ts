@@ -91,23 +91,49 @@ export async function GET({ url }: RequestEvent) {
 				}
 
 				// Get the most recent message date with this agent
-				const [lastMessage] = await db
-					.select({ createdAt: content.createdAt })
+				// We need to check reading assignments to find messages between these agents
+				const messagesQuery = await db
+					.select({ 
+						id: content.id,
+						createdAt: content.createdAt,
+						authorAgentId: content.authorAgentId 
+					})
 					.from(content)
 					.where(and(
 						eq(content.projectId, parseInt(projectId)),
 						isNull(content.channelId),
 						or(
-							and(eq(content.authorAgentId, agentId), eq(content.authorAgentId, otherAgentId)),
-							and(eq(content.authorAgentId, otherAgentId), eq(content.authorAgentId, agentId))
+							eq(content.authorAgentId, agentId),
+							eq(content.authorAgentId, otherAgentId)
 						)
 					))
-					.orderBy(content.createdAt)
-					.limit(1);
+					.orderBy(content.createdAt);
+
+				// Filter messages that are actually between these two agents
+				let lastMessageDate = null;
+				for (const message of messagesQuery) {
+					const assignments = await db
+						.select({ assignedTo: readingAssignments.assignedTo })
+						.from(readingAssignments)
+						.where(and(
+							eq(readingAssignments.contentId, message.id),
+							eq(readingAssignments.assignedToType, 'agent')
+						));
+
+					// Check if message is between the two agents
+					const isRelevant = (
+						(message.authorAgentId === agentId && assignments.some(a => a.assignedTo === otherAgentId)) ||
+						(message.authorAgentId === otherAgentId && assignments.some(a => a.assignedTo === agentId))
+					);
+
+					if (isRelevant) {
+						lastMessageDate = message.createdAt;
+					}
+				}
 
 				return {
 					...agent,
-					lastMessageDate: lastMessage?.createdAt || null
+					lastMessageDate: lastMessageDate
 				};
 			})
 		);

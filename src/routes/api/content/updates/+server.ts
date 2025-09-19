@@ -178,14 +178,14 @@ export async function GET({ url }: RequestEvent) {
 		);
 
 		// Helper function to check if content is document-related
-		const isDocumentRelated = async (content: any) => {
+		const isDocumentRelated = async (contentItem: any) => {
 			// Direct document
-			if (content.type === 'document') return true;
+			if (contentItem.type === 'document') return true;
 			
 			// Reply to a document (need to check if parent is a document)
-			if (content.parentContentId) {
+			if (contentItem.parentContentId) {
 				// First check in current updates batch
-				const parentContent = updatesWithAssignments.find(u => u.id === content.parentContentId);
+				const parentContent = updatesWithAssignments.find(u => u.id === contentItem.parentContentId);
 				if (parentContent && parentContent.type === 'document') return true;
 				
 				// If parent not found in current batch, check database
@@ -193,7 +193,7 @@ export async function GET({ url }: RequestEvent) {
 					const [parentFromDB] = await db
 						.select({ type: content.type })
 						.from(content)
-						.where(eq(content.id, content.parentContentId))
+						.where(eq(content.id, contentItem.parentContentId))
 						.limit(1);
 					
 					if (parentFromDB && parentFromDB.type === 'document') return true;

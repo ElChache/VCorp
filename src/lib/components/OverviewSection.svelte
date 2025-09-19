@@ -17,11 +17,20 @@
 	}
 
 	async function startMonitoring() {
+		if (!selectedProject) {
+			alert('Please select a project first before starting monitoring');
+			return;
+		}
+
 		try {
-			const response = await fetch('/api/monitoring/start', { method: 'POST' });
+			const response = await fetch('/api/monitoring/start', { 
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ projectId: selectedProject.id })
+			});
 			if (response.ok) {
 				await refreshMonitoringStatus();
-				console.log('Monitoring service started successfully');
+				console.log(`Monitoring service started for project: ${selectedProject.name}`);
 			} else {
 				const error = await response.json();
 				console.error('Failed to start monitoring:', error.error);
@@ -75,6 +84,9 @@
 <!-- Monitoring Service Controls -->
 <div class="monitoring-section">
 	<h3>🔍 Monitoring Service</h3>
+	{#if monitoringStatus?.isRunning && monitoringStatus?.currentProjectId}
+		<p class="monitoring-project">Monitoring project: <strong>{selectedProject?.name || `Project ${monitoringStatus.currentProjectId}`}</strong></p>
+	{/if}
 	<div class="monitoring-controls">
 		<div class="monitoring-status">
 			<span class="status-indicator" class:active={monitoringStatus?.isRunning}></span>
@@ -85,7 +97,14 @@
 			{#if monitoringStatus?.isRunning}
 				<button class="btn-stop" on:click={stopMonitoring}>Stop Monitoring</button>
 			{:else}
-				<button class="btn-start" on:click={startMonitoring}>Start Monitoring</button>
+				<button 
+					class="btn-start" 
+					on:click={startMonitoring}
+					disabled={!selectedProject}
+					title={!selectedProject ? "Please select a project first" : "Start monitoring for this project"}
+				>
+					Start Monitoring
+				</button>
 			{/if}
 			<button class="btn-refresh" on:click={refreshMonitoringStatus}>Refresh</button>
 		</div>
@@ -149,6 +168,16 @@
 		background: #f9f9ff;
 	}
 
+	.monitoring-project {
+		margin: 8px 0 16px 0;
+		padding: 8px 12px;
+		background: #e8f2ff;
+		border: 1px solid #b3d9ff;
+		border-radius: 4px;
+		font-size: 14px;
+		color: #0066cc;
+	}
+
 	.monitoring-section h3 {
 		margin: 0 0 16px 0;
 		color: #333;
@@ -201,8 +230,13 @@
 		font-size: 13px;
 	}
 
-	.btn-start:hover {
+	.btn-start:hover:not(:disabled) {
 		background: #218838;
+	}
+	.btn-start:disabled {
+		background: #6c757d;
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 
 	.btn-stop {

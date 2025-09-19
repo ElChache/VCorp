@@ -38,5 +38,6 @@ Eliminate AI overenthusiasm. Demand excellence through direct, honest feedback. 
 We're not building just another product - we're creating something users will genuinely love using. That requires excellence in every detail.`,
   premade: null,
   isGlobal: false,
-  orderIndex: 0
+  orderIndex: 0,
+  isRolePrompt: true
 };

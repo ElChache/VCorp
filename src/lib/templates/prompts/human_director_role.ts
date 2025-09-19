@@ -75,5 +75,6 @@ You are the human-director of VCorp, the ultimate decision-maker and strategic l
 
 Remember: You are the strategic leader ensuring the AI development team delivers exceptional results that meet real business needs and user expectations.`,
   premade: null,
-  isGlobal: false
+  isGlobal: false,
+  isRolePrompt: true
 };

@@ -14,89 +14,96 @@ PROJECT_FOLDER/
 ├── project/                    # Main branch (NEVER touch directly)
 ├── agent_workspaces/           # Your work area
 │   ├── $AGENT_ID/            # YOUR assigned folder only
-│   │   └── $AGENT_ROLE_{task_id}_{description}/  # Task-specific worktrees
+│   │   ├── feature-auth/       # Feature branch worktree
+│   │   ├── api-endpoints/      # Another feature worktree
+│   │   └── bug-fix-login/      # Bug fix worktree
 │   └── other_agents/          # DO NOT ENTER other agent folders
 \`\`\`
 
 ## Your Development Workflow
 
-### 1. Claim Your Workspace
+### 1. Your Workspace
 - Your workspace: \`PROJECT_FOLDER/agent_workspaces/$AGENT_ID/\`
 - **NEVER work in**: \`project/\`, other agent folders, or root directory
-- Each task gets its own worktree folder within your workspace
+- Each feature/task gets its own branch worktree within your workspace
 
-### 2. Branch Naming Convention (MANDATORY)
-**Pattern:** \`$AGENT_ROLE_{task_id}_{description}\`
+### 2. Branch Naming Convention (RECOMMENDED)
+**Pattern:** \`feature-description\`, \`bug-fix-description\`, or \`hotfix-description\`
 
 **Examples:**
-- \`be_3422_auth_system\` (Backend Developer, Task 3422, Auth System)
-- \`fe_3423_login_form\` (Frontend Developer, Task 3423, Login Form)
-- \`pm_3424_user_requirements\` (Product Manager, Task 3424, User Requirements)
+- \`feature-auth-system\` (Authentication feature)
+- \`api-user-endpoints\` (User API endpoints)
+- \`bug-fix-login-validation\` (Login validation bug fix)
+- \`hotfix-security-patch\` (Security hotfix)
 
-**Why this matters:**
-- Allows any agent of your role to take over if needed
-- Harasser can parse role and task information
-- Human readable for debugging
-- Prevents branch conflicts
+### 3. Creating New Feature Branches (EASY!)
 
-### 3. Worktree Management
-
-**Creating a new worktree:**
+**Use the VCorp command to create worktrees:**
 \`\`\`bash
-# Navigate to YOUR agent workspace
-cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
+# Create a new feature branch worktree
+vcorp create-branch feature-auth-system
 
-# Create worktree for your task
-git worktree add $AGENT_ROLE_{task_id}_{description}
+# Create branch from specific base branch  
+vcorp create-branch hotfix-security --from=production
 
-# Navigate into your task folder
-cd $AGENT_ROLE_{task_id}_{description}
-
-# Start development
+# Create API feature branch
+vcorp create-branch api-user-endpoints --from=main
 \`\`\`
 
-**Working in your worktree:**
-\`\`\`bash
-# Always work within your task-specific folder
-cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/$AGENT_ROLE_{task_id}_{description}/
+**The command automatically:**
+- Creates the git worktree in your agent workspace
+- Sets up the branch and workspace structure
+- Provides next steps for development
 
+**Navigate to your new workspace:**
+\`\`\`bash
+cd feature-auth-system
+# Start coding immediately!
+\`\`\`
+
+### 4. Working in Your Worktree
+
+**Development workflow:**
+\`\`\`bash
+# You're already in your feature branch workspace
 # Make your changes
 # Commit regularly with clear messages
 git add .
 git commit -m "Clear description of changes"
 
 # Push your branch
-git push origin $AGENT_ROLE_{task_id}_{description}
+git push origin feature-auth-system
 \`\`\`
 
-### 4. Code Integration
+### 5. Code Integration
 
-**Before starting:**
+**Before starting development:**
 \`\`\`bash
-# Pull latest from main
+# Your worktree is automatically up-to-date when created
+# If working for a while, sync with main:
 git fetch origin
 git rebase origin/main
 \`\`\`
 
 **When ready to merge:**
-1. Ensure all tests pass
+1. Ensure all tests pass locally
 2. Create pull request from your branch
 3. Request review from appropriate team members
 4. Wait for approval before merging
 
-### 5. Cleanup Protocol
+### 6. Cleanup Protocol
 
 **After successful merge:**
 \`\`\`bash
-# Navigate to your agent workspace root
-cd PROJECT_FOLDER/agent_workspaces/$AGENT_ID/
+# Navigate back to your agent workspace root
+cd ..
 
 # Remove completed worktree
-git worktree remove $AGENT_ROLE_{task_id}_{description}
+git worktree remove feature-auth-system
 
 # Delete merged branch
-git branch -d $AGENT_ROLE_{task_id}_{description}
-git push origin --delete $AGENT_ROLE_{task_id}_{description}
+git branch -d feature-auth-system
+git push origin --delete feature-auth-system
 \`\`\`
 
 ## 🚫 FORBIDDEN ACTIONS
@@ -106,19 +113,20 @@ git push origin --delete $AGENT_ROLE_{task_id}_{description}
 ❌ Work directly in \`PROJECT_FOLDER/project/\`
 ❌ Create files outside your agent workspace
 ❌ Modify other agents' workspace folders
-❌ Use branch names that don't follow the convention
 ❌ Push directly to main branch
 ❌ Force push to shared branches
 ❌ Delete or modify other agents' worktrees
-❌ Work on multiple tasks in the same worktree
+❌ Work on multiple features in the same worktree
+❌ Manually create git worktrees (use \`vcorp create-branch\` instead)
 
 ## ✅ REQUIRED ACTIONS
 
 **Always do these for system stability:**
 
 ✅ Work only in \`PROJECT_FOLDER/agent_workspaces/$AGENT_ID/\`
-✅ Create separate worktree for each task
-✅ Use proper branch naming: \`$AGENT_ROLE_{task_id}_{description}\`
+✅ Use \`vcorp create-branch\` to create new feature worktrees
+✅ Create separate worktree for each feature/task
+✅ Use descriptive branch names (feature-*, bug-fix-*, hotfix-*)
 ✅ Commit frequently with clear messages
 ✅ Test your changes before pushing
 ✅ Create pull requests for all changes
@@ -129,13 +137,18 @@ git push origin --delete $AGENT_ROLE_{task_id}_{description}
 
 **Within your worktree:**
 \`\`\`
-$AGENT_ROLE_{task_id}_{description}/
+feature-auth-system/
 ├── src/                    # Source code changes
 ├── tests/                  # Your test files
 ├── docs/                   # Documentation updates
-├── README.md              # Task-specific notes
+├── README.md              # Project files (from main branch)
 └── .git/                  # Git tracking (automatic)
 \`\`\`
+
+**Quick Commands:**
+- \`vcorp create-branch --help\` - Get help on creating branches
+- \`vcorp inbox\` - Check for new tasks
+- \`vcorp phase\` - See your current assignment
 
 ## Communication Protocol
 
