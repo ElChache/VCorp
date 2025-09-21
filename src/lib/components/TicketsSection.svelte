@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { marked } from 'marked';
 	import { tickets, agents, roleTypes, isLoading, error, contentActions } from '$lib/stores/contentStore';
 	import TicketComments from './TicketComments.svelte';
 
@@ -284,7 +285,7 @@
 								</div>
 								
 								<div class="ticket-body">
-									{ticket.body}
+									{@html marked((ticket.body || '').replace(/\\n/g, '\n'))}
 								</div>
 
 								<div class="ticket-meta">
@@ -589,6 +590,68 @@
 		margin-bottom: 1rem;
 		line-height: 1.5;
 		color: #374151;
+	}
+
+	/* Markdown styling within ticket body */
+	.ticket-body :global(h1),
+	.ticket-body :global(h2),
+	.ticket-body :global(h3),
+	.ticket-body :global(h4),
+	.ticket-body :global(h5),
+	.ticket-body :global(h6) {
+		font-weight: 600;
+		margin: 0.5rem 0 0.25rem 0;
+		color: #1f2937;
+	}
+
+	.ticket-body :global(h1) { font-size: 1.25rem; }
+	.ticket-body :global(h2) { font-size: 1.125rem; }
+	.ticket-body :global(h3) { font-size: 1rem; }
+
+	.ticket-body :global(p) {
+		margin: 0.5rem 0;
+	}
+
+	.ticket-body :global(ul),
+	.ticket-body :global(ol) {
+		margin: 0.5rem 0;
+		padding-left: 1.5rem;
+	}
+
+	.ticket-body :global(li) {
+		margin: 0.25rem 0;
+	}
+
+	.ticket-body :global(strong) {
+		font-weight: 600;
+	}
+
+	.ticket-body :global(em) {
+		font-style: italic;
+	}
+
+	.ticket-body :global(code) {
+		background: #f3f4f6;
+		padding: 0.125rem 0.25rem;
+		border-radius: 0.25rem;
+		font-family: monospace;
+		font-size: 0.875em;
+	}
+
+	.ticket-body :global(pre) {
+		background: #f3f4f6;
+		padding: 0.75rem;
+		border-radius: 0.375rem;
+		overflow-x: auto;
+		margin: 0.5rem 0;
+	}
+
+	.ticket-body :global(blockquote) {
+		border-left: 4px solid #e5e7eb;
+		padding-left: 1rem;
+		margin: 0.5rem 0;
+		color: #6b7280;
+		font-style: italic;
 	}
 
 	.ticket-meta {

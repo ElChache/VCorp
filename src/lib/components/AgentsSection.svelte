@@ -663,6 +663,40 @@
 										<h4>Last Heartbeat</h4>
 										<p>{formatHeartbeat(selectedAgent.lastHeartbeat)}</p>
 									</div>
+									
+									<div class="info-card context-card">
+										<h4>Context Usage</h4>
+										{#if selectedAgent.contextStatus && selectedAgent.contextStatus !== 'unknown'}
+											<div class="context-display">
+												<div class="context-percentage">
+													<span class="percentage-value context-{selectedAgent.contextStatus}">
+														{selectedAgent.contextPercentage || 0}%
+													</span>
+													<div class="context-bar">
+														<div 
+															class="context-fill context-{selectedAgent.contextStatus}" 
+															style="width: {selectedAgent.contextPercentage || 0}%"
+														></div>
+													</div>
+												</div>
+												<div class="context-details">
+													<span class="context-messages">
+														{selectedAgent.contextMessageCount || 0} messages
+													</span>
+													{#if selectedAgent.contextHasWarning}
+														<span class="context-warning">⚠️ High usage</span>
+													{/if}
+												</div>
+												{#if selectedAgent.contextLastChecked}
+													<div class="context-last-checked">
+														Last checked: {formatHeartbeat(selectedAgent.contextLastChecked)}
+													</div>
+												{/if}
+											</div>
+										{:else}
+											<p class="context-unknown">Context monitoring unavailable</p>
+										{/if}
+									</div>
 								</div>
 							</div>
 						{/if}
@@ -1353,5 +1387,108 @@
 		gap: 0.5rem;
 		padding: 1rem 1.5rem;
 		border-top: 1px solid #e5e7eb;
+	}
+
+	/* Context Monitoring Styles */
+	.context-card {
+		grid-column: span 2; /* Make context card span full width */
+	}
+
+	.context-display {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.context-percentage {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.percentage-value {
+		font-size: 24px;
+		font-weight: 700;
+		line-height: 1;
+	}
+
+	.percentage-value.context-low {
+		color: #16a34a;
+	}
+
+	.percentage-value.context-medium {
+		color: #f59e0b;
+	}
+
+	.percentage-value.context-high {
+		color: #ea580c;
+	}
+
+	.percentage-value.context-critical {
+		color: #dc2626;
+	}
+
+	.context-bar {
+		width: 100%;
+		height: 8px;
+		background: #f3f4f6;
+		border-radius: 4px;
+		overflow: hidden;
+	}
+
+	.context-fill {
+		height: 100%;
+		border-radius: 4px;
+		transition: width 0.3s ease;
+	}
+
+	.context-fill.context-low {
+		background: #16a34a;
+	}
+
+	.context-fill.context-medium {
+		background: #f59e0b;
+	}
+
+	.context-fill.context-high {
+		background: #ea580c;
+	}
+
+	.context-fill.context-critical {
+		background: #dc2626;
+	}
+
+	.context-details {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		font-size: 14px;
+	}
+
+	.context-messages {
+		color: #6b7280;
+		font-weight: 500;
+	}
+
+	.context-warning {
+		background: #fef3c7;
+		color: #f59e0b;
+		padding: 2px 8px;
+		border-radius: 4px;
+		font-size: 12px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.context-last-checked {
+		color: #9ca3af;
+		font-size: 12px;
+	}
+
+	.context-unknown {
+		color: #9ca3af !important;
+		font-style: italic;
+		margin: 0 !important;
 	}
 </style>

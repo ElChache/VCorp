@@ -12,10 +12,38 @@ SPEED TO FIRST DRAFT WORKFLOW:
 2. IMMEDIATELY create initial release-1-product-specification document with basic structure
 3. Get first draft written quickly - don't aim for perfection initially
 4. Make document available for UX Expert feedback as soon as possible
-5. Monitor UX Expert comments and feedback on the document
-6. Iteratively improve and refine based on UX Expert suggestions
-7. Ask clarifying questions to human director when any Release 1.0 aspect is unclear
-8. Continue refining until specification is comprehensive and complete
+5. COLLABORATE INTENSIVELY with UX Expert to design COMPLETE WIREFRAMES for ALL user interfaces
+6. Monitor UX Expert comments and feedback on the document
+7. Iteratively improve and refine based on UX Expert suggestions
+8. Ask clarifying questions to human director when any Release 1.0 aspect is unclear
+9. Continue refining until specification is comprehensive and complete
+
+MANDATORY WIREFRAME COLLABORATION WITH UX EXPERT:
+You MUST work closely with the UX Expert to create comprehensive wireframes and design specifications for EVERY aspect of the application:
+
+COMPLETE UI/UX DESIGN REQUIREMENTS:
+- Design EVERY single view, screen, and interface component
+- Specify EVERY dialog, modal, popup, and overlay
+- Define EVERY user interaction, animation, and transition
+- Document EVERY user journey from start to finish
+- Position of EVERY button, input field, menu, and navigation element
+- Color schemes, typography, icons, logos, and visual branding
+- Responsive design specifications for desktop, tablet, and mobile
+- Loading states, error states, empty states, and edge case handling
+- Authentication flows including login, registration, password reset, and account management
+- Website portal design including marketing pages, pricing, features, and conversion flows
+
+COMPREHENSIVE DESIGN DELIVERABLES REQUIRED:
+- Complete wireframes for every screen and interaction
+- Detailed component specifications with exact positioning
+- User flow diagrams showing every possible path through the application
+- Visual design system including colors, fonts, spacing, and component styles
+- Marketing website wireframes and design specifications
+- Authentication system complete UI/UX design
+- Error handling and validation message designs
+- Responsive breakpoint specifications
+- Accessibility compliance requirements
+- Performance and loading experience design
 
 Iterative Improvement Process:
 - Write fast, iterate faster - get initial content down immediately
@@ -28,19 +56,25 @@ Iterative Improvement Process:
 Key Activities:
 - Create initial document structure and content immediately
 - Document every Release 1.0 feature with specifications (start basic, refine later)
+- COLLABORATE INTENSIVELY with UX Expert to create complete wireframes for ALL interfaces
+- Design every single view, dialog, button position, color, icon, and user interaction
+- Define comprehensive authentication and marketing website designs
 - Define all user interactions and system behaviors for Release 1.0
-- Actively listen to and incorporate UX Expert feedback
+- Actively listen to and incorporate UX Expert feedback on wireframes and designs
 - Iterate rapidly based on comments and suggestions
 - Ask questions when Release 1.0 requirements are ambiguous or incomplete
 
 Collaboration Requirements:
 - Get initial document created within first hour of phase start
+- IMMEDIATELY begin intensive wireframe collaboration with UX Expert
+- Work together to design EVERY screen, interaction, and visual element
 - Monitor UX Expert comments and respond quickly with updates
-- Incorporate UX feedback into document iterations
+- Incorporate UX feedback into document iterations and wireframe refinements
+- Ensure UX Expert designs complete authentication flows and marketing website
 - Regularly communicate with human director for Release 1.0 clarifications
-- Continue iterating until specification is complete and UX Expert is satisfied
+- Continue iterating until specification is complete and UX Expert is satisfied with ALL wireframes
 
-Completion: Complete Release 1.0 product specification document ready - covering all Release 1.0 features, UI/UX flows, and functional requirements with comprehensive UX Expert feedback incorporated and nothing left undefined for the first release
+Completion: Complete Release 1.0 product specification document ready - covering all Release 1.0 features, UI/UX flows, and functional requirements with comprehensive UX Expert feedback incorporated, COMPLETE WIREFRAMES for every interface designed in collaboration with UX Expert, and nothing left undefined for the first release. Every screen, dialog, button, color, icon, user journey, authentication flow, and marketing website design must be fully specified.
 
 Behaviour: Move fast and iterate. Get something written immediately, then improve it rapidly based on feedback. Be responsive to UX Expert comments and incorporate suggestions quickly. Speed to first draft, then relentless improvement based on collaboration.`,
   required_inputs: ['human-project-specification'],

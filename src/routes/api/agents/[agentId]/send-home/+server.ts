@@ -35,15 +35,18 @@ export const POST = async ({ params }: RequestEvent) => {
 				const wrapUpMessage = `
 🏠 Time to wrap up your day!
 
-Please finish any work you're currently doing and when you're ready to clock out, call this endpoint:
+Please finish any work you're currently doing and when you're ready to clock out, use:
 
-curl -X POST "http://localhost:5173/api/agents/${agentId}/clock-out" -H "Content-Type: application/json"
+vcorp clock-out
 
 Take your time to finish properly - no rush! 👋
 `;
 
-				// Send the message to the tmux session
-				const tmuxCommand = `tmux send-keys -t "${agent.tmuxSession}" 'echo "${wrapUpMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"'`;
+				// Escape the message for bash and tmux (using single quotes, so escape single quotes)
+				const escapedMessage = wrapUpMessage.replace(/'/g, "'\"'\"'");
+
+				// Send the message directly to the tmux session  
+				const tmuxCommand = `tmux send-keys -t "${agent.tmuxSession}" '${escapedMessage}'`;
 				execSync(tmuxCommand, { stdio: 'ignore' });
 				
 				// Send Enter key as separate command

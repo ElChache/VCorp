@@ -177,7 +177,7 @@ export const CORE_PHASE_ROLE_ASSIGNMENTS = [
   { phaseName: 'AI Implementation Phase', roleName: 'ai-developer', phaseOrder: 2 },
   
   // UX Expert phases
-  { phaseName: 'UX Feedback & Collaboration Phase', roleName: 'ux-expert', phaseOrder: 1 },
+  { phaseName: 'Comprehensive UX Collaboration & Wireframe Guidance Phase', roleName: 'ux-expert', phaseOrder: 1 },
   { phaseName: 'Ongoing UX Excellence Monitoring', roleName: 'ux-expert', phaseOrder: 2 },
   
   // Graphic Designer phases

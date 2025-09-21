@@ -77,30 +77,30 @@ function clearDirectory(dirPath: string): void {
 /**
  * Initializes a git repository from a remote origin
  */
-async function initializeGitRepository(gitOrigin: string, mainBranch: string): Promise<boolean> {
+async function initializeGitRepository(gitOrigin: string, mainBranch: string, projectPath: string): Promise<boolean> {
 	try {
 		// Validate git URL
 		if (!isValidGitUrl(gitOrigin)) {
 			throw new Error(`Invalid git URL format: ${gitOrigin}`);
 		}
 
-		const projectPath = path.resolve('./project');
-		console.log(`🔄 Initializing git repository at ${projectPath}`);
+		const resolvedProjectPath = path.resolve(projectPath, 'project');
+		console.log(`🔄 Initializing git repository at ${resolvedProjectPath}`);
 
 		// Create project directory if it doesn't exist
-		if (!fs.existsSync(projectPath)) {
-			fs.mkdirSync(projectPath, { recursive: true });
-			console.log(`📁 Created project directory: ${projectPath}`);
+		if (!fs.existsSync(resolvedProjectPath)) {
+			fs.mkdirSync(resolvedProjectPath, { recursive: true });
+			console.log(`📁 Created project directory: ${resolvedProjectPath}`);
 		}
 
 		// Clear existing contents
-		clearDirectory(projectPath);
+		clearDirectory(resolvedProjectPath);
 		console.log(`🧹 Cleared project directory`);
 
 		// Clone the repository
 		await execGitCommand(
 			['clone', gitOrigin, '.'], 
-			projectPath, 
+			resolvedProjectPath, 
 			`Git clone from ${gitOrigin}`
 		);
 
@@ -109,12 +109,12 @@ async function initializeGitRepository(gitOrigin: string, mainBranch: string): P
 		if (branchToCheckout !== 'main') {
 			await execGitCommand(
 				['checkout', branchToCheckout], 
-				projectPath, 
+				resolvedProjectPath, 
 				`Git checkout to branch ${branchToCheckout}`
 			);
 		}
 
-		console.log(`✅ Git repository initialized successfully at ${projectPath} from ${gitOrigin} on branch ${branchToCheckout}`);
+		console.log(`✅ Git repository initialized successfully at ${resolvedProjectPath} from ${gitOrigin} on branch ${branchToCheckout}`);
 		return true;
 
 	} catch (error) {
@@ -574,9 +574,22 @@ export async function POST({ request }: RequestEvent) {
 		}
 
 		// Initialize git repository if git origin is provided
-		const gitInitialized = gitOrigin?.trim() 
-			? await initializeGitRepository(gitOrigin.trim(), mainBranch?.trim() || 'main')
-			: false;
+		let gitInitialized = false;
+		if (gitOrigin?.trim()) {
+			console.log(`🔄 Attempting to initialize git repository with origin: ${gitOrigin.trim()}`);
+			console.log(`📁 Target path: ${path.trim()}`);
+			console.log(`🌿 Main branch: ${mainBranch?.trim() || 'main'}`);
+			
+			gitInitialized = await initializeGitRepository(gitOrigin.trim(), mainBranch?.trim() || 'main', path.trim());
+			
+			if (gitInitialized) {
+				console.log(`✅ Git repository successfully initialized`);
+			} else {
+				console.log(`❌ Git repository initialization failed`);
+			}
+		} else {
+			console.log(`ℹ️ No git origin provided, skipping git initialization`);
+		}
 
 		return json({ 
 			...newProject, 

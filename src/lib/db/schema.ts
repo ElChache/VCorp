@@ -127,6 +127,15 @@ export const agents = pgTable('agents', {
 	tmuxSession: text('tmux_session'),
 	worktreePath: text('worktree_path'), // PROJECT_FOLDER/agent_workspaces/agent_id/
 	lastHeartbeat: timestamp('last_heartbeat').notNull().defaultNow(),
+	
+	// Context monitoring fields
+	contextMessageCount: integer('context_message_count').default(0), // Number of messages in session
+	contextPercentage: integer('context_percentage').default(0), // Estimated context usage percentage
+	contextStatus: text('context_status').default('unknown'), // 'low', 'medium', 'high', 'critical', 'unknown'
+	contextHasWarning: boolean('context_has_warning').default(false), // Claude mentioned context limits
+	contextLastChecked: timestamp('context_last_checked'), // When context was last monitored
+	contextSessionFile: text('context_session_file'), // Path to active Claude session file
+	
 	createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

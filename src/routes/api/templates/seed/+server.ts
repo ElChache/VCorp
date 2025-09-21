@@ -99,7 +99,6 @@ export async function POST() {
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
 						isGlobal: (promptTemplate as any).isGlobal || false,
-						isRolePrompt: (promptTemplate as any).isRolePrompt || false,
 					})
 					.where(eq(promptTemplates.id, existing.id))
 					.returning();
@@ -117,7 +116,6 @@ export async function POST() {
 						content: promptTemplate.content,
 						premade: promptTemplate.premade,
 						isGlobal: (promptTemplate as any).isGlobal || false,
-						isRolePrompt: (promptTemplate as any).isRolePrompt || false,
 						version: 1
 					})
 					.returning();

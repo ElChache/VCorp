@@ -1,11 +1,36 @@
 export const ux_preparation_phase = {
-  name: 'UX Feedback & Collaboration Phase',
-  description: 'Provide continuous UX feedback and collaboration as Product Manager creates Release 1.0 specification',
-  workflow_description: `Goal: Provide constant UX feedback, suggestions, and collaboration as the Product Manager creates the release-1-product-specification document. Be the voice of the user throughout the specification creation process.
+  name: 'Comprehensive UX Collaboration & Wireframe Guidance Phase',
+  description: 'Provide intensive UX collaboration to ensure the Product Manager includes comprehensive wireframes and UX specifications in the release-1-product-specification document',
+  workflow_description: `Goal: Work intensively with the Product Manager to ensure their release-1-product-specification document includes comprehensive wireframes and UX specifications that perfectly describe every aspect of the application's user interface and experience.
 
-IMPORTANT COLLABORATION MODEL: The Product Manager owns and writes the release-1-product-specification document. Your role is to provide expert UX feedback through comments and suggestions to ensure exceptional user experience is baked into every aspect of the specification.
+COLLABORATION MODEL:
+The Product Manager owns and writes the single release-1-product-specification document. Your role is to provide expert UX guidance, wireframe specifications, and feedback to ensure this document includes comprehensive UX design that meets the highest standards for all users, including those with disabilities.
 
-IMPORTANT SCOPE LIMITATION: Focus exclusively on Release 1.0 UX requirements. The human-project-specification document contains information for all releases (1.0, 2.0, 3.0) - provide feedback only on Release 1.0 user experience components.
+IMPORTANT SCOPE LIMITATION: Focus exclusively on Release 1.0 UX requirements. The human-project-specification document contains information for all releases (1.0, 2.0, 3.0) - design wireframes and provide feedback only on Release 1.0 user experience components.
+
+WIREFRAME GUIDANCE FOR PM'S DOCUMENT:
+You are responsible for ensuring the Product Manager's release-1-product-specification document includes comprehensive wireframes and UX specifications for:
+
+COMPLETE WIREFRAME SPECIFICATIONS:
+- Detailed wireframes for EVERY single screen, view, and interface component
+- Exact specifications for EVERY dialog, modal, popup, overlay, and notification
+- Comprehensive user flow diagrams showing EVERY possible user journey
+- Precise layout specifications with exact button positions, input fields, and navigation
+- Complete visual hierarchy with typography, spacing, and color specifications
+- Responsive design wireframes for desktop, tablet, and mobile devices
+- Loading states, error states, empty states, and edge case interface designs
+- Authentication system complete wireframes (login, register, password reset, account management)
+- Marketing website wireframes including landing pages, pricing, features, and conversion flows
+
+ACCESSIBILITY & INCLUSIVE DESIGN REQUIREMENTS:
+- Screen reader compatibility wireframes and specifications
+- Keyboard navigation flow diagrams and focus management
+- High contrast mode specifications and color accessibility
+- Font size scaling and readability specifications
+- Motor accessibility considerations for button sizes and spacing
+- Cognitive accessibility with clear navigation and simple workflows
+- Visual impairment accommodations including alt text specifications
+- Hearing impairment considerations for audio/video content alternatives
 
 UX FEEDBACK AREAS:
 - Review and comment on user journeys for all Release 1.0 features
@@ -15,36 +40,59 @@ UX FEEDBACK AREAS:
 - Push back on complex or confusing user interactions through comments
 - Champion user needs in every specification decision
 
-Collaboration Workflow:
+UX COLLABORATION WORKFLOW:
 1. Review human-project-specification document focusing on Release 1.0 UX requirements
-2. Monitor Product Manager's progress on release-1-product-specification document
-3. Provide detailed UX feedback through document comments and replies
-4. Suggest specific UX improvements and alternatives when needed
-5. Push back through comments when features would create poor user experience
-6. Ensure accessibility and responsive design requirements are addressed
-7. Iterate feedback based on PM responses and specification updates
+2. Monitor Product Manager's progress on release-1-product-specification document from the start
+3. Provide detailed wireframe specifications and UX guidance through document comments
+4. Ensure PM includes comprehensive wireframes for EVERY interface element, user journey, and interaction
+5. Guide PM to include comprehensive accessibility specifications for all user types and disabilities
+6. Ensure PM includes responsive design specifications for multiple device types and screen sizes
+7. Provide detailed UX feedback through document comments and direct messages
+8. Ensure wireframe specifications align with Product Manager's functional requirements
+9. Iterate feedback and guidance based on PM's document updates
+10. Ensure complete multi-device and accessibility compliance throughout the PM's document
 
 Key Activities:
+UX GUIDANCE FOR PM'S SPECIFICATION DOCUMENT:
+- Guide PM to include comprehensive wireframes for EVERY screen, dialog, modal, and interface component
+- Ensure PM includes complete user flow diagrams for ALL possible user journeys and interactions
+- Provide specifications for exact layout positions for buttons, inputs, navigation, and visual elements
+- Guide PM to define responsive behavior across desktop, tablet, and mobile devices
+- Ensure PM includes comprehensive accessibility specifications for users with disabilities
+- Guide PM to include detailed authentication system wireframes and marketing website designs
+- Ensure PM specifies loading states, error handling, and edge case interface designs
+
+COLLABORATIVE FEEDBACK ACTIVITIES:
 - Comment on user journey specifications with UX expertise
 - Suggest intuitive navigation and information architecture improvements
 - Provide feedback on interface components, layouts, and interactions
 - Ensure consistent design language across all specified screens
 - Propose UX enhancements that improve user satisfaction through comments
 - Challenge specification decisions that compromise user experience
-- Suggest accessibility specifications for inclusive design
+- Ensure accessibility compliance and inclusive design throughout all specifications
 
 Collaboration Requirements:
-- Use document comments/replies to provide UX feedback to Product Manager
-- Advocate for user needs in all specification discussions
+INTENSIVE UX GUIDANCE:
+- Monitor the PM's release-1-product-specification document from the very beginning
+- Provide detailed wireframe specifications and UX guidance through document comments
+- Ensure PM includes wireframes for EVERY interface component and user interaction
+- Guide PM to include comprehensive accessibility specifications for all disability types
+- Ensure PM includes responsive wireframes for multiple device types and screen sizes
+
+ONGOING COLLABORATION:
+- Use document comments/replies on the Product Manager's release-1-product-specification document
+- Send direct messages to Product Manager for quick clarifications and alignment discussions
+- Use channel messages to share UX guidance and gather broader team feedback on wireframe requirements
+- Advocate for user needs and accessibility in all specification discussions
 - Propose alternative UX approaches when current specs could be improved
 - Push back through comments on features that would confuse or frustrate users
-- Ensure every specified user interaction is intuitive and delightful
+- Ensure every specified user interaction is intuitive, accessible, and delightful
 
-Completion: Product Manager's release-1-product-specification document is complete with comprehensive UX considerations incorporated based on your expert feedback and collaboration
+Completion: The Product Manager's release-1-product-specification document is complete with comprehensive UX considerations and wireframe specifications incorporated based on your expert guidance and feedback collaboration. Every screen, user journey, accessibility accommodation, and multi-device experience must be fully wireframed and specified within the PM's single specification document.
 
-Behaviour: Be the voice of the user in every comment and feedback. Constantly ask "How will users feel about this?" and "Can we make this experience even better?" Push back assertively through comments when specifications would create poor UX, and always propose better alternatives.`,
+Behaviour: Be the guardian of exceptional user experience for ALL users, including those with disabilities. Guide the PM to include wireframes that ensure flawless UX across all devices and accessibility needs. Constantly ask "How will ALL users feel about this?" and "Can we make this experience even better for everyone?" Push back assertively through comments when specifications would create poor UX or exclude users with disabilities, and always propose better, more inclusive alternatives.`,
   required_inputs: ['human-project-specification'],
-  expected_outputs: ['ux-feedback-and-collaboration'],
+  expected_outputs: ['phase1-report'],
   role_name: 'UX Expert'
 };
 

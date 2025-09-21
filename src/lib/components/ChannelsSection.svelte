@@ -505,11 +505,6 @@
 												<h5>Available Roles</h5>
 												{#if channelRoles.allRoles}
 													{@const unassignedRoles = channelRoles.allRoles.filter(role => !role.isAssigned)}
-													{console.log('=== ROLE AVAILABILITY DEBUG ===', {
-														allRoles: channelRoles.allRoles,
-														unassignedRoles: unassignedRoles,
-														assignedRoles: channelRoles.assignedRoles
-													})}
 													{#if unassignedRoles.length > 0}
 														<div class="role-list">
 															{#each unassignedRoles as role}

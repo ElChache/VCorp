@@ -1,6 +1,7 @@
 import { execSync, spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import { join, dirname, basename, extname } from 'path';
+import os from 'os';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments, readingAssignmentReads, projects, scheduledReminders } from '$lib/db/schema';
 import { eq, and, or, notExists } from 'drizzle-orm';
@@ -54,11 +55,22 @@ interface ScheduledReminderResult {
 	error?: string;
 }
 
+interface ContextInfo {
+	messageCount: number;
+	estimatedPercentage: number;
+	status: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
+	hasWarning: boolean;
+	confidence: 'low' | 'medium' | 'high';
+	sessionFile?: string;
+	lastChecked: Date;
+}
+
 /**
  * Singleton MonitoringManager
  * Handles all monitoring operations every 5 seconds:
  * - Agent status updates (active/idle/offline)
  * - Unread message notifications to agents
+ * - Context monitoring and auto send-home
  */
 class MonitoringManager {
 	private static instance: MonitoringManager | null = null;
@@ -96,7 +108,27 @@ class MonitoringManager {
 		lastGracePeriodStart: Date | null;
 	}> = new Map();
 
+	// Track agents that have been sent home and are being monitored for offline status
+	private agentsSentHome: Map<string, {
+		intervalId: NodeJS.Timeout;
+		timeoutId: NodeJS.Timeout;
+		startTime: Date;
+		projectId: number;
+		originalTmuxSession: string;
+		sentHomeReason: string;
+	}> = new Map();
+
 	private readonly INTERVAL_MS = 5000; // 5 seconds
+	
+	// Context monitoring thresholds (configurable)
+	private readonly CONTEXT_AUTO_SEND_HOME_THRESHOLD = 90; // Percentage at which to auto send home
+	private readonly CONTEXT_WARNING_THRESHOLD = 75; // Percentage at which to show warnings
+
+	// Get the current server port (defaults to 5173, but detects actual port)
+	private getServerPort(): string {
+		// Check if VCORP_PORT environment variable is set
+		return process.env.VCORP_PORT || '5173';
+	}
 	// High Priority: Human Director Messages
 	private readonly URGENT_NOTIFICATION_TEMPLATE = `[AUTO] 📥 Message from Project Director
 ═══════════════════════════════════════════════════════════════════════
@@ -311,6 +343,13 @@ This is just a gentle reminder - no action needed if you're already working! �
 			this.fileWatcher = null;
 		}
 
+		// Stop all offline monitoring intervals
+		for (const [agentId, monitoring] of this.agentsSentHome) {
+			clearInterval(monitoring.intervalId);
+			clearTimeout(monitoring.timeoutId);
+		}
+		this.agentsSentHome.clear();
+
 		this.stats.uptime = Date.now() - this.stats.startTime.getTime();
 		console.log('\n🛑 Monitoring service stopped');
 		this.logStats();
@@ -358,7 +397,7 @@ This is just a gentle reminder - no action needed if you're already working! �
 
 	private async processProject(projectId: number): Promise<void> {
 		// Run all monitoring tasks in parallel
-		const [statusUpdates, notificationResults, gentlePokeResults, reminderResults, forwardingResults, terminalLogResults] = await Promise.all([
+		const [statusUpdates, notificationResults, gentlePokeResults, reminderResults, forwardingResults, terminalLogResults, escalationResults, batchResults, contextResults] = await Promise.all([
 			this.updateAgentStatuses(projectId),
 			this.sendUnreadNotifications(projectId),
 			this.sendGentlePokes(projectId),
@@ -366,7 +405,8 @@ This is just a gentle reminder - no action needed if you're already working! �
 			this.processAssistantForwarding(projectId),
 			this.captureTerminalLogs(projectId),
 			this.checkHumanDirectorEscalations(), // Add escalation checking
-			this.processBatchedNotifications() // Add batch processing
+			this.processBatchedNotifications(), // Add batch processing
+			this.monitorAgentContexts(projectId) // Add context monitoring
 		]);
 
 		// Update stats
@@ -1499,7 +1539,7 @@ Consider reviewing during natural break points.
 	private async getPhaseContextForRole(roleType: string, projectId: number): Promise<string> {
 		try {
 			// Use internal API call to get phase context
-			const response = await fetch(`http://localhost:5173/api/roles/${encodeURIComponent(roleType)}/current-phase?projectId=${projectId}`);
+			const response = await fetch(`http://localhost:${this.getServerPort()}/api/roles/${encodeURIComponent(roleType)}/current-phase?projectId=${projectId}`);
 			
 			if (!response.ok) {
 				return 'Unable to fetch current phase information.';
@@ -1775,10 +1815,8 @@ Status: ${phase.status}`;
 
 	private async initializeFileWatcher(): Promise<void> {
 		try {
-			console.log('🔍 DEBUG: Starting file watcher initialization...');
 			
 			if (!this._currentProjectId) {
-				console.log('🔍 DEBUG: No project selected, skipping file watcher setup');
 				return;
 			}
 
@@ -1790,7 +1828,6 @@ Status: ${phase.status}`;
 				.limit(1);
 			
 			if (currentProject.length === 0) {
-				console.log('🔍 DEBUG: Current project not found, skipping file watcher setup');
 				return;
 			}
 			
@@ -1804,8 +1841,6 @@ Status: ${phase.status}`;
 				`${projectPath}/agent_workspaces`
 			];
 			
-			console.log('🔍 DEBUG: Watch paths for current project:', watchPaths);
-			console.log('🔍 DEBUG: Monitoring project:', `${project.name} (ID: ${project.id}, Path: ${project.path})`);
 			
 			this.fileWatcher = chokidar.watch(watchPaths, {
 				ignored: /(^|[\/\\])\../, // ignore dotfiles
@@ -1819,23 +1854,17 @@ Status: ${phase.status}`;
 				atomic: true // Helps with file detection
 			});
 
-			console.log('🔍 DEBUG: Chokidar watcher created, setting up event handlers...');
 
 			this.fileWatcher
 				.on('ready', () => {
-					console.log('🔍 DEBUG: File watcher is ready and watching for changes');
-					console.log('🔍 DEBUG: Watched files:', this.fileWatcher.getWatched());
 				})
 				.on('add', (path: string) => {
-					console.log('🔍 DEBUG: File ADD event:', path);
 					this.handleFileAdd(path);
 				})
 				.on('change', (path: string) => {
-					console.log('🔍 DEBUG: File CHANGE event:', path);
 					this.handleFileChange(path);
 				})
 				.on('unlink', (path: string) => {
-					console.log('🔍 DEBUG: File DELETE event:', path);
 					this.handleFileDelete(path);
 				})
 				.on('error', (error: Error) => {
@@ -1843,7 +1872,6 @@ Status: ${phase.status}`;
 					this.stats.errors++;
 				})
 				.on('raw', (event: string, path: string, details?: any) => {
-					console.log('🔍 DEBUG: Raw event:', event, 'path:', path, 'details:', details);
 				});
 
 			console.log('📁 File watcher initialized with enhanced debugging');
@@ -1855,11 +1883,9 @@ Status: ${phase.status}`;
 
 	private async handleFileAdd(filePath: string): Promise<void> {
 		try {
-			console.log(`🔍 DEBUG: Entering handleFileAdd for: ${filePath}`);
 			
 			// Only process .md files
 			if (!filePath.endsWith('.md')) {
-				console.log(`🔍 DEBUG: Skipping non-markdown file: ${filePath}`);
 				return;
 			}
 			
@@ -1867,19 +1893,15 @@ Status: ${phase.status}`;
 			const slug = this.getSlugFromPath(filePath);
 			const authorId = this.getAuthorFromPath(filePath);
 			
-			console.log(`🔍 DEBUG: File details - type: ${fileType}, slug: ${slug}, author: ${authorId || 'none'}`);
 			
 			// Check if document/ticket already exists in DB
-			console.log(`🔍 DEBUG: Checking for existing content with slug: ${slug}`);
 			const existingContent = await this.findContentBySlug(slug, fileType);
 			
 			if (existingContent) {
-				console.log(`🔍 DEBUG: Found existing content, syncing DB to file`);
 				// File was created but content already exists - sync from DB to file
 				await this.syncDbToFile(existingContent, filePath);
 				console.log(`📁 Synced existing ${fileType} "${slug}" from DB to new file`);
 			} else {
-				console.log(`🔍 DEBUG: No existing content found, creating new from file`);
 				// New file - create document/ticket in DB
 				await this.syncFileToDb(filePath, fileType, slug);
 				console.log(`📁 Created new ${fileType} "${slug}" from file`);
@@ -1889,7 +1911,6 @@ Status: ${phase.status}`;
 			}
 			
 			this.stats.filesSynced++;
-			console.log(`🔍 DEBUG: Successfully handled file add. Stats updated.`);
 		} catch (error) {
 			console.error(`❌ CRITICAL ERROR in handleFileAdd for ${filePath}:`, error);
 			console.error('Stack trace:', error instanceof Error ? error.stack : error);
@@ -2129,6 +2150,401 @@ Status: ${phase.status}`;
 		}
 		
 		return null;
+	}
+
+	// =============================================================================
+	// CONTEXT MONITORING METHODS - Claude Session Analysis for Auto Send-Home
+	// =============================================================================
+
+	private async monitorAgentContexts(projectId: number): Promise<void> {
+		try {
+			// Get all active agents for this project
+			const activeAgents = await db
+				.select({
+					id: agents.id,
+					roleType: agents.roleType,
+					tmuxSession: agents.tmuxSession,
+					status: agents.status,
+					contextSessionFile: agents.contextSessionFile
+				})
+				.from(agents)
+				.where(and(
+					eq(agents.projectId, projectId),
+					or(
+						eq(agents.status, 'active'),
+						eq(agents.status, 'idle')
+					)
+				));
+			
+
+			for (const agent of activeAgents) {
+				if (!agent.tmuxSession) {
+					continue; // Skip agents without tmux sessions
+				}
+
+				try {
+					const contextInfo = await this.analyzeAgentContext(agent.id);
+					
+					if (contextInfo) {
+						// Update agent context fields in database
+						await db
+							.update(agents)
+							.set({
+								contextMessageCount: contextInfo.messageCount,
+								contextPercentage: contextInfo.estimatedPercentage,
+								contextStatus: contextInfo.status,
+								contextHasWarning: contextInfo.hasWarning,
+								contextLastChecked: contextInfo.lastChecked,
+								contextSessionFile: contextInfo.sessionFile
+							})
+							.where(eq(agents.id, agent.id));
+
+						// Check if agent needs to be sent home due to high context usage
+						// BUT only if they're not already sent home (avoid repeated send-home messages)
+						if (contextInfo.estimatedPercentage >= this.CONTEXT_AUTO_SEND_HOME_THRESHOLD) {
+							if (!this.agentsSentHome.has(agent.id)) {
+								await this.autoSendAgentHome(agent, contextInfo);
+							} else {
+								console.log(`⏸️ Agent ${agent.id} already sent home - skipping repeated send-home`);
+							}
+						}
+					}
+				} catch (error) {
+					console.error(`Failed to analyze context for agent ${agent.id}:`, error);
+					// Continue with other agents rather than failing the whole operation
+				}
+			}
+		} catch (error) {
+			console.error('Failed to monitor agent contexts:', error);
+			this.stats.errors++;
+		}
+	}
+
+	private async analyzeAgentContext(agentId: string): Promise<ContextInfo | null> {
+		try {
+			const sessionFile = await this.findAgentSessionFile(agentId);
+			
+			if (!sessionFile) {
+				return null;
+			}
+			
+
+			// Read and analyze the session file
+			const sessionData = await this.readSessionFile(sessionFile);
+			const contextAnalysis = this.analyzeSessionData(sessionData);
+
+			return {
+				messageCount: contextAnalysis.messageCount,
+				estimatedPercentage: contextAnalysis.estimatedPercentage,
+				status: contextAnalysis.status,
+				hasWarning: contextAnalysis.hasWarning,
+				confidence: contextAnalysis.confidence,
+				sessionFile,
+				lastChecked: new Date()
+			};
+		} catch (error) {
+			console.error(`Error analyzing context for agent ${agentId}:`, error);
+			return null;
+		}
+	}
+
+	private async findAgentSessionFile(agentId: string): Promise<string | null> {
+		try {
+			const claudeProjectsDir = join(os.homedir(), '.claude', 'projects');
+			
+			// Check if Claude projects directory exists
+			try {
+				await fs.access(claudeProjectsDir);
+			} catch {
+				return null; // Claude projects directory doesn't exist
+			}
+
+			// Look for sessions that might belong to this agent
+			// Agent workspaces are typically in format: /path/to/project/agent_workspaces/AGENT_ID
+			const files = await fs.readdir(claudeProjectsDir);
+			
+			for (const file of files) {
+				// Convert agent ID to both formats for pattern matching
+				const agentIdDashes = agentId.replace(/_/g, '-');
+				const agentIdUnderscores = agentId.replace(/-/g, '_');
+				
+				
+				// Look for directories that match agent workspace patterns
+				// Format: -Users-davidcerezo-Projects-VCorpMonitorsProject-agent-workspaces-AGENT_ID
+				if (file.includes(`agent-workspaces-${agentIdDashes}`) || 
+					file.includes(`agent_workspaces-${agentIdUnderscores}`) || 
+					file.endsWith(`-${agentIdDashes}`) || 
+					file.endsWith(`-${agentIdUnderscores}`)) {
+					const sessionDir = join(claudeProjectsDir, file);
+					
+					try {
+						// Check if it's a directory
+						const stats = await fs.stat(sessionDir);
+						if (!stats.isDirectory()) continue;
+						
+						// Look for .jsonl files in this directory
+						const sessionFiles = await fs.readdir(sessionDir);
+						
+						for (const sessionFile of sessionFiles) {
+							if (sessionFile.endsWith('.jsonl')) {
+								const sessionPath = join(sessionDir, sessionFile);
+								return sessionPath;
+							}
+						}
+					} catch (error) {
+						continue;
+					}
+				}
+			}
+			
+			return null;
+		} catch (error) {
+			console.error(`Error finding session file for agent ${agentId}:`, error);
+			return null;
+		}
+	}
+
+	private async readSessionFile(sessionFilePath: string): Promise<any[]> {
+		try {
+			const content = await fs.readFile(sessionFilePath, 'utf8');
+			const lines = content.trim().split('\n');
+			
+			const messages = [];
+			for (const line of lines) {
+				if (line.trim()) {
+					try {
+						const message = JSON.parse(line);
+						messages.push(message);
+					} catch {
+						// Skip invalid JSON lines
+						continue;
+					}
+				}
+			}
+			
+			return messages;
+		} catch (error) {
+			console.error(`Error reading session file ${sessionFilePath}:`, error);
+			return [];
+		}
+	}
+
+	private analyzeSessionData(messages: any[]): {
+		messageCount: number;
+		estimatedPercentage: number;
+		status: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
+		hasWarning: boolean;
+		confidence: 'low' | 'medium' | 'high';
+	} {
+		
+		// Debug: Print first 2 messages to understand structure
+		if (messages.length > 0) {
+			if (messages.length > 1) {
+			}
+		}
+		
+		if (messages.length === 0) {
+			return {
+				messageCount: 0,
+				estimatedPercentage: 0,
+				status: 'unknown',
+				hasWarning: false,
+				confidence: 'low'
+			};
+		}
+
+		// Count conversation messages (user and assistant)
+		const conversationMessages = messages.filter((msg, index) => {
+			const isUserOrAssistant = (msg.type === 'user' || msg.type === 'assistant');
+			const hasMessage = !!msg.message;
+			const hasValidRole = hasMessage && (msg.message.role === 'user' || msg.message.role === 'assistant');
+			const passes = isUserOrAssistant && hasMessage && hasValidRole;
+			
+			if (index < 3) { // Debug first 3 messages
+			}
+			
+			return passes;
+		});
+
+		const messageCount = conversationMessages.length;
+		
+		// Estimate context percentage based on message count and content length
+		// Claude typically has ~200K token context, roughly 150K words, ~750K characters
+		const totalContentLength = conversationMessages.reduce((total, msg) => {
+			const content = msg.message?.content || '';
+			const contentLength = typeof content === 'string' ? content.length : JSON.stringify(content).length;
+			return total + contentLength;
+		}, 0);
+
+		// Rough estimation: 1 character ≈ 0.25 tokens, context limit ≈ 200K tokens
+		const estimatedTokens = totalContentLength * 0.25;
+		const estimatedPercentage = Math.min(100, Math.round((estimatedTokens / 200000) * 100));
+
+		// Determine status and warning level
+		let status: 'low' | 'medium' | 'high' | 'critical' | 'unknown';
+		let hasWarning = false;
+
+		if (estimatedPercentage >= this.CONTEXT_AUTO_SEND_HOME_THRESHOLD) {
+			status = 'critical';
+			hasWarning = true;
+		} else if (estimatedPercentage >= this.CONTEXT_WARNING_THRESHOLD) {
+			status = 'high';
+			hasWarning = true;
+		} else if (estimatedPercentage >= 50) {
+			status = 'medium';
+		} else {
+			status = 'low';
+		}
+
+		// Confidence based on data quality
+		let confidence: 'low' | 'medium' | 'high' = 'medium';
+		if (messageCount < 5) {
+			confidence = 'low';
+		} else if (messageCount > 20) {
+			confidence = 'high';
+		}
+
+		return {
+			messageCount,
+			estimatedPercentage,
+			status,
+			hasWarning,
+			confidence
+		};
+	}
+
+	private async autoSendAgentHome(agent: any, contextInfo: ContextInfo): Promise<void> {
+		try {
+			console.log(`🏠 Auto-sending agent ${agent.id} home due to high context usage (${contextInfo.estimatedPercentage}%)`);
+			
+			// Use the existing sendHome prompt without mentioning context
+			const response = await fetch(`http://localhost:${this.getServerPort()}/api/agents/${agent.id}/send-home`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					reason: 'automated_system_management' // Generic reason, not mentioning context
+				})
+			});
+
+			if (response.ok) {
+				console.log(`✅ Successfully sent agent ${agent.id} home (context: ${contextInfo.estimatedPercentage}%)`);
+				
+				// Start monitoring agent for offline status
+				this.startOfflineMonitoring(agent);
+			} else {
+				console.error(`❌ Failed to send agent ${agent.id} home:`, await response.text());
+			}
+		} catch (error) {
+			console.error(`Error sending agent ${agent.id} home:`, error);
+		}
+	}
+
+	private startOfflineMonitoring(agent: any): void {
+		// Clear any existing monitoring for this agent
+		this.stopOfflineMonitoring(agent.id);
+
+		console.log(`🔍 Starting offline monitoring for agent ${agent.id} (sent home due to context threshold)`);
+		
+		// Check every 10 seconds if agent has gone offline  
+		const intervalId = setInterval(async () => {
+			const isOffline = await this.isAgentOffline(agent.id, agent.tmuxSession);
+			
+			if (isOffline) {
+				console.log(`📴 Agent ${agent.id} detected as offline - bringing back`);
+				await this.bringAgentBackFromOffline(agent.id);
+				this.stopOfflineMonitoring(agent.id);
+			}
+		}, 10000); // Check every 10 seconds
+
+		// Set timeout to force kill after 5 minutes
+		const timeoutId = setTimeout(async () => {
+			console.log(`⏰ 5-minute timeout reached for agent ${agent.id} - force killing and bringing back`);
+			await this.forceKillAndBringBackAgent(agent.id, agent.tmuxSession);
+			this.stopOfflineMonitoring(agent.id);
+		}, 5 * 60 * 1000); // 5 minutes
+
+		// Store monitoring info with proper structure
+		this.agentsSentHome.set(agent.id, {
+			intervalId,
+			timeoutId,
+			startTime: new Date(),
+			projectId: this._currentProjectId!,
+			originalTmuxSession: agent.tmuxSession || '',
+			sentHomeReason: 'context_threshold'
+		});
+	}
+
+	private async isAgentOffline(agentId: string, tmuxSession: string | null): Promise<boolean> {
+		if (!tmuxSession) return true;
+
+		try {
+			// Check if tmux session exists
+			const { execSync } = await import('child_process');
+			execSync(`tmux has-session -t "${tmuxSession}"`, { stdio: 'ignore' });
+			return false; // Session exists, agent is still online
+		} catch (error) {
+			return true; // Session doesn't exist, agent is offline
+		}
+	}
+
+	private async bringAgentBackFromOffline(agentId: string): Promise<void> {
+		try {
+			console.log(`🔄 Bringing agent ${agentId} back from offline status`);
+			
+			const response = await fetch(`http://localhost:${this.getServerPort()}/api/agents/${agentId}/bring-back`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					projectId: this._currentProjectId
+				})
+			});
+
+			if (response.ok) {
+				console.log(`✅ Successfully brought agent ${agentId} back online`);
+			} else {
+				console.error(`❌ Failed to bring agent ${agentId} back:`, await response.text());
+			}
+		} catch (error) {
+			console.error(`Error bringing agent ${agentId} back:`, error);
+		}
+	}
+
+	private async forceKillAndBringBackAgent(agentId: string, tmuxSession: string | null): Promise<void> {
+		try {
+			console.log(`💀 Force killing tmux session for agent ${agentId}`);
+			
+			if (tmuxSession) {
+				const { execSync } = await import('child_process');
+				try {
+					execSync(`tmux kill-session -t "${tmuxSession}"`, { stdio: 'ignore' });
+					console.log(`✅ Killed tmux session ${tmuxSession}`);
+				} catch (killError) {
+					console.log(`⚠️ Tmux session ${tmuxSession} was already dead`);
+				}
+			}
+
+			// Wait a few seconds for cleanup
+			await new Promise(resolve => setTimeout(resolve, 3000));
+
+			// Bring agent back
+			await this.bringAgentBackFromOffline(agentId);
+		} catch (error) {
+			console.error(`Error force killing and bringing back agent ${agentId}:`, error);
+		}
+	}
+
+	private stopOfflineMonitoring(agentId: string): void {
+		const monitoring = this.agentsSentHome.get(agentId);
+		if (monitoring) {
+			clearInterval(monitoring.intervalId);
+			clearTimeout(monitoring.timeoutId);
+			this.agentsSentHome.delete(agentId);
+			console.log(`🛑 Stopped offline monitoring for agent ${agentId}`);
+		}
 	}
 }
 

@@ -26,14 +26,14 @@ export const leads_worktree_workflow = {
 ## Lead-Specific Workflow
 
 ### Understanding Developer Workflow
-**Important:** Developers now use `vcorp create-branch` to create their worktrees automatically. You should understand this workflow to guide and monitor them:
+**Important:** Developers now use \`vcorp create-branch\` to create their worktrees automatically. You should understand this workflow to guide and monitor them:
 
 **Developer Command:**
-\`\`\`bash
+\\\`\\\`\\\`bash
 # Developers use this from their agent workspace:
 vcorp create-branch feature-auth-system
 vcorp create-branch bug-fix-login --from=main
-\`\`\`
+\\\`\\\`\\\`
 
 **This automatically:**
 - Creates git worktree in their agent workspace

@@ -1,9 +1,11 @@
 import { spawn, execSync } from 'child_process';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, writeFile, readdir, stat, unlink } from 'fs/promises';
+import { join } from 'path';
 import { db } from '$lib/db/index';
 import { projects, roles, prompts, rolePromptOrders } from '$lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { resolveAgentPermissions, validatePermissionRules, type AgentPermissions } from '$lib/templates/permissions';
+import os from 'os';
 
 export interface AgentLaunchOptions {
 	agentId: string;
@@ -13,13 +15,81 @@ export interface AgentLaunchOptions {
 	customStartupPrompt?: string;
 }
 
+/**
+ * Clean up old Claude session files for an agent to reset context tracking
+ */
+async function cleanupAgentClaudeSession(agentId: string): Promise<void> {
+	try {
+		const claudeProjectsDir = join(os.homedir(), '.claude', 'projects');
+		
+		// Check if Claude projects directory exists
+		try {
+			await stat(claudeProjectsDir);
+		} catch {
+			return; // Directory doesn't exist, nothing to clean
+		}
+
+		console.log(`🧹 Cleaning up old Claude session files for agent ${agentId}...`);
+
+		// Look for session directories that match this agent
+		const files = await readdir(claudeProjectsDir);
+		
+		// Convert agent ID to both formats for pattern matching
+		const agentIdDashes = agentId.replace(/_/g, '-');
+		const agentIdUnderscores = agentId.replace(/-/g, '_');
+		
+		let cleanedCount = 0;
+		
+		for (const file of files) {
+			// Look for directories that match agent workspace patterns
+			if (file.includes(`agent-workspaces-${agentIdDashes}`) || 
+				file.includes(`agent_workspaces-${agentIdUnderscores}`) || 
+				file.endsWith(`-${agentIdDashes}`) || 
+				file.endsWith(`-${agentIdUnderscores}`)) {
+				
+				const sessionDir = join(claudeProjectsDir, file);
+				
+				try {
+					// Check if it's a directory
+					const stats = await stat(sessionDir);
+					if (!stats.isDirectory()) continue;
+					
+					// Remove all .jsonl files in this directory
+					const sessionFiles = await readdir(sessionDir);
+					
+					for (const sessionFile of sessionFiles) {
+						if (sessionFile.endsWith('.jsonl')) {
+							const sessionPath = join(sessionDir, sessionFile);
+							await unlink(sessionPath);
+							cleanedCount++;
+							console.log(`🗑️ Removed old session file: ${sessionFile}`);
+						}
+					}
+				} catch (error) {
+					console.warn(`⚠️ Failed to clean session directory ${file}:`, (error as Error).message);
+					continue;
+				}
+			}
+		}
+		
+		if (cleanedCount > 0) {
+			console.log(`✅ Cleaned up ${cleanedCount} old session files for agent ${agentId}`);
+		} else {
+			console.log(`🔍 No old session files found for agent ${agentId}`);
+		}
+	} catch (error) {
+		console.error(`❌ Failed to cleanup Claude session files for agent ${agentId}:`, error);
+		// Don't throw - this shouldn't block agent launch
+	}
+}
+
 export async function launchAgentSession(options: AgentLaunchOptions) {
 	const { agentId, roleType, projectId, model = 'sonnet', customStartupPrompt } = options;
 	
-	console.log(`🚀 Launching agent session - agentId: ${agentId}, roleType: ${roleType}, projectId: ${projectId}`);
+	// Clean up old Claude session files to reset context tracking
+	await cleanupAgentClaudeSession(agentId);
 
 	// Get the project to fetch its path
-	console.log(`🔍 Fetching project ${projectId} details...`);
 	const [project] = await db
 		.select()
 		.from(projects)
@@ -27,15 +97,12 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 		.limit(1);
 
 	if (!project) {
-		console.log(`❌ Project ${projectId} not found`);
 		throw new Error('Project not found');
 	}
 
-	console.log(`✅ Project found: ${project.name}, path: ${project.path || 'not specified'}`);
 	const workingDirectory = project.path?.trim() || process.cwd();
 
 	// Find the role in the project that matches the roleType
-	console.log(`🔍 Finding role for type: ${roleType} in project ${projectId}`);
 	const [projectRole] = await db
 		.select()
 		.from(roles)
@@ -46,14 +113,11 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 		.limit(1);
 
 	if (!projectRole) {
-		console.log(`❌ Role ${roleType} not found in project ${projectId}`);
 		throw new Error(`Role ${roleType} not found in project`);
 	}
 
-	console.log(`✅ Found role: ${projectRole.name} with ID: ${projectRole.id}`);
 
 	// Get permissions for this role
-	console.log(`🔒 Loading permissions for role: ${projectRole.name}`);
 	let agentPermissions: AgentPermissions | null = null;
 	let claudePermissionArgs: string[] = [];
 
@@ -95,17 +159,13 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 			// Write settings file
 			await writeFile(claudeSettingsFile, JSON.stringify(claudeSettings, null, 2));
 			
-			console.log(`📄 Created agent-specific Claude settings file: ${claudeSettingsFile}`);
 			claudePermissionArgs = []; // No command line args needed
 			
-			console.log(`✅ Resolved ${resolvedPermissions.allow.length} allow rules and ${resolvedPermissions.deny.length} deny rules`);
-			console.log(`🔒 Permission level: ${agentPermissions.permissionLevel}`);
 		} catch (error) {
 			console.error(`❌ Failed to parse permissions for role ${projectRole.name}:`, error);
 			throw new Error(`Failed to parse role permissions: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
 	} else {
-		console.log(`⚠️ No permissions configured for role ${projectRole.name}, creating settings with PATH only`);
 		
 		// Create basic settings with just PATH (no permissions)
 		const claudeSettings = {
@@ -123,7 +183,6 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 		// Write settings file
 		await writeFile(claudeSettingsFile, JSON.stringify(claudeSettings, null, 2));
 		
-		console.log(`📄 Created basic Claude settings file: ${claudeSettingsFile}`);
 		
 		// Default to very restricted permissions if none configured
 		claudePermissionArgs = [
@@ -133,16 +192,13 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 
 	// Create tmux session name
 	const sessionName = `vcorp-${agentId}`;
-	console.log(`📺 Creating tmux session: ${sessionName}`);
 
 	// Launch tmux session with Claude in the agent's workspace directory
 	const agentWorkspace = `${workingDirectory}/agent_workspaces/${agentId}`;
-	console.log(`📂 Starting Claude in agent workspace: ${agentWorkspace}`);
 	
 	// Ensure the agent workspace directory exists
 	// This serves as the base directory for git worktrees (e.g., feature-auth/, api-endpoints/)
 	await mkdir(agentWorkspace, { recursive: true });
-	console.log(`🔒 Applying ${claudePermissionArgs.length} permission rules`);
 	
 	// SOPHISTICATED COMMAND (using settings file for permissions)
 	const claudeCommand = [
@@ -151,12 +207,7 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 		'--dangerously-skip-permissions', // Skip all permission prompts for autonomous operation
 		...claudePermissionArgs
 	];
-	console.log(`🚀 Using sophisticated Claude command with settings file: ${claudeCommand.join(' ')}`);
 	if (agentPermissions) {
-		console.log(`🔒 Permission Level: ${agentPermissions.permissionLevel}`);
-		console.log(`✅ Allow rules: ${agentPermissions.allow.length}`);
-		console.log(`❌ Deny rules: ${agentPermissions.deny.length}`);
-		console.log(`📝 Description: ${agentPermissions.description}`);
 	}
 	
 	spawn('tmux', [
@@ -171,22 +222,18 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 		}
 	});
 
-	console.log(`⏳ Waiting for tmux session to start...`);
 	// Wait a moment for tmux to start
 	await new Promise(resolve => setTimeout(resolve, 2000));
 
 	// Verify tmux session was created
 	try {
 		execSync(`tmux has-session -t "${sessionName}"`, { stdio: 'ignore' });
-		console.log(`✅ Tmux session ${sessionName} created successfully`);
 	} catch (error) {
-		console.log(`❌ Failed to create tmux session ${sessionName}:`, error);
 		throw new Error('Failed to create tmux session');
 	}
 
 	// Send the startup prompt to the agent (use custom prompt if provided)
 	const startupMessage = customStartupPrompt || `Agent ${agentId} ready`;
-	console.log(`💬 Sending startup prompt to agent (two-stage)...`);
 	
 	// Stage 1: Send the prompt text
 	spawn('tmux', [
@@ -210,10 +257,8 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 
 	// Stage 3: Create VCorp command wrapper after startup prompt
 	setTimeout(async () => {
-		console.log(`🔧 Creating VCorp command wrapper...`);
 		
 		// Query prompts available to this agent role
-		console.log(`🔍 Querying available prompts for role: ${roleType}...`);
 		const availablePrompts = await db
 			.select({
 				slug: prompts.slug
@@ -224,7 +269,6 @@ export async function launchAgentSession(options: AgentLaunchOptions) {
 			.orderBy(rolePromptOrders.orderIndex);
 		
 		const promptSlugs = availablePrompts.map(p => p.slug).join(',');
-		console.log(`📄 Available prompt slugs: ${promptSlugs}`);
 		
 		const vcorpWrapper = `#!/bin/bash
 # VCorp agent wrapper - auto-generated for ${agentId}
@@ -270,7 +314,6 @@ exec /Users/davidcerezo/Projects/vcorp/bin/vcorp-admin --project=${projectId} --
 		}, 200);
 	}, 1500); // Create VCorp wrapper 1.5 seconds after startup prompt
 
-	console.log(`✅ Agent ${agentId} session launched successfully`);
 	
 	return {
 		sessionName,

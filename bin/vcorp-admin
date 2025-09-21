@@ -4,7 +4,7 @@
 # Usage: vcorp-admin --project=ID --agent=AGENT_ID --role=ROLE_TYPE COMMAND
 
 # Set default port
-VCORP_PORT=5173
+VCORP_PORT=4173
 
 # Parse command line arguments
 PROJECT_ID=""
@@ -77,7 +77,9 @@ show_global_help() {
     echo "   permissions  View your access permissions and workspace"
     echo "   inbox        Check assigned messages and tasks"
     echo "   phase        Check current work assignment"
+    echo "   clock-out    End your work session and go offline"
     echo "   agents       List all project team members"
+    echo "   roles        List all available role types"
     echo "   channels     List accessible channels"
     echo "   channel      View messages in specific channel"
     echo "   thread       View full conversation context"
@@ -228,6 +230,23 @@ show_agents_help() {
     echo "   • Human directors are shown separately from AI agents"
 }
 
+show_roles_help() {
+    echo "🎭 vcorp roles - List all available role types"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp roles                          Show formatted role list"
+    echo "   vcorp roles --json                   Raw JSON output"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp roles                          # See all available roles"
+    echo "   vcorp roles --json                   # JSON format for scripts"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use these role names with --role= or --assign-role= in other commands"
+    echo "   • Roles are used for ticket assignments and message routing"
+    echo "   • Shows agent counts per role for team planning"
+}
+
 show_channels_help() {
     echo "📋 vcorp channels - List channels accessible to your role"
     echo ""
@@ -298,6 +317,28 @@ show_phase_help() {
     echo "   • Phase assignments are managed by leads and product managers"
 }
 
+show_clock_out_help() {
+    echo "⏰ vcorp clock-out - End your work session and go offline"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp clock-out                      Clock out and end your session"
+    echo "   vcorp clock-out --help               Show this help"
+    echo ""
+    echo "What this does:"
+    echo "   • Gracefully terminates your current tmux session"
+    echo "   • Updates your status to 'offline' in the system"
+    echo "   • Ends your work day properly"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp clock-out                      # End your work session"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Use this when you're done working for the day"
+    echo "   • Your session will be terminated and you'll be marked offline"
+    echo "   • You can be brought back online by project leads when needed"
+    echo "   • Always finish your current work before clocking out"
+}
+
 show_help_index() {
     echo "📚 VCorp Agent Help System"
     echo ""
@@ -326,7 +367,7 @@ show_help_role() {
     echo "📋 Getting your role-specific instructions..."
     
     # Get role prompts from API
-    role_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    role_prompts=$(curl -s "http://localhost:$VCORP_PORT/api/agents/$AGENT_ID/prompts")
     
     # Check for API errors
     if echo "$role_prompts" | jq -e '.error' > /dev/null 2>&1; then
@@ -349,7 +390,7 @@ show_help_workflow() {
     echo "📋 Getting your development process instructions..."
     
     # Get workflow prompts from API
-    workflow_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    workflow_prompts=$(curl -s "http://localhost:$VCORP_PORT/api/agents/$AGENT_ID/prompts")
     
     # Check for API errors
     if echo "$workflow_prompts" | jq -e '.error' > /dev/null 2>&1; then
@@ -367,7 +408,7 @@ show_help_communication() {
     echo "📋 Getting your communication protocols..."
     
     # Get communication prompts from API
-    comm_prompts=$(curl -s "http://localhost:5173/api/agents/$AGENT_ID/prompts")
+    comm_prompts=$(curl -s "http://localhost:$VCORP_PORT/api/agents/$AGENT_ID/prompts")
     
     # Check for API errors
     if echo "$comm_prompts" | jq -e '.error' > /dev/null 2>&1; then
@@ -438,7 +479,9 @@ show_help_commands() {
     echo "   permissions  View your access permissions and workspace"
     echo "   inbox        Check assigned messages and tasks"
     echo "   phase        Check current work assignment"
+    echo "   clock-out    End your work session and go offline"
     echo "   agents       List all project team members"
+    echo "   roles        List all available role types"
     echo "   channels     List accessible channels"
     echo "   channel      View messages in specific channel"
     echo "   thread       View full conversation context"
@@ -458,7 +501,41 @@ show_help_commands() {
     echo "   1. vcorp inbox     # Check your assignments"
     echo "   2. vcorp phase     # See your current work"
     echo "   3. vcorp agents    # Meet your team"
-    echo "   4. vcorp channels  # Find communication channels"
+    echo "   4. vcorp roles     # See available role types"
+    echo "   5. vcorp channels  # Find communication channels"
+    echo ""
+    echo "📝 Creating Content:"
+    echo "   • vcorp ticket \"Title\" \"Description\" --role=ROLE_TYPE   # Create work ticket"
+    echo "   • vcorp document \"Title\" \"Content\" --assign-role=ROLE   # Create document"
+    echo "   • vcorp tickets                                          # View tickets by role"
+    echo "   • vcorp documents                                        # Browse all documents"
+}
+
+show_tickets_help() {
+    echo "🎫 vcorp tickets - List and search work tickets"
+    echo ""
+    echo "Usage:"
+    echo "   vcorp tickets                        Your assigned tickets (managers see all)"
+    echo "   vcorp tickets --all                  Force showing all project tickets"
+    echo "   vcorp tickets --status=open          Filter by status"
+    echo "   vcorp tickets --priority=high        Filter by priority"
+    echo "   vcorp tickets search \"bug\"           Search tickets"
+    echo "   vcorp tickets --start=21 --end=40    Pagination support"
+    echo ""
+    echo "Status Options: open, in_progress, blocked, ready_for_review, reviewing, review_passed, needs_attention, resolved, closed"
+    echo "Priority Options: low, medium, high, critical"
+    echo ""
+    echo "Examples:"
+    echo "   vcorp tickets                        # Your assigned tickets"
+    echo "   vcorp tickets --all                  # All project tickets"
+    echo "   vcorp tickets --status=open          # Open tickets only"
+    echo "   vcorp tickets search \"database\"      # Find database-related tickets"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • Role-based filtering: Individual contributors see assigned tickets, managers see all"
+    echo "   • Use --all to override default filtering"
+    echo "   • Status and priority filters work with both assigned and all tickets"
+    echo "   • Create new tickets with: vcorp ticket \"Title\" \"Description\" --role=ROLE_TYPE"
 }
 
 show_create_branch_help() {
@@ -576,21 +653,23 @@ show_ticket_help() {
     echo "🎫 vcorp ticket - Create work tickets with assignments and status"
     echo ""
     echo "Usage:"
-    echo "   vcorp ticket TITLE DESCRIPTION [OPTIONS]"
-    echo "   vcorp ticket --title=TITLE --description=DESCRIPTION [OPTIONS]"
-    echo "   vcorp ticket TITLE --file=FILE [OPTIONS]"
-    echo "   vcorp ticket --title=TITLE --file=FILE [OPTIONS]"
+    echo "   vcorp ticket TITLE DESCRIPTION --role=ROLE_TYPE [OPTIONS]"
+    echo "   vcorp ticket --title=TITLE --description=DESCRIPTION --role=ROLE_TYPE [OPTIONS]"
+    echo "   vcorp ticket TITLE --file=FILE --assign-role=ROLE_TYPE [OPTIONS]"
+    echo "   vcorp ticket --title=TITLE --file=FILE --assign-role=ROLE_TYPE [OPTIONS]"
     echo ""
     echo "Examples:"
-    echo "   vcorp ticket \"Fix login bug\" \"Users can't login with special characters\""
+    echo "   vcorp ticket \"Fix login bug\" \"Users can't login with special characters\" --role=backend-developer"
     echo "   vcorp ticket \"API Design\" \"Design REST API\" --role=backend-developer --priority=high"
     echo "   vcorp ticket \"Bug Report\" --file=bug-details.md --priority=critical --assign-role=backend-developer"
-    echo "   vcorp ticket \"Feature Request\" --file=requirements.md --assign-squad=leadership"
+    echo "   vcorp ticket \"Feature Request\" --file=requirements.md --assign-role=product-manager"
     echo ""
-    echo "Assignment Options:"
-    echo "   --role=ROLE_TYPE                    Assign to specific role (legacy, same as --assign-role)"
+    echo "Assignment Options (REQUIRED):"
+    echo "   --role=ROLE_TYPE                    Assign to specific role (REQUIRED)"
+    echo "   --assign-role=role1,role2           Assign to role types (alternative to --role)"
+    echo ""
+    echo "Additional Assignment Options:"
     echo "   --assign-agent=agent1,agent2        Assign to specific agents"
-    echo "   --assign-role=role1,role2           Assign to role types"
     echo "   --assign-squad=squad1,squad2        Assign to squads"
     echo ""
     echo "Status Options:"
@@ -607,9 +686,10 @@ show_ticket_help() {
     echo "   DESCRIPTION                         Inline description text"
     echo ""
     echo "💡 Tips:"
+    echo "   • All tickets MUST be assigned to a role (--role or --assign-role required)"
     echo "   • Tickets are automatically created as 'open' status"
     echo "   • Use --file= for long descriptions, bug reports, or formatted content"
-    echo "   • Use --role for single role assignment (legacy compatibility)"
+    echo "   • Use --role for single role assignment (most common)"
     echo "   • Use --assign-* for complex multi-target assignments"
     echo "   • Combine role assignment + additional assignments for broad coverage"
 }
@@ -795,7 +875,7 @@ case "$COMMAND" in
         
         # Fetch inbox data
         echo "📬 Checking your inbox..."
-        inbox_response=$(curl -s "http://localhost:5173/api/inbox?agentId=$AGENT_ID")
+        inbox_response=$(curl -s "http://localhost:$VCORP_PORT/api/inbox?agentId=$AGENT_ID")
         
         # Check if curl succeeded
         if [[ $? -ne 0 ]]; then
@@ -879,7 +959,7 @@ case "$COMMAND" in
         
         # Get current phase information
         encodedRole=$(echo "$AGENT_ROLE" | sed 's/ /%20/g')
-        phase_response=$(curl -s "http://localhost:5173/api/roles/$encodedRole/current-phase?projectId=$PROJECT_ID")
+        phase_response=$(curl -s "http://localhost:$VCORP_PORT/api/roles/$encodedRole/current-phase?projectId=$PROJECT_ID")
         
         # Check for API errors
         if echo "$phase_response" | jq -e '.error' > /dev/null 2>&1; then
@@ -917,6 +997,44 @@ case "$COMMAND" in
         fi
         ;;
         
+    clock-out)
+        # Parse arguments: vcorp clock-out [--help]
+        parse_args ""
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_clock_out_help
+            exit 0
+        fi
+        
+        # Confirm clock-out action
+        echo "⏰ Clocking out..."
+        echo ""
+        
+        # Call the clock-out API
+        clock_out_response=$(curl -s -X POST "http://localhost:$VCORP_PORT/api/agents/$AGENT_ID/clock-out" \
+            -H "Content-Type: application/json" 2>/dev/null)
+        
+        # Check if curl succeeded
+        if [[ $? -ne 0 ]]; then
+            echo "❌ Error: Could not connect to VCorp server at localhost:$VCORP_PORT"
+            exit 1
+        fi
+        
+        # Check if the API returned an error
+        if echo "$clock_out_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$clock_out_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Success message
+        echo "✅ Successfully clocked out!"
+        echo ""
+        echo "$(echo "$clock_out_response" | jq -r '.message // "Thanks for your hard work today! See you tomorrow!"')"
+        echo ""
+        echo "👋 Your session has been terminated and you are now offline."
+        ;;
+        
     agents)
         # Parse arguments: vcorp agents [--json]
         parse_args "json"
@@ -928,7 +1046,7 @@ case "$COMMAND" in
         fi
         
         # Get agents data
-        agents_response=$(curl -s "http://localhost:5173/api/agents?projectId=$PROJECT_ID")
+        agents_response=$(curl -s "http://localhost:$VCORP_PORT/api/agents?projectId=$PROJECT_ID")
         
         # Check for API errors
         if echo "$agents_response" | jq -e '.error' > /dev/null 2>&1; then
@@ -965,6 +1083,50 @@ case "$COMMAND" in
             "\n"'
         ;;
         
+    roles)
+        # Parse arguments: vcorp roles [--json]
+        parse_args "json"
+        
+        # Show help if requested
+        if [[ "$ARG_help" == "true" ]]; then
+            show_roles_help
+            exit 0
+        fi
+        
+        # Get role types data
+        roles_response=$(curl -s "http://localhost:$VCORP_PORT/api/projects/$PROJECT_ID/role-types")
+        
+        # Check for API errors
+        if echo "$roles_response" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error: $(echo "$roles_response" | jq -r '.error')"
+            exit 1
+        fi
+        
+        # Handle --json flag
+        if [[ "$ARG_json" == "true" ]]; then
+            echo "$roles_response" | jq '.'
+            exit 0
+        fi
+        
+        # Formatted output (default)
+        echo "🎭 Available Role Types:"
+        echo ""
+        
+        # Check if we have roles
+        role_count=$(echo "$roles_response" | jq '. | length')
+        if [[ "$role_count" == "0" ]]; then
+            echo "No role types found for this project."
+            exit 0
+        fi
+        
+        # Format each role with agent counts
+        echo "$roles_response" | jq -r '.[] | 
+            "• \(.roleType)\n" +
+            "  👥 \(.count) agents (\(.activeCount) active)\n"'
+        
+        echo "💡 Use these role names with: --role=ROLE_TYPE or --assign-role=ROLE_TYPE"
+        ;;
+        
     channels)
         # Parse arguments: vcorp channels [--json]
         parse_args "json"
@@ -977,7 +1139,7 @@ case "$COMMAND" in
         
         # Get channels data
         encodedRole=$(echo "$AGENT_ROLE" | sed 's/ /%20/g')
-        channels_response=$(curl -s "http://localhost:5173/api/roles/$encodedRole/channels")
+        channels_response=$(curl -s "http://localhost:$VCORP_PORT/api/roles/$encodedRole/channels")
         
         # Check for API errors
         if echo "$channels_response" | jq -e '.error' > /dev/null 2>&1; then
@@ -1029,7 +1191,7 @@ case "$COMMAND" in
         fi
         
         # Get channel messages
-        channel_response=$(curl -s "http://localhost:5173/api/channels/$ARG_channel_id/messages")
+        channel_response=$(curl -s "http://localhost:$VCORP_PORT/api/channels/$ARG_channel_id/messages")
         
         # Check for API errors
         if echo "$channel_response" | jq -e '.error' > /dev/null 2>&1; then
@@ -1083,7 +1245,7 @@ case "$COMMAND" in
         fi
         
         # Get thread conversation
-        thread_response=$(curl -s "http://localhost:5173/api/content/$ARG_message_id/thread")
+        thread_response=$(curl -s "http://localhost:$VCORP_PORT/api/content/$ARG_message_id/thread")
         
         # Check for API errors
         if echo "$thread_response" | jq -e '.error' > /dev/null 2>&1; then
@@ -1199,7 +1361,7 @@ case "$COMMAND" in
             '{projectId: ($projectId | tonumber), body: $body, parentContentId: ($parentId | tonumber), authorAgentId: $authorId, assignTo: $assignTo}')
         
         # Send the reply
-        echo "$replyJson" | curl -X POST "http://localhost:5173/api/replies" \
+        echo "$replyJson" | curl -X POST "http://localhost:$VCORP_PORT/api/replies" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1278,7 +1440,7 @@ case "$COMMAND" in
             '{projectId: ($projectId | tonumber), channelId: ($channelId | tonumber), body: $body, authorAgentId: $authorId, assignTo: $assignTo}')
         
         # Send the message
-        echo "$messageJson" | curl -X POST "http://localhost:5173/api/messages" \
+        echo "$messageJson" | curl -X POST "http://localhost:$VCORP_PORT/api/messages" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1357,7 +1519,7 @@ case "$COMMAND" in
             '{projectId: ($projectId | tonumber), channelId: null, body: $body, authorAgentId: $authorId, assignTo: $assignTo}')
         
         # Send the message
-        echo "$messageJson" | curl -X POST "http://localhost:5173/api/messages" \
+        echo "$messageJson" | curl -X POST "http://localhost:$VCORP_PORT/api/messages" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1381,7 +1543,7 @@ case "$COMMAND" in
             --arg projectId "$PROJECT_ID" \
             --arg authorId "$AGENT_ID" \
             '{projectId: ($projectId | tonumber), body: $body, authorAgentId: $authorId, assignTo: [{"type": "role", "target": "human-director"}]}' | \
-        curl -X POST "http://localhost:5173/api/send-message" \
+        curl -X POST "http://localhost:$VCORP_PORT/api/send-message" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1405,7 +1567,7 @@ case "$COMMAND" in
             --arg projectId "$PROJECT_ID" \
             --arg authorId "$AGENT_ID" \
             '{projectId: ($projectId | tonumber), body: $body, authorAgentId: $authorId, assignTo: [{"type": "role", "target": "it-administrator"}]}' | \
-        curl -X POST "http://localhost:5173/api/send-message" \
+        curl -X POST "http://localhost:$VCORP_PORT/api/send-message" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1510,7 +1672,7 @@ case "$COMMAND" in
         fi
         
         # Send the document
-        echo "$docJson" | curl -X POST "http://localhost:5173/api/documents" \
+        echo "$docJson" | curl -X POST "http://localhost:$VCORP_PORT/api/documents" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1572,6 +1734,17 @@ case "$COMMAND" in
         status="${ARG_status:-open}"
         role="${ARG_role:-}"
         
+        # Validate that ticket has a role assignment (either --role or --assign-role)
+        if [[ -z "$role" && -z "$ARG_assign_role" ]]; then
+            echo "❌ Error: Tickets must be assigned to a role"
+            echo "   Use --role=ROLE_TYPE or --assign-role=ROLE_TYPE"
+            echo "   Example: vcorp ticket \"Bug Fix\" \"Description\" --role=backend-developer"
+            echo ""
+            echo "💡 To see all available roles, run: vcorp roles"
+            echo ""
+            show_ticket_help
+            exit 1
+        fi
         
         echo "🎫 Creating ticket '$ARG_title'..."
         
@@ -1629,7 +1802,7 @@ case "$COMMAND" in
         fi
         
         # Send the ticket
-        echo "$ticketJson" | curl -X POST "http://localhost:5173/api/tickets" \
+        echo "$ticketJson" | curl -X POST "http://localhost:$VCORP_PORT/api/tickets" \
             -H "Content-Type: application/json" \
             -d @-
         
@@ -1793,29 +1966,7 @@ case "$COMMAND" in
                     fi
                     ;;
                 --help)
-                    echo "🎫 vcorp tickets - List and search work tickets"
-                    echo ""
-                    echo "Usage:"
-                    echo "   vcorp tickets                        Your assigned tickets (managers see all)"
-                    echo "   vcorp tickets --all                  Force showing all project tickets"
-                    echo "   vcorp tickets --status=open          Filter by status"
-                    echo "   vcorp tickets --priority=high        Filter by priority"
-                    echo "   vcorp tickets search \"bug\"           Search tickets"
-                    echo "   vcorp tickets --start=21 --end=40    Pagination support"
-                    echo ""
-                    echo "Status Options: open, in_progress, blocked, ready_for_review, reviewing, review_passed, needs_attention, resolved, closed"
-                    echo "Priority Options: low, medium, high, critical"
-                    echo ""
-                    echo "Examples:"
-                    echo "   vcorp tickets                        # Your assigned tickets"
-                    echo "   vcorp tickets --all                  # All project tickets"
-                    echo "   vcorp tickets --status=open          # Open tickets only"
-                    echo "   vcorp tickets search \"database\"      # Find database-related tickets"
-                    echo ""
-                    echo "💡 Tips:"
-                    echo "   • Role-based filtering: Individual contributors see assigned tickets, managers see all"
-                    echo "   • Use --all to override default filtering"
-                    echo "   • Status and priority filters work with both assigned and all tickets"
+                    show_tickets_help
                     exit 0
                     ;;
                 *)
@@ -2080,7 +2231,7 @@ case "$COMMAND" in
         echo "Unknown command: $COMMAND"
         echo ""
         echo "Available commands:"
-        echo "  help, permissions, inbox, phase, agents, channels, channel, thread"
+        echo "  help, permissions, inbox, phase, clock-out, agents, channels, channel, thread"
         echo "  reply, message, dm, director, it, document, ticket, documents, tickets, remove, create-branch"
         exit 1
         ;;

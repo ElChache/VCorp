@@ -12,8 +12,6 @@ export async function GET({ url }: RequestEvent) {
 			return json({ error: 'projectId is required' }, { status: 400 });
 		}
 
-		console.log(`📊 Getting DM oversight data for project ${projectId}`);
-
 		// Get all agents in the project (excluding Human Director)
 		const projectAgents = await db
 			.select({
@@ -81,8 +79,6 @@ export async function GET({ url }: RequestEvent) {
 
 		// Sort by total DM count (most active first)
 		agentsWithCounts.sort((a, b) => b.totalDmCount - a.totalDmCount);
-
-		console.log(`✅ Found ${agentsWithCounts.length} agents with DM data`);
 
 		return json(agentsWithCounts);
 

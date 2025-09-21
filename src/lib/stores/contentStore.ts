@@ -397,7 +397,6 @@ export const contentActions = {
 	optimisticallyMarkAsRead(contentId: number, assignmentId: number, agentId: string) {
 		if (!agentId) return;
 
-		console.log('🚀 Optimistically marking as read:', { contentId, assignmentId, agentId });
 
 		contentStore.update(state => {
 			const content = state.contentById[contentId];
@@ -563,7 +562,6 @@ export const totalUnreadCount = derived(
 	[channelUnreadCount, dmUnreadCount, documentsUnreadCount, ticketsUnreadCount, phasesUnreadCount],
 	([$channels, $dms, $docs, $tickets, $phases]) => {
 		const total = $channels + $dms + $docs + $tickets + $phases;
-		console.log('📊 totalUnreadCount recalculated:', { $channels, $dms, $docs, $tickets, $phases, total });
 		return total;
 	}
 );
