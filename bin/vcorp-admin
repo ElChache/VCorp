@@ -4,7 +4,7 @@
 # Usage: vcorp-admin --project=ID --agent=AGENT_ID --role=ROLE_TYPE COMMAND
 
 # Set default port
-VCORP_PORT=4173
+VCORP_PORT=5173
 
 # Parse command line arguments
 PROJECT_ID=""

@@ -4,7 +4,7 @@ import { join, dirname, basename, extname } from 'path';
 import os from 'os';
 import { db } from '$lib/db/index';
 import { agents, content, readingAssignments, readingAssignmentReads, projects, scheduledReminders } from '$lib/db/schema';
-import { eq, and, or, notExists } from 'drizzle-orm';
+import { eq, and, or, notExists, isNull } from 'drizzle-orm';
 import chokidar from 'chokidar';
 
 import { checkForwardingStatus } from '$lib/services/ForwardingService';
@@ -554,7 +554,8 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 				id: agents.id,
 				roleType: agents.roleType,
 				squadId: agents.squadId,
-				tmuxSession: agents.tmuxSession
+				tmuxSession: agents.tmuxSession,
+				isHumanDirector: agents.isHumanDirector
 			})
 			.from(agents)
 			.where(and(
@@ -573,18 +574,19 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 			}
 
 			try {
-				const unreadMessages = await this.getUnreadMessagesForAgent(agent);
+				// Use the new inbox method that auto-marks messages as read
+				const inboxData = await this.getInboxDataAndMarkAsRead(agent);
 				
-				if (unreadMessages.length === 0) {
-					continue; // No unread messages
+				if (!inboxData || inboxData.unreadMessages.length === 0) {
+					continue; // No unread messages or error getting inbox data
 				}
 
 				// Check if this agent should receive a notification based on grace period, rate limiting, and work phase
-				if (!await this.shouldSendNotificationToAgent(agent.id, unreadMessages, projectId)) {
+				if (!await this.shouldSendNotificationToAgent(agent.id, inboxData.unreadMessages, projectId)) {
 					continue; // Skip due to grace period, rate limiting, or work phase considerations
 				}
 
-				const success = await this.sendNotificationToAgent(agent, unreadMessages);
+				const success = await this.sendNotificationToAgent(agent, inboxData.unreadMessages);
 				
 				// Update notification state if successful
 				if (success) {
@@ -593,7 +595,7 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 				
 				results.push({
 					agentId: agent.id,
-					unreadCount: unreadMessages.length,
+					unreadCount: inboxData.unreadMessages.length,
 					success
 				});
 
@@ -613,6 +615,10 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 		return results;
 	}
 
+	/**
+	 * @deprecated This method is deprecated. Use getInboxDataAndMarkAsRead() instead.
+	 * Kept for backward compatibility but no longer used by the notification system.
+	 */
 	private async getUnreadMessagesForAgent(agent: any): Promise<any[]> {
 		const assignmentConditions = [
 			and(
@@ -752,6 +758,161 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 		return threadMessages.join('\n');
 	}
 
+	/**
+	 * Internal method that replicates the inbox API logic exactly
+	 * This fetches unread messages for an agent AND automatically marks them as read
+	 * Prevents notification spam by ensuring messages are only notified once
+	 */
+	private async getInboxDataAndMarkAsRead(agent: any): Promise<{
+		unreadMessages: any[];
+		readMessages: any[];
+		summary: { total: number; unread: number; read: number; autoMarked: number; };
+	} | null> {
+		try {
+			// Get all reading assignments that target this agent (same as inbox API)
+			const assignmentConditions = [
+				and(
+					eq(readingAssignments.assignedToType, 'agent'),
+					eq(readingAssignments.assignedTo, agent.id)
+				),
+				and(
+					eq(readingAssignments.assignedToType, 'role'),
+					eq(readingAssignments.assignedTo, agent.roleType)
+				)
+			];
+
+			// Add squad condition if agent has a squad
+			if (agent.squadId) {
+				assignmentConditions.push(
+					and(
+						eq(readingAssignments.assignedToType, 'squad'),
+						eq(readingAssignments.assignedTo, agent.squadId)
+					)
+				);
+			}
+
+			// Get all relevant reading assignments with their messages (same as inbox API)
+			const assignedMessages = await db
+				.select({
+					// Assignment info
+					assignmentId: readingAssignments.id,
+					assignedToType: readingAssignments.assignedToType,
+					assignedTo: readingAssignments.assignedTo,
+					assignedAt: readingAssignments.assignedAt,
+					
+					// Message info
+					messageId: content.id,
+					title: content.title,
+					body: content.body,
+					type: content.type,
+					priority: content.priority,
+					authorAgentId: content.authorAgentId,
+					channelId: content.channelId,
+					parentContentId: content.parentContentId,
+					createdAt: content.createdAt,
+					
+					// Include author's human director status for filtering
+					authorIsHumanDirector: agents.isHumanDirector
+				})
+				.from(readingAssignments)
+				.innerJoin(content, eq(readingAssignments.contentId, content.id))
+				.leftJoin(agents, eq(content.authorAgentId, agents.id))
+				.where(or(...assignmentConditions))
+				.orderBy(content.createdAt);
+
+			// For each message, check if this agent has read it (same as inbox API)
+			const messagesWithStatus = await Promise.all(
+				assignedMessages.map(async (message) => {
+					const [readRecord] = await db
+						.select({
+							readAt: readingAssignmentReads.readAt,
+							acknowledged: readingAssignmentReads.acknowledged,
+						})
+						.from(readingAssignmentReads)
+						.where(and(
+							eq(readingAssignmentReads.readingAssignmentId, message.assignmentId),
+							eq(readingAssignmentReads.agentId, agent.id)
+						))
+						.limit(1);
+
+					return {
+						messageId: message.messageId,
+						title: message.title,
+						body: message.body,
+						type: message.type,
+						priority: message.priority,
+						authorAgentId: message.authorAgentId,
+						authorIsHumanDirector: message.authorIsHumanDirector, // Add this for filtering
+						channelId: message.channelId,
+						parentContentId: message.parentContentId,
+						createdAt: message.createdAt,
+						assignedAt: message.assignedAt,
+						assignmentType: message.assignedToType,
+						assignmentTarget: message.assignedTo,
+						assignmentId: message.assignmentId, // Add this for auto-marking
+						isRead: !!readRecord,
+						readAt: readRecord?.readAt || null,
+						acknowledged: readRecord?.acknowledged || false,
+						isDM: !message.channelId,
+						isReply: !!message.parentContentId
+					};
+				})
+			);
+
+			// Separate read vs unread (same as inbox API)
+			const unreadMessages = messagesWithStatus.filter(m => !m.isRead);
+			const readMessages = messagesWithStatus.filter(m => m.isRead);
+
+			// AUTO-MARK: Mark all unread messages as read (same as inbox API lines 133-168)
+			if (unreadMessages.length > 0) {
+				try {
+					// Find all reading assignment IDs for unread messages
+					const unreadAssignmentIds = unreadMessages.map(msg => msg.assignmentId).filter((id): id is number => id != null);
+
+					// Batch create read records for all unread assignments
+					if (unreadAssignmentIds.length > 0) {
+						const readRecordsToCreate = unreadAssignmentIds.map(assignmentId => ({
+							readingAssignmentId: assignmentId,
+							agentId: agent.id,
+							acknowledged: false,
+						}));
+
+						if (readRecordsToCreate.length > 0) {
+							await db.insert(readingAssignmentReads).values(readRecordsToCreate);
+						}
+						console.log(`Auto-marked ${unreadAssignmentIds.length} messages as read for agent ${agent.id} during notification`);
+						
+						// Reset grace period for notification system
+						try {
+							this.resetAgentGracePeriod(agent.id);
+						} catch (resetError) {
+							console.error('Failed to reset notification grace period:', resetError);
+							// Don't fail the request if grace period reset fails
+						}
+					}
+				} catch (autoMarkError) {
+					console.error('Failed to auto-mark messages as read during notification:', autoMarkError);
+					// Don't fail the notification if auto-mark fails, just log it
+				}
+			}
+
+			return {
+				unreadMessages,
+				readMessages,
+				summary: {
+					total: messagesWithStatus.length,
+					unread: unreadMessages.length,
+					read: readMessages.length,
+					autoMarked: unreadMessages.length
+				}
+			};
+
+		} catch (error) {
+			console.error('Failed to get inbox data and mark as read:', error);
+			return null;
+		}
+	}
+
 	private async sendNotificationToAgent(agent: any, messages: any[]): Promise<boolean> {
 		// Determine message categories
 		const humanDirectorMessages = messages.filter(msg => msg.authorIsHumanDirector === true);
@@ -798,36 +959,19 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 			return (priorityOrder[b.priority] || 2) - (priorityOrder[a.priority] || 2);
 		});
 
-		const preview = this.buildNotificationPreview(sortedMessages, isUrgent);
+		// Build complete message content instead of previews since we have full data
+		const messageContent = this.buildCompleteMessageContent(sortedMessages, isUrgent);
 
 		const notification = template
 			.replace('{count}', messagesToShow.length.toString())
 			.replace('{plural}', messagesToShow.length === 1 ? '' : 's')
 			.replace(/\{agentId\}/g, agent.id)
-			.replace('{preview}', preview || 'No preview available');
+			.replace('{preview}', messageContent || 'No messages available');
 
 		const success = await this.sendTmuxMessage(agent.tmuxSession, notification);
 		
-		if (success) {
-			// Update lastNotifiedAt timestamp for all notified messages
-			const now = new Date();
-			const assignmentIds = messages.map(msg => msg.assignmentId).filter(id => id);
-			
-			if (assignmentIds.length > 0) {
-				try {
-					await Promise.all(
-						assignmentIds.map(assignmentId =>
-							db.update(readingAssignments)
-								.set({ lastNotifiedAt: now })
-								.where(eq(readingAssignments.id, assignmentId))
-						)
-					);
-				} catch (error) {
-					console.error('Failed to update notification timestamps:', error);
-					// Don't fail the whole notification just because we couldn't update timestamps
-				}
-			}
-		}
+		// Messages are already auto-marked as read by getInboxDataAndMarkAsRead()
+		// No need for additional timestamp updates since auto-marking handles everything
 		
 		return success;
 	}
@@ -855,6 +999,49 @@ This is just a gentle reminder - no action needed if you're already working! ðŸš
 				}
 			})
 			.join('\n\n');
+	}
+
+	/**
+	 * Build complete message content for notifications
+	 * Since we now have full inbox data, we can show complete messages instead of previews
+	 */
+	private buildCompleteMessageContent(messages: any[], isUrgent: boolean = false): string {
+		const maxMessages = isUrgent ? 5 : 3; // Show more messages for urgent notifications
+		
+		return messages
+			.slice(0, maxMessages)
+			.map(msg => {
+				const priorityIcon = msg.priority === 'high' ? 'ðŸ”´ HIGH' : 
+									 msg.priority === 'low' ? 'ðŸŸ¡ LOW' : 'ðŸ”µ MEDIUM';
+				
+				// Add special formatting for human director messages
+				const authorPrefix = msg.authorIsHumanDirector ? 'ðŸ‘‘ DIRECTOR' : priorityIcon;
+				
+				// Build reply commands for easy interaction
+				const replyCommand = `vcorp reply ${msg.messageId}`;
+				const threadCommand = msg.parentContentId ? `vcorp thread ${msg.parentContentId}` : `vcorp thread ${msg.messageId}`;
+				
+				if (msg.isReply && msg.parentContentId) {
+					// This is a reply - show it in thread context
+					return `â€¢ [${authorPrefix}] THREAD UPDATE (reply):
+  ðŸ“ Original: ${msg.title || '(no title)'}
+  â†³ Reply: ${msg.body}
+  
+  ðŸ”§ Simple function to check thread context:
+  ${threadCommand}
+  
+  ðŸ”§ Simple function to reply:
+  ${replyCommand} "Your response here"`;
+				} else {
+					// Regular message - show complete content
+					return `â€¢ [${authorPrefix}] ${msg.title || msg.type}:
+  ${msg.body}
+  
+  ðŸ”§ Simple function to reply:
+  ${replyCommand} "Your response here"`;
+				}
+			})
+			.join('\n\n') + (messages.length > maxMessages ? `\n\n... (${messages.length - maxMessages} more message${messages.length - maxMessages === 1 ? '' : 's'} - use 'vcorp inbox' to see all)` : '');
 	}
 
 	private trackHumanDirectorEscalation(agentId: string): void {
@@ -1662,7 +1849,8 @@ Status: ${phase.status}`;
 			.select({
 				id: agents.id,
 				tmuxSession: agents.tmuxSession,
-				status: agents.status
+				status: agents.status,
+				isHumanDirector: agents.isHumanDirector
 			})
 			.from(agents)
 			.where(eq(agents.projectId, projectId));
